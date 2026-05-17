@@ -6,6 +6,8 @@ It keeps `auth.json` pointed at the best available profile before a session star
 
 ![Codex rolling auth selector](assets/usage-selector.png)
 
+![Codex rolling auth selector scroll](assets/usage-selector.gif)
+
 ## Install
 
 ```bash
@@ -64,3 +66,9 @@ codex resume 019e1af9-d95b-7f11-b1f0-aae08a7c4f1d
 - Set `CODEX_AUTH_CODEX_BIN=/path/to/codex` if the wrapper cannot find your real Codex binary.
 - Set `CODEX_AUTH_AUTO=0` to bypass automatic rolling for one command.
 - Set `CODEX_AUTH_USAGE_HEADER=1` or `CODEX_AUTH_USAGE_STATUS=1` if you want the full table header or status column back.
+
+## Regenerate Assets
+
+```bash
+node scripts/generate-assets.mjs
+```
