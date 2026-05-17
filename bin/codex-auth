@@ -4941,7 +4941,7 @@ selector_palette_status_compact() {
 selector_palette_metric_cell() {
   local percent="$1"
   local width="$2"
-  local tone bar_w label
+  local tone bar_w label label_w=4
 
   (( width <= 0 )) && return 0
   [[ -n "$percent" ]] || percent="-"
@@ -4966,9 +4966,14 @@ selector_palette_metric_cell() {
     usage_tone_reset
     return 0
   fi
-  fit_text_center "$label" 4
+  if (( width >= 18 )); then
+    label_w=5
+  fi
+  fit_text_center "$label" "$label_w"
   usage_tone_reset
-  bar_w=$((width - 4))
+  printf ' '
+  bar_w=$((width - label_w - 1))
+  (( bar_w < 0 )) && bar_w=0
   selector_palette_bar "$percent" "$bar_w"
 }
 
@@ -5106,20 +5111,10 @@ print_selector_palette_table_row() {
 selector_palette_bar() {
   local percent="$1"
   local width="$2"
-  local tone left_rail right_rail value units full partial used
+  local tone value units full partial used
   local partial_glyphs=("" "▏" "▎" "▍" "▌" "▋" "▊" "▉")
 
   tone="$(usage_limit_tone "$percent")"
-  if usage_unicode_enabled; then
-    left_rail="▕"
-    right_rail="▐"
-  else
-    left_rail="["
-    right_rail="]"
-  fi
-  usage_tone_color muted
-  printf '%s' "$left_rail"
-  usage_tone_reset
   percent="${percent%\%}"
   if [[ "$percent" =~ ^-?[0-9]+$ ]]; then
     value="$percent"
@@ -5151,9 +5146,6 @@ selector_palette_bar() {
   else
     printf '%*s' "$width" ''
   fi
-  usage_tone_color muted
-  printf '%s' "$right_rail"
-  usage_tone_reset
 }
 
 selector_palette_badge() {
