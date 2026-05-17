@@ -5106,7 +5106,8 @@ print_selector_palette_table_row() {
 selector_palette_bar() {
   local percent="$1"
   local width="$2"
-  local tone left_rail right_rail
+  local tone left_rail right_rail value units full partial used
+  local partial_glyphs=("" "▏" "▎" "▍" "▌" "▋" "▊" "▉")
 
   tone="$(usage_limit_tone "$percent")"
   if usage_unicode_enabled; then
@@ -5119,9 +5120,37 @@ selector_palette_bar() {
   usage_tone_color muted
   printf '%s' "$left_rail"
   usage_tone_reset
-  usage_tone_color "$tone"
-  usage_bar "$percent" "$width"
-  usage_tone_reset
+  percent="${percent%\%}"
+  if [[ "$percent" =~ ^-?[0-9]+$ ]]; then
+    value="$percent"
+    (( value < 0 )) && value=0
+    (( value > 100 )) && value=100
+    if usage_unicode_enabled; then
+      units=$(((value * width * 8 + 50) / 100))
+      full=$((units / 8))
+      partial=$((units % 8))
+      if (( full >= width )); then
+        full="$width"
+        partial=0
+      fi
+      used="$full"
+      (( partial > 0 && used < width )) && used=$((used + 1))
+      usage_tone_color "$tone"
+      repeat_glyph "█" "$full"
+      (( partial > 0 && full < width )) && printf '%s' "${partial_glyphs[$partial]}"
+      usage_tone_reset
+      (( width > used )) && printf '%*s' "$((width - used))" ''
+    else
+      full=$(((value * width + 50) / 100))
+      (( full > width )) && full="$width"
+      usage_tone_color "$tone"
+      repeat_glyph "#" "$full"
+      usage_tone_reset
+      (( width > full )) && printf '%*s' "$((width - full))" ''
+    fi
+  else
+    printf '%*s' "$width" ''
+  fi
   usage_tone_color muted
   printf '%s' "$right_rail"
   usage_tone_reset
