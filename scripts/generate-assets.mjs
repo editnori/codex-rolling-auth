@@ -78,11 +78,16 @@ function metric(x, y, value, width = 150) {
     return text(labelX, y, "-", "muted", 'text-anchor="middle"');
   }
   const fillW = Math.max(0, Math.min(barW, Math.round((value / 100) * barW)));
-  return [
+  const parts = [
     text(labelX, y, value, tone, 'text-anchor="middle"'),
     `<rect x="${barX}" y="${y - 16}" width="${barW}" height="32" class="bar-bg"/>`,
-    `<rect x="${barX}" y="${y - 16}" width="${fillW}" height="32" class="bar-${tone}"/>`,
-  ].join("\n");
+    `<rect x="${barX}" y="${y - 16}" width="${barW}" height="2" class="bar-rule"/>`,
+    `<rect x="${barX}" y="${y + 14}" width="${barW}" height="2" class="bar-rule"/>`,
+  ];
+  if (fillW > 0) {
+    parts.splice(2, 0, `<rect x="${barX}" y="${y - 16}" width="${fillW}" height="32" class="bar-${tone}"/>`);
+  }
+  return parts.join("\n");
 }
 
 function visibleRows(selected, scrolled) {
@@ -150,6 +155,7 @@ function style() {
     .bar-warn { fill: ${palette.warn}; }
     .bar-bad { fill: ${palette.bad}; }
     .bar-muted { fill: ${palette.muted}; }
+    .bar-rule { fill: ${palette.bg}; }
   `;
 }
 

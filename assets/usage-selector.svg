@@ -15,6 +15,7 @@
     .bar-warn { fill: #ffb77e; }
     .bar-bad { fill: #ff7086; }
     .bar-muted { fill: #8c8c8c; }
+    .bar-rule { fill: #101112; }
   </style>
 <text x="30" y="24" class="title" >Auth · Codex profiles</text>
 <text x="404" y="24" class="muted" >enter select · esc stay</text>
@@ -30,63 +31,87 @@
 <text x="418" y="140" class="warn" text-anchor="middle">43</text>
 <rect x="448" y="124" width="94" height="32" class="bar-bg"/>
 <rect x="448" y="124" width="40" height="32" class="bar-warn"/>
+<rect x="448" y="124" width="94" height="2" class="bar-rule"/>
+<rect x="448" y="154" width="94" height="2" class="bar-rule"/>
 <text x="664" y="140" class="good" text-anchor="middle">100</text>
 <rect x="694" y="124" width="94" height="32" class="bar-bg"/>
 <rect x="694" y="124" width="94" height="32" class="bar-good"/>
+<rect x="694" y="124" width="94" height="2" class="bar-rule"/>
+<rect x="694" y="154" width="94" height="2" class="bar-rule"/>
 <text x="928" y="140" class="good" font-weight="700">ready</text>
 <text x="30" y="174" class="good" >use</text>
 <text x="140" y="174" class="fg" >Layth48</text>
 <text x="418" y="174" class="good" text-anchor="middle">76</text>
 <rect x="448" y="158" width="94" height="32" class="bar-bg"/>
 <rect x="448" y="158" width="71" height="32" class="bar-good"/>
+<rect x="448" y="158" width="94" height="2" class="bar-rule"/>
+<rect x="448" y="188" width="94" height="2" class="bar-rule"/>
 <text x="664" y="174" class="good" text-anchor="middle">86</text>
 <rect x="694" y="158" width="94" height="32" class="bar-bg"/>
 <rect x="694" y="158" width="81" height="32" class="bar-good"/>
+<rect x="694" y="158" width="94" height="2" class="bar-rule"/>
+<rect x="694" y="188" width="94" height="2" class="bar-rule"/>
 <text x="928" y="174" class="good" >ready</text>
 <text x="30" y="208" class="good" >use</text>
 <text x="140" y="208" class="fg" >Layth18</text>
 <text x="418" y="208" class="good" text-anchor="middle">64</text>
 <rect x="448" y="192" width="94" height="32" class="bar-bg"/>
 <rect x="448" y="192" width="60" height="32" class="bar-good"/>
+<rect x="448" y="192" width="94" height="2" class="bar-rule"/>
+<rect x="448" y="222" width="94" height="2" class="bar-rule"/>
 <text x="664" y="208" class="warn" text-anchor="middle">31</text>
 <rect x="694" y="192" width="94" height="32" class="bar-bg"/>
 <rect x="694" y="192" width="29" height="32" class="bar-warn"/>
+<rect x="694" y="192" width="94" height="2" class="bar-rule"/>
+<rect x="694" y="222" width="94" height="2" class="bar-rule"/>
 <text x="928" y="208" class="good" >ready</text>
 <text x="30" y="242" class="bad" font-weight="700">cap</text>
 <text x="140" y="242" class="fg" >Layth38</text>
 <text x="418" y="242" class="bad" text-anchor="middle">0</text>
 <rect x="448" y="226" width="94" height="32" class="bar-bg"/>
-<rect x="448" y="226" width="0" height="32" class="bar-bad"/>
+<rect x="448" y="226" width="94" height="2" class="bar-rule"/>
+<rect x="448" y="256" width="94" height="2" class="bar-rule"/>
 <text x="664" y="242" class="good" text-anchor="middle">100</text>
 <rect x="694" y="226" width="94" height="32" class="bar-bg"/>
 <rect x="694" y="226" width="94" height="32" class="bar-good"/>
+<rect x="694" y="226" width="94" height="2" class="bar-rule"/>
+<rect x="694" y="256" width="94" height="2" class="bar-rule"/>
 <text x="928" y="242" class="warn" >old cap</text>
 <text x="30" y="276" class="bad" font-weight="700">cap</text>
 <text x="140" y="276" class="fg" >Layth</text>
 <text x="418" y="276" class="bad" text-anchor="middle">0</text>
 <rect x="448" y="260" width="94" height="32" class="bar-bg"/>
-<rect x="448" y="260" width="0" height="32" class="bar-bad"/>
+<rect x="448" y="260" width="94" height="2" class="bar-rule"/>
+<rect x="448" y="290" width="94" height="2" class="bar-rule"/>
 <text x="664" y="276" class="good" text-anchor="middle">100</text>
 <rect x="694" y="260" width="94" height="32" class="bar-bg"/>
 <rect x="694" y="260" width="94" height="32" class="bar-good"/>
+<rect x="694" y="260" width="94" height="2" class="bar-rule"/>
+<rect x="694" y="290" width="94" height="2" class="bar-rule"/>
 <text x="928" y="276" class="bad" >cap</text>
 <text x="30" y="310" class="bad" font-weight="700">cap</text>
 <text x="140" y="310" class="fg" >Layth.qassem</text>
 <text x="418" y="310" class="bad" text-anchor="middle">0</text>
 <rect x="448" y="294" width="94" height="32" class="bar-bg"/>
-<rect x="448" y="294" width="0" height="32" class="bar-bad"/>
+<rect x="448" y="294" width="94" height="2" class="bar-rule"/>
+<rect x="448" y="324" width="94" height="2" class="bar-rule"/>
 <text x="664" y="310" class="good" text-anchor="middle">100</text>
 <rect x="694" y="294" width="94" height="32" class="bar-bg"/>
 <rect x="694" y="294" width="94" height="32" class="bar-good"/>
+<rect x="694" y="294" width="94" height="2" class="bar-rule"/>
+<rect x="694" y="324" width="94" height="2" class="bar-rule"/>
 <text x="928" y="310" class="bad" >cap</text>
 <text x="30" y="344" class="bad" font-weight="700">cap</text>
 <text x="140" y="344" class="fg" >Layth28</text>
 <text x="418" y="344" class="bad" text-anchor="middle">0</text>
 <rect x="448" y="328" width="94" height="32" class="bar-bg"/>
-<rect x="448" y="328" width="0" height="32" class="bar-bad"/>
+<rect x="448" y="328" width="94" height="2" class="bar-rule"/>
+<rect x="448" y="358" width="94" height="2" class="bar-rule"/>
 <text x="664" y="344" class="good" text-anchor="middle">100</text>
 <rect x="694" y="328" width="94" height="32" class="bar-bg"/>
 <rect x="694" y="328" width="94" height="32" class="bar-good"/>
+<rect x="694" y="328" width="94" height="2" class="bar-rule"/>
+<rect x="694" y="358" width="94" height="2" class="bar-rule"/>
 <text x="928" y="344" class="bad" >cap</text>
 <text x="30" y="378" class="warn" >login</text>
 <text x="140" y="378" class="fg" >current</text>

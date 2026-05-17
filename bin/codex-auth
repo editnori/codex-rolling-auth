@@ -2503,6 +2503,9 @@ usage_tone_color() {
     border)
       printf '\033[38;2;50;50;50m'
       ;;
+    track_edge)
+      printf '\033[38;2;16;16;16m'
+      ;;
     muted)
       printf '\033[38;2;128;128;128m'
       ;;
@@ -5146,21 +5149,11 @@ selector_palette_bar() {
   local width="$2"
   local tone value units full partial used inner_w bg_style
   local partial_glyphs=("" "▏" "▎" "▍" "▌" "▋" "▊" "▉")
+  local bar_border_glyph="▁"
 
   tone="$(usage_limit_tone "$percent")"
   bg_style="${CODEX_AUTH_SELECTOR_BAR_STYLE:-bg}"
-  if usage_color_active && [[ "$bg_style" == "bg" ]]; then
-    if (( width >= 3 )); then
-      inner_w=$((width - 2))
-      usage_tone_bg track_edge
-      printf ' '
-      usage_tone_reset
-    else
-      inner_w="$width"
-    fi
-  else
-    inner_w="$width"
-  fi
+  inner_w="$width"
   percent="${percent%\%}"
   if [[ "$percent" =~ ^-?[0-9]+$ ]]; then
     value="$percent"
@@ -5179,12 +5172,14 @@ selector_palette_bar() {
       if usage_color_active && [[ "$bg_style" == "bg" ]]; then
         if (( used > 0 )); then
           usage_tone_bg "$tone"
-          printf '%*s' "$used" ''
+          usage_tone_color track_edge
+          repeat_glyph "$bar_border_glyph" "$used"
           usage_tone_reset
         fi
         if (( inner_w > used )); then
           usage_tone_bg track
-          printf '%*s' "$((inner_w - used))" ''
+          usage_tone_color track_edge
+          repeat_glyph "$bar_border_glyph" "$((inner_w - used))"
           usage_tone_reset
         fi
       else
@@ -5200,12 +5195,14 @@ selector_palette_bar() {
       if usage_color_active && [[ "$bg_style" == "bg" ]]; then
         if (( full > 0 )); then
           usage_tone_bg "$tone"
-          printf '%*s' "$full" ''
+          usage_tone_color track_edge
+          repeat_glyph "$bar_border_glyph" "$full"
           usage_tone_reset
         fi
         if (( inner_w > full )); then
           usage_tone_bg track
-          printf '%*s' "$((inner_w - full))" ''
+          usage_tone_color track_edge
+          repeat_glyph "$bar_border_glyph" "$((inner_w - full))"
           usage_tone_reset
         fi
       else
@@ -5218,16 +5215,12 @@ selector_palette_bar() {
   else
     if usage_color_active && [[ "$bg_style" == "bg" ]]; then
       usage_tone_bg track
-      printf '%*s' "$inner_w" ''
+      usage_tone_color track_edge
+      repeat_glyph "$bar_border_glyph" "$inner_w"
       usage_tone_reset
     else
       printf '%*s' "$inner_w" ''
     fi
-  fi
-  if usage_color_active && [[ "$bg_style" == "bg" && "$width" -ge 3 ]]; then
-    usage_tone_bg track_edge
-    printf ' '
-    usage_tone_reset
   fi
 }
 
