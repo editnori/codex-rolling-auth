@@ -42,13 +42,13 @@ codex-auth usage --refresh --select
 Run a rolling Codex session explicitly:
 
 ```bash
-codex-auth run -- codex resume --last
+codex-auth run -- resume --last
 ```
 
 Resume a specific session with rolling auth:
 
 ```bash
-codex-auth run -- codex resume 019e1af9-d95b-7f11-b1f0-aae08a7c4f1d
+codex-auth run -- resume 019e1af9-d95b-7f11-b1f0-aae08a7c4f1d
 ```
 
 If you installed the shim with `--wrap-codex`, normal Codex commands also roll:

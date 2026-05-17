@@ -19,5 +19,5 @@ printf 'installed %s\n' "$bindir/codex-auth"
 if [[ "${1:-}" == "--wrap-codex" ]]; then
   printf 'installed %s\n' "$bindir/codex"
 else
-  printf 'run with: codex-auth run -- codex resume --last\n'
+  printf 'run with: codex-auth run -- resume --last\n'
 fi
