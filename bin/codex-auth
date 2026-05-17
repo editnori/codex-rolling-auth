@@ -6292,7 +6292,7 @@ arrow_action_menu() {
       if (( fzf_vertical_padding )); then
         fzf_padding_args+=(--padding=1,0,1,0)
       fi
-      if [[ "$term_lines" =~ ^[0-9]+$ ]] && (( term_lines > fzf_height + 1 )); then
+      if [[ "${CODEX_AUTH_SELECTOR_CENTER:-0}" == "1" && "$term_lines" =~ ^[0-9]+$ ]] && (( term_lines > fzf_height + 1 )); then
         fzf_outer_top_padding=$(((term_lines - fzf_height) / 2))
       fi
       fzf_height_arg="~$fzf_height"
@@ -6378,7 +6378,7 @@ arrow_action_menu() {
       selector_controls="1-${#rows[@]} select | q stay"
     fi
   fi
-  if [[ "$term_lines" =~ ^[0-9]+$ ]]; then
+  if [[ "${CODEX_AUTH_SELECTOR_CENTER:-0}" == "1" && "$term_lines" =~ ^[0-9]+$ ]]; then
     fallback_height=$((3 + ${#rows[@]} + 1))
     if (( term_lines > fallback_height + 1 )); then
       fallback_top_padding=$(((term_lines - fallback_height) / 2))
