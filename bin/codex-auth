@@ -2517,6 +2517,36 @@ usage_tone_reset() {
   return 0
 }
 
+usage_tone_bg() {
+  local tone="${1:-}"
+
+  if ! usage_color_active; then
+    return 0
+  fi
+
+  case "$tone" in
+    good)
+      printf '\033[48;2;166;227;161m'
+      ;;
+    warn)
+      printf '\033[48;2;250;178;131m'
+      ;;
+    active)
+      printf '\033[48;2;157;124;216m'
+      ;;
+    bad)
+      printf '\033[48;2;224;108;117m'
+      ;;
+    accent)
+      printf '\033[48;2;250;178;131m'
+      ;;
+    track)
+      printf '\033[48;2;35;35;35m'
+      ;;
+  esac
+  return 0
+}
+
 usage_limit_tone() {
   local percent="${1:-}"
   local value
@@ -5130,21 +5160,53 @@ selector_palette_bar() {
       fi
       used="$full"
       (( partial > 0 && used < width )) && used=$((used + 1))
-      usage_tone_color "$tone"
-      repeat_glyph "█" "$full"
-      (( partial > 0 && full < width )) && printf '%s' "${partial_glyphs[$partial]}"
-      usage_tone_reset
-      (( width > used )) && printf '%*s' "$((width - used))" ''
+      if usage_color_active && [[ "${CODEX_AUTH_SELECTOR_BAR_STYLE:-bg}" == "bg" ]]; then
+        if (( used > 0 )); then
+          usage_tone_bg "$tone"
+          printf '%*s' "$used" ''
+          usage_tone_reset
+        fi
+        if (( width > used )); then
+          usage_tone_bg track
+          printf '%*s' "$((width - used))" ''
+          usage_tone_reset
+        fi
+      else
+        usage_tone_color "$tone"
+        repeat_glyph "█" "$full"
+        (( partial > 0 && full < width )) && printf '%s' "${partial_glyphs[$partial]}"
+        usage_tone_reset
+        (( width > used )) && printf '%*s' "$((width - used))" ''
+      fi
     else
       full=$(((value * width + 50) / 100))
       (( full > width )) && full="$width"
-      usage_tone_color "$tone"
-      repeat_glyph "#" "$full"
-      usage_tone_reset
-      (( width > full )) && printf '%*s' "$((width - full))" ''
+      if usage_color_active && [[ "${CODEX_AUTH_SELECTOR_BAR_STYLE:-bg}" == "bg" ]]; then
+        if (( full > 0 )); then
+          usage_tone_bg "$tone"
+          printf '%*s' "$full" ''
+          usage_tone_reset
+        fi
+        if (( width > full )); then
+          usage_tone_bg track
+          printf '%*s' "$((width - full))" ''
+          usage_tone_reset
+        fi
+      else
+        usage_tone_color "$tone"
+        repeat_glyph "#" "$full"
+        usage_tone_reset
+        (( width > full )) && printf '%*s' "$((width - full))" ''
+      fi
     fi
   else
-    printf '%*s' "$width" ''
+    if usage_color_active && [[ "${CODEX_AUTH_SELECTOR_BAR_STYLE:-bg}" == "bg" ]]; then
+      usage_tone_bg track
+      printf '%*s' "$width" ''
+      usage_tone_reset
+    else
+      printf '%*s' "$width" ''
+    fi
   fi
 }
 

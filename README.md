@@ -67,6 +67,7 @@ codex resume 019e1af9-d95b-7f11-b1f0-aae08a7c4f1d
 - Set `CODEX_AUTH_AUTO=0` to bypass automatic rolling for one command.
 - Set `CODEX_AUTH_USAGE_HEADER=1` or `CODEX_AUTH_USAGE_STATUS=1` if you want the full table header or status column back.
 - Set `CODEX_AUTH_SELECTOR_CENTER=1` if you want the selector vertically centered in the terminal.
+- Set `CODEX_AUTH_SELECTOR_BAR_STYLE=glyph` if your terminal does not render background-color bars cleanly.
 
 ## Regenerate Assets
 
