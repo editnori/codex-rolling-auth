@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+find_real_codex() {
+  local candidate
+
+  if [[ -n "${CODEX_AUTH_CODEX_BIN:-}" && -x "${CODEX_AUTH_CODEX_BIN:-}" ]]; then
+    printf '%s\n' "$CODEX_AUTH_CODEX_BIN"
+    return 0
+  fi
+
+  for candidate in \
+    "$HOME/.bun/bin/codex-real" \
+    "$HOME/.bun/bin/codex" \
+    "$HOME/.npm-global/bin/codex" \
+    /usr/local/bin/codex \
+    /usr/bin/codex \
+    /bin/codex
+  do
+    [[ -x "$candidate" ]] || continue
+    [[ "$(realpath "$candidate" 2>/dev/null || printf '%s' "$candidate")" != "$(realpath "$0" 2>/dev/null || printf '%s' "$0")" ]] || continue
+    printf '%s\n' "$candidate"
+    return 0
+  done
+
+  return 1
+}
+
+case "${1:-}" in
+  login|logout|update|completion|mcp|plugin|features|help|--help|-h|--version|-V)
+    ;;
+  *)
+    if command -v codex-auth >/dev/null 2>&1 && [[ "${CODEX_AUTH_AUTO:-1}" != "0" && "${CODEX_AUTH_RUNNER:-0}" != "1" ]]; then
+      CODEX_AUTH_CODEX_BIN="$(find_real_codex)" exec codex-auth run -- "$@"
+    fi
+    ;;
+esac
+
+exec "$(find_real_codex)" "$@"

@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1008" height="380" viewBox="0 0 1008 380">
+  <rect width="1008" height="380" fill="#101112"/>
+  <style>
+    text { font-family: "DejaVu Sans Mono", "SFMono-Regular", Consolas, monospace; font-size: 24px; dominant-baseline: middle; }
+    .muted { fill: #8b8b8b; }
+    .title { fill: #ffb07a; }
+    .active { fill: #b990ff; }
+    .good { fill: #a7e3a0; }
+    .warn { fill: #ffb77e; }
+    .bad { fill: #ff7184; }
+    .fg { fill: #eeeeee; }
+    .bar-bg { fill: #242424; }
+    .bar-week { fill: #ffb77e; }
+    .bar-good { fill: #a7e3a0; }
+    .bar-low { fill: #ff7184; }
+  </style>
+
+  <text x="28" y="22" class="title">Auth &#183; Codex profiles</text>
+  <text x="365" y="22" class="muted">enter select &#183; esc stay</text>
+
+  <text x="51" y="60" class="muted" text-anchor="middle">act</text>
+  <text x="171" y="60" class="muted" text-anchor="middle">profile</text>
+  <text x="444" y="60" class="muted" text-anchor="middle">wk%</text>
+  <text x="646" y="60" class="muted" text-anchor="middle">5h%</text>
+  <text x="894" y="60" class="muted" text-anchor="middle">status</text>
+
+  <text x="2" y="91" class="warn" font-weight="700">filter</text>
+
+  <rect x="0" y="132" width="1008" height="32" fill="#292929"/>
+  <text x="28" y="148" class="active" font-weight="700">stay</text>
+  <text x="128" y="148" class="fg" font-weight="700">Layth08</text>
+  <text x="382" y="148" class="warn" text-anchor="middle" font-weight="700">43</text>
+  <rect x="418" y="132" width="132" height="32" class="bar-bg"/>
+  <rect x="418" y="132" width="57" height="32" class="bar-week"/>
+  <text x="608" y="148" class="good" text-anchor="middle" font-weight="700">100</text>
+  <rect x="656" y="132" width="132" height="32" class="bar-bg"/>
+  <rect x="656" y="132" width="132" height="32" class="bar-good"/>
+  <text x="912" y="148" class="good" font-weight="700">ready</text>
+
+  <text x="28" y="180" class="good">use</text>
+  <text x="128" y="180" class="fg">Layth48</text>
+  <text x="382" y="180" class="good" text-anchor="middle">76</text>
+  <rect x="418" y="164" width="132" height="32" class="bar-bg"/>
+  <rect x="418" y="164" width="100" height="32" class="bar-good"/>
+  <text x="608" y="180" class="good" text-anchor="middle">87</text>
+  <rect x="656" y="164" width="132" height="32" class="bar-bg"/>
+  <rect x="656" y="164" width="115" height="32" class="bar-good"/>
+  <text x="912" y="180" class="good">ready</text>
+
+  <text x="28" y="212" class="good">use</text>
+  <text x="128" y="212" class="fg">Layth18</text>
+  <text x="382" y="212" class="good" text-anchor="middle">65</text>
+  <rect x="418" y="196" width="132" height="32" class="bar-bg"/>
+  <rect x="418" y="196" width="86" height="32" class="bar-good"/>
+  <text x="608" y="212" class="warn" text-anchor="middle">37</text>
+  <rect x="656" y="196" width="132" height="32" class="bar-bg"/>
+  <rect x="656" y="196" width="49" height="32" class="bar-week"/>
+  <text x="912" y="212" class="good">ready</text>
+
+  <text x="28" y="244" class="bad">cap</text>
+  <text x="128" y="244" class="fg">Layth38</text>
+  <text x="382" y="244" class="bad" text-anchor="middle">0</text>
+  <rect x="418" y="228" width="132" height="32" class="bar-bg"/>
+  <text x="608" y="244" class="good" text-anchor="middle">100</text>
+  <rect x="656" y="228" width="132" height="32" class="bar-bg"/>
+  <rect x="656" y="228" width="132" height="32" class="bar-good"/>
+  <text x="912" y="244" class="warn">old cap</text>
+
+  <text x="28" y="276" class="bad">cap</text>
+  <text x="128" y="276" class="fg">Layth</text>
+  <text x="382" y="276" class="bad" text-anchor="middle">0</text>
+  <rect x="418" y="260" width="132" height="32" class="bar-bg"/>
+  <text x="608" y="276" class="good" text-anchor="middle">100</text>
+  <rect x="656" y="260" width="132" height="32" class="bar-bg"/>
+  <rect x="656" y="260" width="132" height="32" class="bar-good"/>
+  <text x="912" y="276" class="bad">cap</text>
+
+  <text x="28" y="308" class="bad">cap</text>
+  <text x="128" y="308" class="fg">Layth.qassem</text>
+  <text x="382" y="308" class="bad" text-anchor="middle">0</text>
+  <rect x="418" y="292" width="132" height="32" class="bar-bg"/>
+  <text x="608" y="308" class="good" text-anchor="middle">100</text>
+  <rect x="656" y="292" width="132" height="32" class="bar-bg"/>
+  <rect x="656" y="292" width="132" height="32" class="bar-good"/>
+  <text x="912" y="308" class="bad">cap</text>
+
+  <text x="28" y="340" class="warn">login</text>
+  <text x="128" y="340" class="fg">current</text>
+  <text x="382" y="340" class="muted" text-anchor="middle">-</text>
+  <text x="608" y="340" class="muted" text-anchor="middle">-</text>
+  <text x="912" y="340" class="muted">login needed</text>
+</svg>
