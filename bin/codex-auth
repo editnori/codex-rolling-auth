@@ -2753,6 +2753,100 @@ usage_static_render_columns() {
   printf '%s' "$cols"
 }
 
+clamp_int_between() {
+  local value="$1"
+  local min="$2"
+  local max="$3"
+
+  if (( value < min )); then
+    printf '%s' "$min"
+  elif (( value > max )); then
+    printf '%s' "$max"
+  else
+    printf '%s' "$value"
+  fi
+}
+
+usage_profile_width_hint() {
+  local cols="$1"
+  local wanted="$2"
+  local verbose="${3:-0}"
+  local row row_verbose threshold min_w max_w
+  local rows=(
+    "1 112 18 28"
+    "1 94 14 24"
+    "1 0 12 24"
+    "0 112 20 30"
+    "0 94 18 28"
+    "0 72 14 24"
+    "0 0 12 24"
+  )
+
+  if [[ ! "$wanted" =~ ^[0-9]+$ ]]; then
+    wanted=12
+  fi
+
+  for row in "${rows[@]}"; do
+    read -r row_verbose threshold min_w max_w <<<"$row"
+    if (( verbose == row_verbose && cols >= threshold )); then
+      clamp_int_between "$wanted" "$min_w" "$max_w"
+      return 0
+    fi
+  done
+}
+
+usage_width_mode_defaults() {
+  local cols="$1"
+  local verbose="${2:-0}"
+  local row row_min row_max row_verbose
+  local mode role_w profile_min status_min reset_w label_w min_bar_w max_bar_w
+  local rows=(
+    "0 25 -1 pico 1 4 3 0 4 0 0"
+    "26 39 -1 nano 1 5 3 0 4 0 0"
+    "40 49 -1 micro 1 8 5 0 4 3 8"
+    "50 59 -1 tiny 1 8 5 5 4 3 8"
+    "60 71 -1 tight 6 8 7 5 4 4 8"
+    "72 93 1 compact 6 8 12 5 4 5 12"
+    "72 93 0 normal 6 8 12 11 4 4 16"
+    "94 111 1 normal 7 8 12 11 4 4 18"
+    "94 111 0 normal 7 8 12 11 4 4 20"
+    "112 9999 1 wide 7 8 12 11 4 4 18"
+    "112 9999 0 wide 7 8 12 11 4 4 22"
+  )
+
+  for row in "${rows[@]}"; do
+    read -r row_min row_max row_verbose mode role_w profile_min status_min reset_w label_w min_bar_w max_bar_w <<<"$row"
+    if (( cols >= row_min && cols <= row_max )); then
+      if (( row_verbose < 0 || row_verbose == verbose )); then
+        break
+      fi
+    fi
+  done
+
+  if (( verbose && cols >= 68 )) && [[ "$mode" == "tight" ]]; then
+    status_min=12
+  fi
+  if (( ! verbose )); then
+    if (( cols >= 61 )); then
+      role_w=5
+      status_min=12
+    else
+      role_w=1
+    fi
+  fi
+  if (( verbose )) && [[ "$mode" != "pico" && "$mode" != "nano" && "$mode" != "micro" && "$mode" != "tiny" && "$mode" != "tight" ]]; then
+    label_w=6
+    max_bar_w=12
+    if (( cols >= 112 )); then
+      max_bar_w=20
+    elif (( cols >= 94 )); then
+      max_bar_w=14
+    fi
+  fi
+
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$mode" "$role_w" "$profile_min" "$status_min" "$reset_w" "$label_w" "$min_bar_w" "$max_bar_w"
+}
+
 print_usage_limit_cell() {
   local percent="$1"
   local reset_time="$2"
@@ -2839,118 +2933,17 @@ print_usage_limit_cell() {
 
 usage_render_widths() {
   local cols="$1"
-  local mode="normal"
-  local role_w=6
+  local mode role_w
   local show_status="${CODEX_AUTH_USAGE_STATUS:-0}"
   local profile_w
   local wanted_profile_w="${USAGE_PROFILE_WIDTH_HINT:-12}"
-  local profile_min=8
-  local status_min=8
-	  local reset_w=11
-	  local label_w=4
-	  local cell_overhead reset_prefix_w=0
-	  local cell_w status_w status_max bar_width available max_profile_w min_bar_w=4 max_bar_w=18
-	  local role_profile_gap=1 status_gap=1 gap_w=4
+  local profile_min status_min reset_w label_w min_bar_w max_bar_w
+  local cell_overhead reset_prefix_w=0
+  local cell_w status_w status_max bar_width available max_profile_w
+  local role_profile_gap=1 status_gap=1 gap_w=4
 
-  [[ "$wanted_profile_w" =~ ^[0-9]+$ ]] || wanted_profile_w=12
-  (( wanted_profile_w < 12 )) && wanted_profile_w=12
-  if (( USAGE_VERBOSE )); then
-    if (( cols >= 112 )); then
-      (( wanted_profile_w < 18 )) && wanted_profile_w=18
-      (( wanted_profile_w > 28 )) && wanted_profile_w=28
-    elif (( cols >= 94 )); then
-      (( wanted_profile_w < 14 )) && wanted_profile_w=14
-      (( wanted_profile_w > 24 )) && wanted_profile_w=24
-    else
-      (( wanted_profile_w > 24 )) && wanted_profile_w=24
-    fi
-  else
-    if (( cols >= 112 )); then
-      (( wanted_profile_w < 20 )) && wanted_profile_w=20
-      (( wanted_profile_w > 30 )) && wanted_profile_w=30
-    elif (( cols >= 94 )); then
-      (( wanted_profile_w < 18 )) && wanted_profile_w=18
-      (( wanted_profile_w > 28 )) && wanted_profile_w=28
-    elif (( cols >= 72 )); then
-      (( wanted_profile_w < 14 )) && wanted_profile_w=14
-      (( wanted_profile_w > 24 )) && wanted_profile_w=24
-    else
-      (( wanted_profile_w > 24 )) && wanted_profile_w=24
-    fi
-  fi
-
-  if (( cols < 26 )); then
-    mode="pico"
-    role_w=1
-    profile_min=4
-    status_min=3
-    reset_w=0
-    min_bar_w=0
-    max_bar_w=0
-  elif (( cols < 40 )); then
-    mode="nano"
-    role_w=1
-    profile_min=5
-    status_min=3
-    reset_w=0
-    min_bar_w=0
-    max_bar_w=0
-  elif (( cols < 50 )); then
-    mode="micro"
-    role_w=1
-    status_min=5
-    reset_w=0
-    min_bar_w=3
-    max_bar_w=8
-  elif (( cols < 60 )); then
-    mode="tiny"
-    role_w=1
-    status_min=5
-    reset_w=5
-    min_bar_w=3
-    max_bar_w=8
-  elif (( cols < 72 )); then
-    mode="tight"
-    role_w=6
-    status_min=7
-    if (( USAGE_VERBOSE && cols >= 68 )); then
-      status_min=12
-    fi
-    reset_w=5
-    min_bar_w=4
-    max_bar_w=8
-  elif (( cols >= 112 )); then
-    mode="wide"
-    role_w=7
-    status_min=12
-    if (( ! USAGE_VERBOSE )); then
-      max_bar_w=22
-    fi
-  elif (( cols >= 94 )); then
-    role_w=7
-    status_min=12
-    if (( ! USAGE_VERBOSE )); then
-      max_bar_w=20
-    fi
-  elif (( cols >= 72 && USAGE_VERBOSE )); then
-    mode="compact"
-    role_w=6
-    status_min=12
-    reset_w=5
-    min_bar_w=5
-    max_bar_w=12
-  elif (( cols >= 72 && ! USAGE_VERBOSE )); then
-    status_min=12
-    max_bar_w=16
-  fi
-  if (( ! USAGE_VERBOSE )); then
-    if (( cols >= 61 )); then
-      role_w=5
-      status_min=12
-    else
-      role_w=1
-    fi
-  fi
+  wanted_profile_w="$(usage_profile_width_hint "$cols" "$wanted_profile_w" "$USAGE_VERBOSE")"
+  IFS=$'\t' read -r mode role_w profile_min status_min reset_w label_w min_bar_w max_bar_w <<<"$(usage_width_mode_defaults "$cols" "$USAGE_VERBOSE")"
   role_profile_gap="$(usage_role_profile_gap "$role_w")"
   status_gap="$(usage_metric_status_gap "$role_w")"
   if [[ "$show_status" != "1" ]]; then
@@ -2963,15 +2956,6 @@ usage_render_widths() {
   fi
   if (( reset_w > 0 )) && usage_unicode_enabled; then
     reset_prefix_w=1
-  fi
-  if (( USAGE_VERBOSE )) && [[ "$mode" != "pico" && "$mode" != "nano" && "$mode" != "micro" && "$mode" != "tiny" && "$mode" != "tight" ]]; then
-    label_w=6
-    max_bar_w=12
-    if (( cols >= 112 )); then
-      max_bar_w=20
-    elif (( cols >= 94 )); then
-      max_bar_w=14
-    fi
   fi
   if [[ "$mode" == "pico" ]]; then
     cell_overhead="$label_w"
@@ -3082,6 +3066,28 @@ usage_role_label() {
   fi
 }
 
+usage_status_is_exact_cap() {
+  case "$1" in
+    "week+5h cap"|"week cap"|"5h cap")
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+usage_stale_ok_label() {
+  local stale_age="$1"
+  local aged_format="${2:-old}"
+
+  if [[ -n "$stale_age" && "$stale_age" != "now" ]]; then
+    printf "$aged_format" "$stale_age"
+  else
+    printf 'stale'
+  fi
+}
+
 usage_display_status() {
   local status="$1"
   local mode="${2:-normal}"
@@ -3099,28 +3105,20 @@ usage_display_status() {
 
   if [[ "$mode" == "pico" || "$mode" == "nano" ]]; then
     if (( stale_status )); then
-      case "$status" in
-        *cap)
-          printf 'cap'
-          ;;
-        *)
-          printf 'old'
-          ;;
-      esac
+      if [[ "$status" == *cap ]]; then
+        printf 'cap'
+      else
+        printf 'old'
+      fi
+      return 0
+    fi
+    if usage_status_is_exact_cap "$status"; then
+      printf 'cap'
       return 0
     fi
     case "$status" in
       ok)
         printf 'ok'
-        ;;
-      "week+5h cap")
-        printf 'cap'
-        ;;
-      "week cap")
-        printf 'cap'
-        ;;
-      "5h cap")
-        printf 'cap'
         ;;
       stale\ *\ cap)
         printf 'old'
@@ -3140,41 +3138,22 @@ usage_display_status() {
 
   if [[ "$mode" == "micro" || "$mode" == "tiny" ]]; then
     if (( stale_status )); then
-      case "$status" in
-        ok)
-          if [[ -n "$stale_age" && "$stale_age" != "now" ]]; then
-            printf 'old'
-          else
-            printf 'stale'
-          fi
-          ;;
-        "week+5h cap")
-          printf 'cap'
-          ;;
-        "week cap")
-          printf 'cap'
-          ;;
-        "5h cap")
-          printf 'cap'
-          ;;
-        *)
-          printf 'stale'
-          ;;
-      esac
+      if [[ "$status" == "ok" ]]; then
+        usage_stale_ok_label "$stale_age"
+      elif usage_status_is_exact_cap "$status"; then
+        printf 'cap'
+      else
+        printf 'stale'
+      fi
+      return 0
+    fi
+    if usage_status_is_exact_cap "$status"; then
+      printf 'cap'
       return 0
     fi
     case "$status" in
       ok)
         printf 'ready'
-        ;;
-      "week+5h cap")
-        printf 'cap'
-        ;;
-      "week cap")
-        printf 'cap'
-        ;;
-      "5h cap")
-        printf 'cap'
         ;;
       stale\ *\ cap)
         printf 'stale'
@@ -3190,36 +3169,20 @@ usage_display_status() {
   fi
 
   if (( stale_status )); then
-    case "$status" in
-      ok)
-        if [[ -n "$stale_age" && "$stale_age" != "now" ]]; then
-          printf 'old %s' "$stale_age"
-        else
-          printf 'stale'
-        fi
-        ;;
-      "week+5h cap")
-        printf 'old cap'
-        ;;
-      "week cap")
-        printf 'old cap'
-        ;;
-      "5h cap")
-        printf 'old cap'
-        ;;
-      *)
-        printf 'stale'
-        ;;
-    esac
+    if [[ "$status" == "ok" ]]; then
+      usage_stale_ok_label "$stale_age" 'old %s'
+    elif usage_status_is_exact_cap "$status"; then
+      printf 'old cap'
+    else
+      printf 'stale'
+    fi
     return 0
   fi
 
-  case "$status" in
-    "week+5h cap"|"week cap"|"5h cap")
-      printf 'cap'
-      return 0
-      ;;
-  esac
+  if usage_status_is_exact_cap "$status"; then
+    printf 'cap'
+    return 0
+  fi
 
   case "$status" in
     ok)
@@ -3230,9 +3193,6 @@ usage_display_status() {
       ;;
     login)
       printf 'login'
-      ;;
-    "week+5h cap")
-      printf 'both cap'
       ;;
     *)
       printf '%s' "$status"
@@ -3650,6 +3610,22 @@ print_usage_render_data_line() {
   printf '\n'
 }
 
+usage_summary_try_append() {
+  local -n line_ref="$1"
+  local -n show_ref="$2"
+  local part="$3"
+  local width="$4"
+
+  if (( ! show_ref )); then
+    return 0
+  fi
+  if (( ${#line_ref} + ${#part} <= width )); then
+    line_ref+="$part"
+  else
+    show_ref=0
+  fi
+}
+
 print_usage_summary_line() {
   local width="$1"
   local default_profile="${2:-}"
@@ -3802,68 +3778,19 @@ print_usage_summary_line() {
   if (( ! has_active && has_best )); then
     show_ready=0
   fi
-  local part=""
-  if (( show_week )); then
-    part=" wk $active_weekly"
-    if (( ${#line} + ${#part} <= width )); then
-      line+="$part"
-    else
-      show_week=0
-    fi
-  fi
-  if (( show_ready )); then
-    part="${sep}ready $ready"
-    if (( ${#line} + ${#part} <= width )); then
-      line+="$part"
-    else
-      show_ready=0
-    fi
-  fi
-  if (( show_caps )); then
-    part="${sep}$cap_label $caps"
-    if (( ${#line} + ${#part} <= width )); then
-      line+="$part"
-    else
-      show_caps=0
-    fi
-  fi
-  if (( show_login )); then
-    part="${sep}login $login"
-    if (( ${#line} + ${#part} <= width )); then
-      line+="$part"
-    else
-      show_login=0
-    fi
-  fi
-  if (( show_unavailable )); then
-    part="${sep}no data $unavailable"
-    if (( ${#line} + ${#part} <= width )); then
-      line+="$part"
-    else
-      show_unavailable=0
-    fi
-  fi
-  if (( show_offline )); then
-    part="${sep}offline $offline"
-    if (( ${#line} + ${#part} <= width )); then
-      line+="$part"
-    else
-      show_offline=0
-    fi
-  fi
+  usage_summary_try_append line show_week " wk $active_weekly" "$width"
+  usage_summary_try_append line show_ready "${sep}ready $ready" "$width"
+  usage_summary_try_append line show_caps "${sep}$cap_label $caps" "$width"
+  usage_summary_try_append line show_login "${sep}login $login" "$width"
+  usage_summary_try_append line show_unavailable "${sep}no data $unavailable" "$width"
+  usage_summary_try_append line show_offline "${sep}offline $offline" "$width"
   if (( stale > 0 )); then
-    part="${sep}stale $stale"
-  fi
-  if (( stale > 0 && ${#line} + ${#part} <= width )); then
     show_stale=1
-    line+="$part"
+    usage_summary_try_append line show_stale "${sep}stale $stale" "$width"
   fi
   if [[ -n "$cache_age_label" ]]; then
-    part="${sep}cache $cache_age_label"
-  fi
-  if [[ -n "$cache_age_label" ]] && (( ${#line} + ${#part} <= width )); then
     show_cache=1
-    line+="$part"
+    usage_summary_try_append line show_cache "${sep}cache $cache_age_label" "$width"
   fi
 
   if (( ${#line} > width )); then
