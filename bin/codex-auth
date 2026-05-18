@@ -2786,7 +2786,7 @@ usage_bar() {
       return 0
     fi
     full=$(((value * width + 50) / 100))
-    (( full > width )) && full="$width"
+    full="$(clamp_int_between "$full" 0 "$width")"
     repeat_glyph "#" "$full"
     repeat_glyph "$empty_glyph" "$((width - full))"
     return 0
@@ -2856,7 +2856,7 @@ usage_render_total_width() {
   local role_profile_gap status_gap
 
   role_profile_gap="$(usage_role_profile_gap "$role_w")"
-  status_gap="$(usage_role_profile_gap "$role_w")"
+  status_gap="$role_profile_gap"
   if (( status_w > 0 )); then
     printf '%s' "$((role_w + role_profile_gap + profile_w + 1 + cell_w + 1 + cell_w + status_gap + status_w))"
   else
@@ -3618,63 +3618,58 @@ usage_header_profile() {
   fi
 }
 
-usage_header_week_percent() {
+usage_header_percent_label() {
   local mode="$1"
+  local label="$2"
+  local nano_label="$3"
 
   if usage_mode_is_pico_or_nano "$mode"; then
-    printf 'wk%%'
+    printf '%s%%' "$nano_label"
   else
-    printf 'week%%'
+    printf '%s%%' "$label"
   fi
 }
 
-usage_header_week_verbose_plain() {
+usage_header_verbose_label() {
   local mode="$1"
+  local label="$2"
+  local nano_label="$3"
+  local reset_glyph="${4:-}"
 
   case "$mode" in
     pico|nano)
-      printf 'wk%%'
+      printf '%s%%' "$nano_label"
       ;;
     micro)
-      printf 'week%%'
+      printf '%s%%' "$label"
       ;;
     tiny)
-      printf 'week%% reset'
+      if [[ -n "$reset_glyph" ]]; then
+        printf '%s%%%s' "$label" "$reset_glyph"
+      else
+        printf '%s%% reset' "$label"
+      fi
       ;;
     tight)
-      printf 'week left reset'
+      if [[ -n "$reset_glyph" ]]; then
+        printf '%s left%s' "$label" "$reset_glyph"
+      else
+        printf '%s left reset' "$label"
+      fi
       ;;
     compact)
-      printf 'week used/reset'
+      if [[ -n "$reset_glyph" ]]; then
+        printf '%s left/used%s' "$label" "$reset_glyph"
+      else
+        printf '%s used/reset' "$label"
+      fi
       ;;
     *)
-      printf 'week left/used reset'
-      ;;
-  esac
-}
-
-usage_header_week_verbose_reset() {
-  local mode="$1"
-  local reset_glyph="$2"
-
-  case "$mode" in
-    pico|nano)
-      printf 'wk%%'
-      ;;
-    micro)
-      printf 'week%%'
-      ;;
-    tiny)
-      printf 'week%%%s' "$reset_glyph"
-      ;;
-    tight)
-      printf 'week left%s' "$reset_glyph"
-      ;;
-    compact)
-      printf 'week left/used%s' "$reset_glyph"
-      ;;
-    *)
-      printf 'week left/used %s reset' "$reset_glyph"
+      if [[ -n "$reset_glyph" ]]; then
+        printf '%s left/used %s reset' "$label" "$reset_glyph"
+      else
+        printf '%s left/used reset' "$label"
+      fi
       ;;
   esac
 }
@@ -3685,15 +3680,11 @@ usage_header_week() {
   reset_glyph="$(usage_reset_glyph)"
 
   if (( ! USAGE_VERBOSE )); then
-    usage_header_week_percent "$mode"
+    usage_header_percent_label "$mode" "week" "wk"
     return 0
   fi
 
-  if [[ -z "$reset_glyph" ]]; then
-    usage_header_week_verbose_plain "$mode"
-  else
-    usage_header_week_verbose_reset "$mode" "$reset_glyph"
-  fi
+  usage_header_verbose_label "$mode" "week" "wk" "$reset_glyph"
 }
 
 usage_header_short_label() {
@@ -3706,88 +3697,22 @@ usage_header_short_label() {
   printf '%s' "$label"
 }
 
-usage_header_short_percent() {
-  local mode="$1"
-  local label="$2"
-
-  if usage_mode_is_pico_or_nano "$mode"; then
-    printf '%s%%' "${label:0:2}"
-  else
-    printf '%s%%' "$label"
-  fi
-}
-
-usage_header_short_verbose_plain() {
-  local mode="$1"
-  local label="$2"
-
-  case "$mode" in
-    pico|nano)
-      printf '%s%%' "${label:0:2}"
-      ;;
-    micro)
-      printf '%s%%' "$label"
-      ;;
-    tiny)
-      printf '%s%% reset' "$label"
-      ;;
-    tight)
-      printf '%s left reset' "$label"
-      ;;
-    compact)
-      printf '%s used/reset' "$label"
-      ;;
-    *)
-      printf '%s left/used reset' "$label"
-      ;;
-  esac
-}
-
-usage_header_short_verbose_reset() {
-  local mode="$1"
-  local label="$2"
-  local reset_glyph="$3"
-
-  case "$mode" in
-    pico|nano)
-      printf '%s%%' "${label:0:2}"
-      ;;
-    micro)
-      printf '%s%%' "$label"
-      ;;
-    tiny)
-      printf '%s%%%s' "$label" "$reset_glyph"
-      ;;
-    tight)
-      printf '%s left%s' "$label" "$reset_glyph"
-      ;;
-    compact)
-      printf '%s left/used%s' "$label" "$reset_glyph"
-      ;;
-    *)
-      printf '%s left/used %s reset' "$label" "$reset_glyph"
-      ;;
-  esac
-}
-
 usage_header_short() {
   local mode="${1:-normal}"
   local label
+  local nano_label
   local reset_glyph
 
   label="$(usage_header_short_label "$mode")"
+  nano_label="${label:0:2}"
   reset_glyph="$(usage_reset_glyph)"
 
   if (( ! USAGE_VERBOSE )); then
-    usage_header_short_percent "$mode" "$label"
+    usage_header_percent_label "$mode" "$label" "$nano_label"
     return 0
   fi
 
-  if [[ -z "$reset_glyph" ]]; then
-    usage_header_short_verbose_plain "$mode" "$label"
-  else
-    usage_header_short_verbose_reset "$mode" "$label" "$reset_glyph"
-  fi
+  usage_header_verbose_label "$mode" "$label" "$nano_label" "$reset_glyph"
 }
 
 usage_header_state() {
@@ -7253,8 +7178,7 @@ selector_enable_palette_color() {
   local selector_palette_mode="$2"
 
   USAGE_COLOR_ENABLED=0
-  (( use_fzf )) && color_enabled && USAGE_COLOR_ENABLED=1
-  if (( selector_palette_mode )) && color_enabled; then
+  if (( use_fzf || selector_palette_mode )) && color_enabled; then
     USAGE_COLOR_ENABLED=1
   fi
   return 0
