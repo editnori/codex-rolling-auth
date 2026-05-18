@@ -3022,19 +3022,40 @@ usage_display_status() {
     fi
   fi
 
-  if [[ "$mode" == "pico" || "$mode" == "nano" ]]; then
-    if (( stale_status )); then
+  if (( stale_status )); then
+    if [[ "$mode" == "pico" || "$mode" == "nano" ]]; then
       if [[ "$status" == *cap ]]; then
         printf 'cap'
       else
         printf 'old'
       fi
       return 0
-    fi
-    if usage_status_is_exact_cap "$status"; then
-      printf 'cap'
+    elif [[ "$mode" == "micro" || "$mode" == "tiny" ]]; then
+      if [[ "$status" == "ok" ]]; then
+        usage_stale_ok_label "$stale_age"
+      elif usage_status_is_exact_cap "$status"; then
+        printf 'cap'
+      else
+        printf 'stale'
+      fi
       return 0
     fi
+    if [[ "$status" == "ok" ]]; then
+      usage_stale_ok_label "$stale_age" 'old %s'
+    elif usage_status_is_exact_cap "$status"; then
+      printf 'old cap'
+    else
+      printf 'stale'
+    fi
+    return 0
+  fi
+
+  if usage_status_is_exact_cap "$status"; then
+    printf 'cap'
+    return 0
+  fi
+
+  if [[ "$mode" == "pico" || "$mode" == "nano" ]]; then
     case "$status" in
       ok)
         printf 'ok'
@@ -3056,20 +3077,6 @@ usage_display_status() {
   fi
 
   if [[ "$mode" == "micro" || "$mode" == "tiny" ]]; then
-    if (( stale_status )); then
-      if [[ "$status" == "ok" ]]; then
-        usage_stale_ok_label "$stale_age"
-      elif usage_status_is_exact_cap "$status"; then
-        printf 'cap'
-      else
-        printf 'stale'
-      fi
-      return 0
-    fi
-    if usage_status_is_exact_cap "$status"; then
-      printf 'cap'
-      return 0
-    fi
     case "$status" in
       ok)
         printf 'ready'
@@ -3084,22 +3091,6 @@ usage_display_status() {
         printf '%s' "$status"
         ;;
     esac
-    return 0
-  fi
-
-  if (( stale_status )); then
-    if [[ "$status" == "ok" ]]; then
-      usage_stale_ok_label "$stale_age" 'old %s'
-    elif usage_status_is_exact_cap "$status"; then
-      printf 'old cap'
-    else
-      printf 'stale'
-    fi
-    return 0
-  fi
-
-  if usage_status_is_exact_cap "$status"; then
-    printf 'cap'
     return 0
   fi
 
@@ -3545,6 +3536,57 @@ usage_summary_try_append() {
   fi
 }
 
+usage_summary_note_active_record() {
+  local valid="$1"
+  local mark="$2"
+  local profile="$3"
+  local weekly="$4"
+  local short="$5"
+  local short_label="$6"
+  local -n active_profile_ref="$7"
+  local -n active_short_ref="$8"
+  local -n active_weekly_ref="$9"
+  local -n active_label_ref="${10}"
+  local -n active_has_usage_ref="${11}"
+
+  [[ "$mark" == "*" ]] || return 0
+  active_profile_ref="$profile"
+  active_short_ref="$short"
+  active_weekly_ref="$weekly"
+  if [[ "$valid" == "0" && -n "$short" && "$short" != "-" ]]; then
+    [[ -n "$short_label" ]] && active_label_ref="$short_label"
+    active_has_usage_ref=1
+  elif [[ "$valid" == "0" && -n "$weekly" && "$weekly" != "-" ]]; then
+    active_short_ref="$weekly"
+    active_label_ref="wk"
+    active_has_usage_ref=1
+  fi
+}
+
+usage_summary_count_record_status() {
+  local valid="$1"
+  local status="$2"
+  local -n caps_ref="$3"
+  local -n login_ref="$4"
+  local -n unavailable_ref="$5"
+  local -n offline_ref="$6"
+  local -n stale_ref="$7"
+  local -n ready_ref="$8"
+
+  [[ "$status" == stale* ]] && stale_ref=$((stale_ref + 1))
+  if [[ "$status" == "offline" ]]; then
+    offline_ref=$((offline_ref + 1))
+  elif [[ "$status" == "login" ]]; then
+    login_ref=$((login_ref + 1))
+  elif [[ "$valid" != "0" || "$status" == "no data" || "$status" == "no usage" ]]; then
+    unavailable_ref=$((unavailable_ref + 1))
+  elif [[ "$status" == *cap* ]]; then
+    caps_ref=$((caps_ref + 1))
+  elif [[ "$status" == "ok" ]]; then
+    ready_ref=$((ready_ref + 1))
+  fi
+}
+
 usage_summary_scan_records() {
   local default_profile="${1:-}"
   shift || true
@@ -3562,32 +3604,10 @@ usage_summary_scan_records() {
     if [[ "$cache_age" =~ ^[0-9]+$ ]] && (( cache_age > cache_age_max )); then
       cache_age_max="$cache_age"
     fi
-    if [[ "$mark" == "*" ]]; then
-      active_profile="$profile"
-      active_short="$short"
-      active_weekly="$weekly"
-      if [[ "$valid" == "0" && -n "$short" && "$short" != "-" ]]; then
-        [[ -n "$short_label" ]] && active_label="$short_label"
-        active_has_usage=1
-      elif [[ "$valid" == "0" && -n "$weekly" && "$weekly" != "-" ]]; then
-        active_short="$weekly"
-        active_label="wk"
-        active_has_usage=1
-      fi
-    fi
+    usage_summary_note_active_record "$valid" "$mark" "$profile" "$weekly" "$short" "$short_label" \
+      active_profile active_short active_weekly active_label active_has_usage
     [[ -z "$best_profile" && "$status" == "ok" ]] && best_profile="$profile"
-    [[ "$status" == stale* ]] && stale=$((stale + 1))
-    if [[ "$status" == "offline" ]]; then
-      offline=$((offline + 1))
-    elif [[ "$status" == "login" ]]; then
-      login=$((login + 1))
-    elif [[ "$valid" != "0" || "$status" == "no data" || "$status" == "no usage" ]]; then
-      unavailable=$((unavailable + 1))
-    elif [[ "$status" == *cap* ]]; then
-      caps=$((caps + 1))
-    elif [[ "$status" == "ok" ]]; then
-      ready=$((ready + 1))
-    fi
+    usage_summary_count_record_status "$valid" "$status" caps login unavailable offline stale ready
   done
 
   [[ -n "$best_profile" ]] && has_best=1 || best_profile="none"
@@ -4277,6 +4297,131 @@ usage_limit_remaining_fields() {
   printf '%s\t%s%%\t%s\n' "$used" "$left" "$(format_reset_time "$reset")"
 }
 
+usage_record_extract_payload() {
+  local payload="$1"
+
+  jq -r '
+    (._codexAuthAgeSec // "") as $age
+    | (._codexAuthStale // false) as $stale
+    | if .error? != null then
+        [
+          "error",
+          ((.error.message // .error.data.message // .error.data.error.message // .error // "error")
+            | tostring
+            | gsub("[\n\t]+"; " ")
+            | gsub("  +"; " ")
+            | gsub("^ "; "")
+            | gsub(" $"; "")),
+          $age,
+          ($stale | tostring),
+          "", "", "", "", "", "", "", "", ""
+        ]
+      else
+        (.rateLimitsByLimitId.codex // .rateLimits // null) as $r
+        | if $r == null then
+            ["no_usage", "", $age, ($stale | tostring), "", "", "", "", "", "", "", "", ""]
+          else
+            def empty_limit:
+              {
+                used: 0,
+                window: "-",
+                window_num: 0,
+                reset: "-"
+              };
+            def limit_row:
+              {
+                used: ((.usedPercent // 0) | tonumber? // 0 | floor),
+                window: (.windowDurationMins // "-"),
+                window_num: ((.windowDurationMins // 0) | tonumber? // 0),
+                reset: (.resetsAt // "-")
+              };
+            [
+              ($r.primary // empty),
+              ($r.secondary // empty)
+            ]
+            | map(select(type == "object") | limit_row)
+            | map(select(.window_num > 0))
+            | sort_by(if .window_num == 0 then 999999999 else .window_num end) as $limits
+            | if ($limits | length) == 0 then
+                ["no_usage", "", $age, ($stale | tostring), "", "", "", "", "", "", "", "", ""]
+              else
+                (if ($limits | length) == 1 and ($limits[0].window_num >= 1440)
+                 then empty_limit
+                 else $limits[0]
+                 end) as $shortLimit
+                | (if ($limits | length) == 1 and ($limits[0].window_num < 1440)
+                   then empty_limit
+                   else $limits[-1]
+                   end) as $weeklyLimit
+                | [
+                    "usage",
+                    "",
+                    $age,
+                    ($stale | tostring),
+                    ($r.planType // "-"),
+                    $shortLimit.used,
+                    $shortLimit.window,
+                    $shortLimit.reset,
+                    $weeklyLimit.used,
+                    $weeklyLimit.window,
+                    $weeklyLimit.reset,
+                    (if $r.credits == null then "-"
+                     elif $r.credits.unlimited then "unlimited"
+                     elif $r.credits.hasCredits then ($r.credits.balance // "yes")
+                     else "0" end),
+                    ($r.rateLimitReachedType // "")
+                  ]
+              end
+          end
+      end
+    | map(tostring)
+    | join("\u001f")
+  ' <<<"$payload" 2>/dev/null || true
+}
+
+usage_record_error_status() {
+  local err="$1"
+
+  if [[ "$err" == *"token has been invalidated"* || "$err" == *"token_invalidated"* || "$err" == *"invalidated oauth token"* || "$err" == *"token_revoked"* ]]; then
+    printf 'login'
+  elif [[ "$err" == "refresh timeout" || "$err" == "refresh unavailable" || "$err" == "no response" ]]; then
+    printf 'offline'
+  else
+    printf '%s' "$err"
+  fi
+}
+
+usage_record_limit_status() {
+  local weekly_used="$1"
+  local short_used="$2"
+  local short_label="$3"
+  local reached="$4"
+  local stale="$5"
+  local cache_age="$6"
+  local status="ok"
+  local stale_age_label
+
+  if (( weekly_used >= 100 && short_used >= 100 )); then
+    status="week+5h cap"
+  elif (( weekly_used >= 100 )); then
+    status="week cap"
+  elif (( short_used >= 100 )); then
+    status="${short_label} cap"
+  elif [[ -n "$reached" ]]; then
+    status="$reached"
+  fi
+  if [[ "$stale" == "true" ]]; then
+    stale_age_label="$(format_cache_age "$cache_age")"
+    if [[ -n "$stale_age_label" ]]; then
+      status="stale $stale_age_label $status"
+    else
+      status="stale $status"
+    fi
+  fi
+
+  printf '%s' "$status"
+}
+
 usage_record_for_profile() {
   local profile_name="$1"
   local profile_file="$2"
@@ -4298,93 +4443,11 @@ usage_record_for_profile() {
   fi
 
   local extracted kind err cache_age stale plan short_used short_window short_reset weekly_used weekly_window weekly_reset credits reached
-  extracted="$(
-    jq -r '
-      (._codexAuthAgeSec // "") as $age
-      | (._codexAuthStale // false) as $stale
-      | if .error? != null then
-          [
-            "error",
-            ((.error.message // .error.data.message // .error.data.error.message // .error // "error")
-              | tostring
-              | gsub("[\n\t]+"; " ")
-              | gsub("  +"; " ")
-              | gsub("^ "; "")
-              | gsub(" $"; "")),
-            $age,
-            ($stale | tostring),
-            "", "", "", "", "", "", "", "", ""
-          ]
-        else
-	          (.rateLimitsByLimitId.codex // .rateLimits // null) as $r
-	          | if $r == null then
-	              ["no_usage", "", $age, ($stale | tostring), "", "", "", "", "", "", "", "", ""]
-	            else
-	              def empty_limit:
-	                {
-	                  used: 0,
-	                  window: "-",
-	                  window_num: 0,
-	                  reset: "-"
-	                };
-	              def limit_row:
-	                {
-	                  used: ((.usedPercent // 0) | tonumber? // 0 | floor),
-	                  window: (.windowDurationMins // "-"),
-	                  window_num: ((.windowDurationMins // 0) | tonumber? // 0),
-	                  reset: (.resetsAt // "-")
-	                };
-	              [
-	                ($r.primary // empty),
-	                ($r.secondary // empty)
-	              ]
-	              | map(select(type == "object") | limit_row)
-	              | map(select(.window_num > 0))
-	              | sort_by(if .window_num == 0 then 999999999 else .window_num end) as $limits
-	              | if ($limits | length) == 0 then
-	                  ["no_usage", "", $age, ($stale | tostring), "", "", "", "", "", "", "", "", ""]
-	                else
-	                  (if ($limits | length) == 1 and ($limits[0].window_num >= 1440)
-	                   then empty_limit
-	                   else $limits[0]
-	                   end) as $shortLimit
-	                  | (if ($limits | length) == 1 and ($limits[0].window_num < 1440)
-	                     then empty_limit
-	                     else $limits[-1]
-	                     end) as $weeklyLimit
-	                  | [
-	                      "usage",
-	                      "",
-	                      $age,
-	                      ($stale | tostring),
-	                      ($r.planType // "-"),
-	                      $shortLimit.used,
-	                      $shortLimit.window,
-	                      $shortLimit.reset,
-	                      $weeklyLimit.used,
-	                      $weeklyLimit.window,
-	                      $weeklyLimit.reset,
-	                      (if $r.credits == null then "-"
-	                       elif $r.credits.unlimited then "unlimited"
-	                       elif $r.credits.hasCredits then ($r.credits.balance // "yes")
-	                       else "0" end),
-	                      ($r.rateLimitReachedType // "")
-	                    ]
-	                end
-	            end
-        end
-      | map(tostring)
-      | join("\u001f")
-    ' <<<"$payload" 2>/dev/null || true
-  )"
+  extracted="$(usage_record_extract_payload "$payload")"
   IFS=$'\037' read -r kind err cache_age stale plan short_used short_window short_reset weekly_used weekly_window weekly_reset credits reached <<<"$extracted"
 
   if [[ "$kind" == "error" ]]; then
-    if [[ "$err" == *"token has been invalidated"* || "$err" == *"token_invalidated"* || "$err" == *"invalidated oauth token"* || "$err" == *"token_revoked"* ]]; then
-      err="login"
-    elif [[ "$err" == "refresh timeout" || "$err" == "refresh unavailable" || "$err" == "no response" ]]; then
-      err="offline"
-    fi
+    err="$(usage_record_error_status "$err")"
     printf '1\t-1\t-1\t%s\t%s\t-\t-\t-\t%s\t5h\t-\t-\t%s\n' "$mark" "$profile_name" "$err" "$cache_age"
     return 0
   fi
@@ -4398,24 +4461,7 @@ usage_record_for_profile() {
   short_label="$(window_label "$short_window")"
   IFS=$'\t' read -r short_used short short_reset_text <<<"$(usage_limit_remaining_fields "$short_used" "$short_window" "$short_reset")"
   IFS=$'\t' read -r weekly_used weekly weekly_reset_text <<<"$(usage_limit_remaining_fields "$weekly_used" "$weekly_window" "$weekly_reset")"
-  status="ok"
-  if (( weekly_used >= 100 && short_used >= 100 )); then
-    status="week+5h cap"
-  elif (( weekly_used >= 100 )); then
-    status="week cap"
-  elif (( short_used >= 100 )); then
-    status="${short_label} cap"
-  elif [[ -n "$reached" ]]; then
-    status="$reached"
-  fi
-  if [[ "$stale" == "true" ]]; then
-    stale_age_label="$(format_cache_age "$cache_age")"
-    if [[ -n "$stale_age_label" ]]; then
-      status="stale $stale_age_label $status"
-    else
-      status="stale $status"
-    fi
-  fi
+  status="$(usage_record_limit_status "$weekly_used" "$short_used" "$short_label" "$reached" "$stale" "$cache_age")"
 
   printf '0\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$weekly_used" "$short_used" "$mark" "$profile_name" "$plan" "$weekly" "$short" "$status" "$short_label" "$weekly_reset_text" "$short_reset_text" "$cache_age"
@@ -5320,38 +5366,34 @@ print_usage_frame_bottom() {
   usage_tone_reset
 }
 
+usage_summary_split_once() {
+  local text="$1"
+  local sep="$2"
+
+  if [[ "$text" == *"$sep"* ]]; then
+    printf '%s\t%s\n' "${text%%"$sep"*}" "${text#*"$sep"}"
+  else
+    printf '%s\t\n' "$text"
+  fi
+}
+
 print_usage_summary_block() {
   local summary="$1"
   local total_w="$2"
   local title="${3:-}"
-  local sep first rest best_subject active_part pool_part pool_head candidate value_candidate
+  local sep first rest best_subject active_part pool_part pool_head candidate value_candidate next_part
   local frame=0 body_w="$total_w"
 
   sep="$(usage_separator)"
-  first="$summary"
-  rest=""
-  if [[ "$summary" == *"$sep"* ]]; then
-    first="${summary%%"$sep"*}"
-    rest="${summary#*"$sep"}"
-  fi
-  if [[ ( "$first" == "best" || "$first" == "best active" ) && -n "$rest" ]]; then
-    if [[ "$rest" == *"$sep"* ]]; then
-      first="$first ${rest%%"$sep"*}"
-      rest="${rest#*"$sep"}"
-    else
-      first="$first $rest"
-      rest=""
-    fi
-  fi
-  if [[ "$first" == "best is active" && -n "$rest" ]]; then
-    if [[ "$rest" == *"$sep"* ]]; then
-      first="$first ${rest%%"$sep"*}"
-      rest="${rest#*"$sep"}"
-    else
-      first="$first $rest"
-      rest=""
-    fi
-  fi
+  IFS=$'\t' read -r first rest <<<"$(usage_summary_split_once "$summary" "$sep")"
+  case "$first" in
+    best|"best active"|"best is active")
+      if [[ -n "$rest" ]]; then
+        IFS=$'\t' read -r next_part rest <<<"$(usage_summary_split_once "$rest" "$sep")"
+        first="$first $next_part"
+      fi
+      ;;
+  esac
   if [[ "$first" == "best active "* ]]; then
     best_subject="${first#best active }"
     first="best $best_subject"
@@ -5363,24 +5405,14 @@ print_usage_summary_block() {
   active_part=""
   pool_part="$rest"
   if [[ -n "$pool_part" ]]; then
-    pool_head="$pool_part"
-    if [[ "$pool_part" == *"$sep"* ]]; then
-      pool_head="${pool_part%%"$sep"*}"
-    fi
+    IFS=$'\t' read -r pool_head next_part <<<"$(usage_summary_split_once "$pool_part" "$sep")"
     if [[ "$pool_head" == "active "* || "$pool_head" == "no active" ]]; then
       active_part="$pool_head"
-      if [[ "$pool_part" == *"$sep"* ]]; then
-        pool_part="${pool_part#*"$sep"}"
-      else
-        pool_part=""
-      fi
+      pool_part="$next_part"
     fi
   fi
   if [[ -n "$pool_part" && -z "$active_part" ]]; then
-    pool_head="$pool_part"
-    if [[ "$pool_part" == *"$sep"* ]]; then
-      pool_head="${pool_part%%"$sep"*}"
-    fi
+    IFS=$'\t' read -r pool_head next_part <<<"$(usage_summary_split_once "$pool_part" "$sep")"
     case "$pool_head" in
       ready*|capped*|cap*|login*|"no data"*|offline*|stale*|cache*)
         ;;
@@ -5390,11 +5422,7 @@ print_usage_summary_block() {
         [[ "$candidate" == "best "* ]] && value_candidate="${candidate#best }"
         if (( ${#value_candidate} <= total_w - 7 )); then
           first="$candidate"
-          if [[ "$pool_part" == *"$sep"* ]]; then
-            pool_part="${pool_part#*"$sep"}"
-          else
-            pool_part=""
-          fi
+          pool_part="$next_part"
         fi
         ;;
     esac
@@ -5905,33 +5933,11 @@ print_palette_summary_header() {
   fi
 }
 
-selector_fzf_menu() {
-  local -n rows_ref="$1"
-  local summary_text="$2"
-  local total_w="$3"
-  local role_w="$4"
-  local profile_w="$5"
-  local cell_w="$6"
-  local status_w="$7"
-  local mode="$8"
-  local selector_palette_mode="$9"
-  local fzf_height fzf_height_arg choice kind action profile_choice fzf_prompt fzf_pointer fzf_header term_lines max_height
-  local fzf_vertical_padding=0
-  local fzf_outer_top_padding=0
-  local fzf_pad_i=0
-  local fzf_header_line fzf_header_line_count=1
-  local fzf_color_args=()
-  local fzf_border_args=()
-  local fzf_margin_args=()
-  local fzf_padding_args=()
-  local fzf_ellipsis_args=()
-  local fzf_header_args=()
-  local fzf_layout_args=(--layout=reverse)
-  local fzf_opencode_theme=0
-  local selector_controls
-  local selector_control_sep
+selector_fzf_base_height() {
+  local row_count="$1"
+  local fzf_height=$((row_count + 8))
+  local term_lines max_height
 
-  fzf_height=$(( ${#rows_ref[@]} + 8 ))
   (( fzf_height < 12 )) && fzf_height=12
   term_lines="${LINES:-}"
   [[ "$term_lines" =~ ^[0-9]+$ ]] || term_lines="$(tput lines 2>/dev/null || true)"
@@ -5942,23 +5948,38 @@ selector_fzf_menu() {
   elif (( fzf_height > 24 )); then
     fzf_height=24
   fi
+
+  printf '%s\t%s\n' "$fzf_height" "$term_lines"
+}
+
+selector_fzf_theme_color() {
+  local selector_palette_mode="$1"
+  local color_arg=""
+  local opencode_theme=0
+
   if [[ -n "${CODEX_AUTH_FZF_THEME:-}" ]]; then
     if [[ "$CODEX_AUTH_FZF_THEME" == "codex" || "$CODEX_AUTH_FZF_THEME" == "1" ]]; then
-      fzf_color_args+=(--color="$(selector_palette_fzf_colors)")
-      fzf_opencode_theme=1
+      color_arg="$(selector_palette_fzf_colors)"
+      opencode_theme=1
     else
-      fzf_color_args+=(--color="$CODEX_AUTH_FZF_THEME")
+      color_arg="$CODEX_AUTH_FZF_THEME"
     fi
   elif (( selector_palette_mode )); then
     if usage_color_active; then
-      fzf_color_args+=(--color="$(selector_palette_fzf_colors)")
+      color_arg="$(selector_palette_fzf_colors)"
     else
-      fzf_color_args+=(--color=bw)
+      color_arg="bw"
     fi
-    fzf_opencode_theme=1
+    opencode_theme=1
   fi
-  fzf_height_arg="~$fzf_height"
-  fzf_ellipsis_args+=(--ellipsis='')
+
+  printf '%s\t%s\n' "$color_arg" "$opencode_theme"
+}
+
+selector_fzf_controls() {
+  local total_w="$1"
+  local fzf_prompt fzf_pointer selector_control_sep selector_controls
+
   if usage_unicode_enabled; then
     fzf_prompt='filter ▸ '
     fzf_pointer='▸'
@@ -5973,52 +5994,123 @@ selector_fzf_menu() {
   else
     selector_controls="enter select${selector_control_sep}esc stay${selector_control_sep}type filter"
   fi
+
+  printf '%s\t%s\t%s\n' "$fzf_prompt" "$fzf_pointer" "$selector_controls"
+}
+
+selector_fzf_apply_frame() {
+  local fzf_opencode_theme="$1"
+  local total_w="$2"
+  local -n fzf_prompt_ref="$3"
+  local -n fzf_pointer_ref="$4"
+  local -n fzf_border_args_ref="$5"
+  local -n fzf_margin_args_ref="$6"
+
   if (( fzf_opencode_theme )); then
     local palette_effective_w right_margin terminal_w
-    fzf_pointer=' '
-    fzf_prompt='filter '
+    fzf_pointer_ref=' '
+    fzf_prompt_ref='filter '
     terminal_w="$(terminal_width)"
     palette_effective_w="$(selector_palette_effective_width "$total_w")"
     right_margin=$((terminal_w - palette_effective_w - 4))
     if (( right_margin > 0 )); then
-      fzf_margin_args+=(--margin="0,$right_margin,0,0")
+      fzf_margin_args_ref+=(--margin="0,$right_margin,0,0")
     fi
-    fzf_border_args+=(--border=none)
+    fzf_border_args_ref+=(--border=none)
   else
-    fzf_border_args+=(--border=rounded --border-label=' auth profiles ' --border-label-pos=3)
+    fzf_border_args_ref+=(--border=rounded --border-label=' auth profiles ' --border-label-pos=3)
   fi
+}
+
+selector_fzf_prepare_header() {
+  local -n header_rows_ref="$1"
+  local summary_text="$2"
+  local selector_controls="$3"
+  local total_w="$4"
+  local role_w="$5"
+  local profile_w="$6"
+  local cell_w="$7"
+  local status_w="$8"
+  local mode="$9"
+  local fzf_opencode_theme="${10}"
+  local term_lines="${11}"
+  local -n fzf_header_ref="${12}"
+  local -n fzf_height_ref="${13}"
+  local -n fzf_height_arg_ref="${14}"
+  local -n fzf_outer_top_padding_ref="${15}"
+  local -n fzf_header_line_count_ref="${16}"
+  local -n fzf_padding_args_ref="${17}"
+  local -n fzf_header_args_ref="${18}"
+  local fzf_header_line max_height fzf_vertical_padding=0
+
   if (( fzf_opencode_theme )); then
-    fzf_header="$(selector_palette_header_text "$summary_text" "$selector_controls" "$total_w")"
-    fzf_header_line_count=0
+    fzf_header_ref="$(selector_palette_header_text "$summary_text" "$selector_controls" "$total_w")"
+    fzf_header_line_count_ref=0
     while IFS= read -r fzf_header_line; do
-      fzf_header_line_count=$((fzf_header_line_count + 1))
-    done <<<"$fzf_header"
-    (( fzf_header_line_count < 1 )) && fzf_header_line_count=1
-    fzf_height=$(( ${#rows_ref[@]} + fzf_header_line_count + 1 ))
+      fzf_header_line_count_ref=$((fzf_header_line_count_ref + 1))
+    done <<<"$fzf_header_ref"
+    (( fzf_header_line_count_ref < 1 )) && fzf_header_line_count_ref=1
+    fzf_height_ref=$(( ${#header_rows_ref[@]} + fzf_header_line_count_ref + 1 ))
     if [[ "$term_lines" =~ ^[0-9]+$ ]]; then
       max_height=$((term_lines - 2))
       (( max_height < 6 )) && max_height=6
-      if (( fzf_height + 2 <= max_height )); then
-        fzf_height=$((fzf_height + 2))
+      if (( fzf_height_ref + 2 <= max_height )); then
+        fzf_height_ref=$((fzf_height_ref + 2))
         fzf_vertical_padding=1
       fi
-      (( fzf_height > max_height )) && fzf_height="$max_height"
-    elif (( fzf_height < 22 )); then
-      fzf_height=$((fzf_height + 2))
+      (( fzf_height_ref > max_height )) && fzf_height_ref="$max_height"
+    elif (( fzf_height_ref < 22 )); then
+      fzf_height_ref=$((fzf_height_ref + 2))
       fzf_vertical_padding=1
     fi
     if (( fzf_vertical_padding )); then
-      fzf_padding_args+=(--padding=1,0,1,0)
+      fzf_padding_args_ref+=(--padding=1,0,1,0)
     fi
-    if [[ "${CODEX_AUTH_SELECTOR_CENTER:-0}" == "1" && "$term_lines" =~ ^[0-9]+$ ]] && (( term_lines > fzf_height + 1 )); then
-      fzf_outer_top_padding=$(((term_lines - fzf_height) / 2))
+    if [[ "${CODEX_AUTH_SELECTOR_CENTER:-0}" == "1" && "$term_lines" =~ ^[0-9]+$ ]] && (( term_lines > fzf_height_ref + 1 )); then
+      fzf_outer_top_padding_ref=$(((term_lines - fzf_height_ref) / 2))
     fi
-    fzf_height_arg="~$fzf_height"
-    fzf_header_args+=(--header-lines="$fzf_header_line_count" --header-first)
+    fzf_height_arg_ref="~$fzf_height_ref"
+    fzf_header_args_ref+=(--header-lines="$fzf_header_line_count_ref" --header-first)
   else
-    fzf_header="$(selector_header_text "$summary_text" "$selector_controls" "$role_w" "$profile_w" "$cell_w" "$status_w" "$total_w" "$mode")"
-    fzf_header_args+=(--header="$fzf_header")
+    fzf_header_ref="$(selector_header_text "$summary_text" "$selector_controls" "$role_w" "$profile_w" "$cell_w" "$status_w" "$total_w" "$mode")"
+    fzf_header_args_ref+=(--header="$fzf_header_ref")
   fi
+}
+
+selector_fzf_menu() {
+  local -n rows_ref="$1"
+  local summary_text="$2"
+  local total_w="$3"
+  local role_w="$4"
+  local profile_w="$5"
+  local cell_w="$6"
+  local status_w="$7"
+  local mode="$8"
+  local selector_palette_mode="$9"
+  local fzf_height fzf_height_arg choice kind action profile_choice fzf_prompt fzf_pointer fzf_header term_lines
+  local fzf_outer_top_padding=0
+  local fzf_pad_i=0
+  local fzf_header_line_count=1
+  local fzf_color_args=()
+  local fzf_border_args=()
+  local fzf_margin_args=()
+  local fzf_padding_args=()
+  local fzf_ellipsis_args=()
+  local fzf_header_args=()
+  local fzf_layout_args=(--layout=reverse)
+  local fzf_opencode_theme=0
+  local selector_controls
+  local fzf_color_arg
+
+  IFS=$'\t' read -r fzf_height term_lines <<<"$(selector_fzf_base_height "${#rows_ref[@]}")"
+  IFS=$'\t' read -r fzf_color_arg fzf_opencode_theme <<<"$(selector_fzf_theme_color "$selector_palette_mode")"
+  [[ -n "$fzf_color_arg" ]] && fzf_color_args+=(--color="$fzf_color_arg")
+  fzf_height_arg="~$fzf_height"
+  fzf_ellipsis_args+=(--ellipsis='')
+  IFS=$'\t' read -r fzf_prompt fzf_pointer selector_controls <<<"$(selector_fzf_controls "$total_w")"
+  selector_fzf_apply_frame "$fzf_opencode_theme" "$total_w" fzf_prompt fzf_pointer fzf_border_args fzf_margin_args
+  selector_fzf_prepare_header rows_ref "$summary_text" "$selector_controls" "$total_w" "$role_w" "$profile_w" "$cell_w" "$status_w" "$mode" \
+    "$fzf_opencode_theme" "$term_lines" fzf_header fzf_height fzf_height_arg fzf_outer_top_padding fzf_header_line_count fzf_padding_args fzf_header_args
 
   for ((fzf_pad_i = 0; fzf_pad_i < fzf_outer_top_padding; fzf_pad_i++)); do
     printf '\n'
@@ -6789,6 +6881,117 @@ active_auth_fingerprint() {
   printf '%s' "${active_meta[2]:-}"
 }
 
+usage_maybe_acquire_refresh_lock() {
+  local profile_count="$1"
+  local -n refresh_lock_held_ref="$2"
+  local refresh_lock_wait
+
+  if [[ "$USAGE_REFRESH" == "1" && "$USAGE_QUIET" != "1" && -t 2 ]]; then
+    print_status_note refresh "$profile_count profiles" >&2
+  fi
+  if [[ "$USAGE_REFRESH" == "1" ]]; then
+    exec 8>"$CODEX_HOME/.tmp/codex-auth-refresh.lock"
+    refresh_lock_wait="${CODEX_AUTH_REFRESH_LOCK_WAIT:-1}"
+    [[ "$refresh_lock_wait" =~ ^[0-9]+$ ]] || refresh_lock_wait=1
+    if ! flock -w "$refresh_lock_wait" 8; then
+      [[ "$USAGE_QUIET" == "1" ]] || print_status_note cache "refresh busy" >&2
+      USAGE_REFRESH=0
+      USAGE_CACHED=1
+    else
+      refresh_lock_held_ref=1
+    fi
+  fi
+}
+
+usage_collect_records_for_mode() {
+  local active_fp="$1"
+  shift
+
+  if [[ "$USAGE_CACHED" == "1" && "$USAGE_REFRESH" != "1" ]]; then
+    collect_usage_records_cached "$active_fp" "$@"
+  elif [[ "$USAGE_REFRESH" == "1" && "$USAGE_FAST_REFRESH" != "1" ]]; then
+    collect_usage_records_synced "$active_fp" "$@"
+  else
+    collect_usage_records "$active_fp" "$@"
+  fi
+}
+
+usage_best_selection() {
+  local records="$1"
+  local best_profile best_mark best_week best_short
+  local default_profile=""
+  local active_is_best=0
+
+  IFS=$'\t' read -r best_profile best_mark best_week best_short <<<"$(find_best_ok_profile "$records" 1)"
+  if [[ -n "$best_profile" ]]; then
+    if [[ "$best_mark" == "*" ]]; then
+      active_is_best=1
+    else
+      default_profile="$best_profile"
+    fi
+  fi
+
+  printf '%s\t%s\n' "$default_profile" "$active_is_best"
+}
+
+usage_render_or_prepare() {
+  local records="$1"
+  local default_profile="$2"
+  local active_is_best="$3"
+  local -n rendered_output_ref="$4"
+
+  rendered_output_ref=0
+  if [[ "$USAGE_SELECT" == "1" ]]; then
+    prepare_usage_records "$records" "$default_profile"
+  elif [[ "$USAGE_QUIET" != "1" ]]; then
+    render_usage_records "$records" "$default_profile" "$active_is_best"
+    rendered_output_ref=1
+  fi
+}
+
+usage_auto_switch_result() {
+  local rendered_output="$1"
+  local default_profile="$2"
+  local active_is_best="$3"
+
+  if (( rendered_output )); then
+    printf '\n'
+  fi
+  if [[ -n "$default_profile" ]]; then
+    cmd_use "$default_profile"
+  elif [[ "$active_is_best" == "1" && "$USAGE_QUIET" != "1" ]]; then
+    print_status_note ready "already on best profile"
+  elif [[ "$USAGE_QUIET" != "1" ]]; then
+    print_status_note blocked "no ready profile"
+  fi
+}
+
+usage_handle_menu_action() {
+  case "$MENU_ACTION" in
+    login)
+      local refreshed_profile="$MENU_PROFILE"
+      cmd_login "$refreshed_profile"
+      printf '\n'
+      print_status_note refresh "$refreshed_profile"
+      refresh_active_profile_state "$refreshed_profile" || true
+      USAGE_REFRESH=0
+      USAGE_CACHED=1
+      return 1
+      ;;
+    blocked)
+      print_status_note blocked "choose switch/login/skip"
+      return 0
+      ;;
+    switch)
+      cmd_use "$MENU_PROFILE"
+      return 0
+      ;;
+    skip|*)
+      return 0
+      ;;
+  esac
+}
+
 cmd_usage() {
   ensure_dirs
   command -v jq >/dev/null 2>&1 || die "jq is required for usage output"
@@ -6811,71 +7014,27 @@ cmd_usage() {
     [[ "$USAGE_QUIET" == "1" ]] || print_empty_profiles
     return 0
   fi
-  if [[ "$USAGE_REFRESH" == "1" && "$USAGE_QUIET" != "1" && -t 2 ]]; then
-    print_status_note refresh "${#profile_files[@]} profiles" >&2
-  fi
-  if [[ "$USAGE_REFRESH" == "1" ]]; then
-    exec 8>"$CODEX_HOME/.tmp/codex-auth-refresh.lock"
-    local refresh_lock_wait
-    refresh_lock_wait="${CODEX_AUTH_REFRESH_LOCK_WAIT:-1}"
-    [[ "$refresh_lock_wait" =~ ^[0-9]+$ ]] || refresh_lock_wait=1
-    if ! flock -w "$refresh_lock_wait" 8; then
-      [[ "$USAGE_QUIET" == "1" ]] || print_status_note cache "refresh busy" >&2
-      USAGE_REFRESH=0
-      USAGE_CACHED=1
-    else
-      refresh_lock_held=1
-    fi
-  fi
+  usage_maybe_acquire_refresh_lock "${#profile_files[@]}" refresh_lock_held
 
   while true; do
     local active_fp
     active_fp="$(active_auth_fingerprint)"
 
     local records=""
-    if [[ "$USAGE_CACHED" == "1" && "$USAGE_REFRESH" != "1" ]]; then
-      records="$(collect_usage_records_cached "$active_fp" "${profile_files[@]}")"
-    elif [[ "$USAGE_REFRESH" == "1" && "$USAGE_FAST_REFRESH" != "1" ]]; then
-      records="$(collect_usage_records_synced "$active_fp" "${profile_files[@]}")"
-    else
-      records="$(collect_usage_records "$active_fp" "${profile_files[@]}")"
-    fi
+    records="$(usage_collect_records_for_mode "$active_fp" "${profile_files[@]}")"
     if (( refresh_lock_held )); then
       flock -u 8 2>/dev/null || true
       refresh_lock_held=0
     fi
 
-    local best_profile best_mark best_week best_short default_profile active_is_best
-    IFS=$'\t' read -r best_profile best_mark best_week best_short <<<"$(find_best_ok_profile "$records" 1)"
-    default_profile=""
-    active_is_best=0
-    if [[ -n "$best_profile" ]]; then
-      if [[ "$best_mark" == "*" ]]; then
-        active_is_best=1
-      else
-        default_profile="$best_profile"
-      fi
-    fi
+    local default_profile active_is_best
+    IFS=$'\t' read -r default_profile active_is_best <<<"$(usage_best_selection "$records")"
 
     local rendered_output=0
-    if [[ "$USAGE_SELECT" == "1" ]]; then
-      prepare_usage_records "$records" "$default_profile"
-    elif [[ "$USAGE_QUIET" != "1" ]]; then
-      render_usage_records "$records" "$default_profile" "$active_is_best"
-      rendered_output=1
-    fi
+    usage_render_or_prepare "$records" "$default_profile" "$active_is_best" rendered_output
 
     if (( auto_switch )); then
-      if (( rendered_output )); then
-        printf '\n'
-      fi
-      if [[ -n "$default_profile" ]]; then
-        cmd_use "$default_profile"
-      elif [[ "$active_is_best" == "1" && "$USAGE_QUIET" != "1" ]]; then
-        print_status_note ready "already on best profile"
-      elif [[ "$USAGE_QUIET" != "1" ]]; then
-        print_status_note blocked "no ready profile"
-      fi
+      usage_auto_switch_result "$rendered_output" "$default_profile" "$active_is_best"
       return 0
     fi
 
@@ -6884,28 +7043,9 @@ cmd_usage() {
     fi
 
     arrow_action_menu "$default_profile" "${SORTED_USAGE_RECORDS[@]}"
-    case "$MENU_ACTION" in
-      login)
-        local refreshed_profile="$MENU_PROFILE"
-        cmd_login "$refreshed_profile"
-        printf '\n'
-        print_status_note refresh "$refreshed_profile"
-        refresh_active_profile_state "$refreshed_profile" || true
-        USAGE_REFRESH=0
-        USAGE_CACHED=1
-        ;;
-      blocked)
-        print_status_note blocked "choose switch/login/skip"
-        return 0
-        ;;
-      switch)
-        cmd_use "$MENU_PROFILE"
-        return 0
-        ;;
-      skip|*)
-        return 0
-        ;;
-    esac
+    if usage_handle_menu_action; then
+      return 0
+    fi
   done
 }
 
