@@ -2962,6 +2962,142 @@ print_usage_limit_cell() {
   return 0
 }
 
+usage_reset_prefix_width() {
+  local reset_w="$1"
+
+  if (( reset_w > 0 )) && usage_unicode_enabled; then
+    printf '1'
+  else
+    printf '0'
+  fi
+}
+
+usage_cell_overhead() {
+  local mode="$1"
+  local label_w="$2"
+  local reset_w="$3"
+  local reset_prefix_w="$4"
+
+  if [[ "$mode" == "pico" ]]; then
+    printf '%s' "$label_w"
+  elif (( reset_w > 0 )); then
+    printf '%s' "$((label_w + 2 + reset_w + reset_prefix_w))"
+  else
+    printf '%s' "$((label_w + 1))"
+  fi
+}
+
+usage_max_profile_width() {
+  local cols="$1"
+  local role_w="$2"
+  local status_min="$3"
+  local cell_overhead="$4"
+  local min_bar_w="$5"
+  local gap_w="$6"
+
+  printf '%s' "$(( cols - role_w - status_min - (2 * (cell_overhead + min_bar_w)) - gap_w ))"
+}
+
+usage_tight_width_fallback() {
+  local cols="$1"
+  local role_w="$2"
+  local status_min="$3"
+  local min_bar_w="$4"
+  local gap_w="$5"
+  local mode="tight"
+  local reset_w=5
+  local label_w=4
+  local reset_prefix_w cell_overhead max_profile_w
+
+  reset_prefix_w="$(usage_reset_prefix_width "$reset_w")"
+  cell_overhead="$(usage_cell_overhead "$mode" "$label_w" "$reset_w" "$reset_prefix_w")"
+  max_profile_w="$(usage_max_profile_width "$cols" "$role_w" "$status_min" "$cell_overhead" "$min_bar_w" "$gap_w")"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$mode" "$reset_w" "$label_w" "$reset_prefix_w" "$cell_overhead" "$max_profile_w"
+}
+
+usage_initial_metric_widths() {
+  local cols="$1"
+  local role_w="$2"
+  local profile_w="$3"
+  local status_min="$4"
+  local gap_w="$5"
+  local cell_overhead="$6"
+  local min_bar_w="$7"
+  local max_bar_w="$8"
+  local available cell_w bar_width status_w
+
+  available=$(( cols - role_w - profile_w - status_min - gap_w ))
+  cell_w=$(( available / 2 ))
+  bar_width=$(( cell_w - cell_overhead ))
+  bar_width="$(clamp_int_between "$bar_width" "$min_bar_w" "$max_bar_w")"
+  cell_w=$(( bar_width + cell_overhead ))
+  status_w=$(( cols - role_w - profile_w - cell_w - cell_w - gap_w ))
+  printf '%s\t%s\t%s\n' "$cell_w" "$bar_width" "$status_w"
+}
+
+usage_fit_status_widths() {
+  local -n profile_w_ref="$1"
+  local -n cell_w_ref="$2"
+  local -n bar_width_ref="$3"
+  local -n status_w_ref="$4"
+  local cols="$5"
+  local role_w="$6"
+  local profile_min="$7"
+  local status_min="$8"
+  local gap_w="$9"
+  local cell_overhead="${10}"
+  local min_bar_w="${11}"
+
+  while (( status_w_ref < status_min && bar_width_ref > min_bar_w )); do
+    bar_width_ref=$((bar_width_ref - 1))
+    cell_w_ref=$(( bar_width_ref + cell_overhead ))
+    status_w_ref=$(( cols - role_w - profile_w_ref - cell_w_ref - cell_w_ref - gap_w ))
+  done
+  while (( status_w_ref < status_min && profile_w_ref > profile_min )); do
+    profile_w_ref=$((profile_w_ref - 1))
+    status_w_ref=$(( cols - role_w - profile_w_ref - cell_w_ref - cell_w_ref - gap_w ))
+  done
+  (( status_w_ref < status_min )) && status_w_ref="$status_min"
+  return 0
+}
+
+usage_status_max_width() {
+  local cols="$1"
+  local row row_verbose threshold max_w
+  local rows=(
+    "1 94 16"
+    "1 72 14"
+    "0 60 13"
+    "0 50 9"
+  )
+
+  for row in "${rows[@]}"; do
+    read -r row_verbose threshold max_w <<<"$row"
+    if (( USAGE_VERBOSE == row_verbose && cols >= threshold )); then
+      printf '%s' "$max_w"
+      return 0
+    fi
+  done
+  printf '0'
+}
+
+usage_render_status_width() {
+  local show_status="$1"
+  local cols="$2"
+  local status_w="$3"
+  local status_max
+
+  if [[ "$show_status" != "1" ]]; then
+    printf '0'
+    return 0
+  fi
+  status_max="$(usage_status_max_width "$cols")"
+  if (( status_max > 0 && status_w > status_max )); then
+    status_w="$status_max"
+  fi
+  printf '%s' "$status_w"
+}
+
 usage_render_widths() {
   local cols="$1"
   local mode role_w
@@ -2985,73 +3121,18 @@ usage_render_widths() {
   if (( ! USAGE_VERBOSE )); then
     reset_w=0
   fi
-  if (( reset_w > 0 )) && usage_unicode_enabled; then
-    reset_prefix_w=1
-  fi
-  if [[ "$mode" == "pico" ]]; then
-    cell_overhead="$label_w"
-  elif (( reset_w > 0 )); then
-    cell_overhead=$((label_w + 2 + reset_w + reset_prefix_w))
-  else
-    cell_overhead=$((label_w + 1))
-  fi
+  reset_prefix_w="$(usage_reset_prefix_width "$reset_w")"
+  cell_overhead="$(usage_cell_overhead "$mode" "$label_w" "$reset_w" "$reset_prefix_w")"
 
-  max_profile_w=$(( cols - role_w - status_min - (2 * (cell_overhead + min_bar_w)) - gap_w ))
+  max_profile_w="$(usage_max_profile_width "$cols" "$role_w" "$status_min" "$cell_overhead" "$min_bar_w" "$gap_w")"
   if (( max_profile_w < 12 && reset_w > 5 )); then
-    mode="tight"
-    reset_w=5
-    label_w=4
-    if usage_unicode_enabled; then
-      reset_prefix_w=1
-    else
-      reset_prefix_w=0
-    fi
-    if (( reset_w > 0 )); then
-      cell_overhead=$((label_w + 2 + reset_w + reset_prefix_w))
-    else
-      cell_overhead=$((label_w + 1))
-    fi
-    max_profile_w=$(( cols - role_w - status_min - (2 * (cell_overhead + min_bar_w)) - gap_w ))
+    IFS=$'\t' read -r mode reset_w label_w reset_prefix_w cell_overhead max_profile_w <<<"$(usage_tight_width_fallback "$cols" "$role_w" "$status_min" "$min_bar_w" "$gap_w")"
   fi
 
-  profile_w="$wanted_profile_w"
-  (( profile_w > max_profile_w )) && profile_w="$max_profile_w"
-  (( profile_w < profile_min )) && profile_w="$profile_min"
-
-  available=$(( cols - role_w - profile_w - status_min - gap_w ))
-  cell_w=$(( available / 2 ))
-  bar_width=$(( cell_w - cell_overhead ))
-  (( bar_width < min_bar_w )) && bar_width="$min_bar_w"
-  (( bar_width > max_bar_w )) && bar_width="$max_bar_w"
-  cell_w=$(( bar_width + cell_overhead ))
-  status_w=$(( cols - role_w - profile_w - cell_w - cell_w - gap_w ))
-  while (( status_w < status_min && bar_width > min_bar_w )); do
-    bar_width=$((bar_width - 1))
-    cell_w=$(( bar_width + cell_overhead ))
-    status_w=$(( cols - role_w - profile_w - cell_w - cell_w - gap_w ))
-  done
-  while (( status_w < status_min && profile_w > profile_min )); do
-    profile_w=$((profile_w - 1))
-    status_w=$(( cols - role_w - profile_w - cell_w - cell_w - gap_w ))
-  done
-  (( status_w < status_min )) && status_w="$status_min"
-  status_max=0
-  if [[ "$show_status" != "1" ]]; then
-    status_w=0
-  elif (( USAGE_VERBOSE )); then
-    if (( cols >= 94 )); then
-      status_max=16
-    elif (( cols >= 72 )); then
-      status_max=14
-    fi
-  else
-    if (( cols >= 60 )); then
-      status_max=13
-    elif (( cols >= 50 )); then
-      status_max=9
-    fi
-  fi
-  (( status_max > 0 && status_w > status_max )) && status_w="$status_max"
+  profile_w="$(clamp_int_between "$wanted_profile_w" "$profile_min" "$max_profile_w")"
+  IFS=$'\t' read -r cell_w bar_width status_w <<<"$(usage_initial_metric_widths "$cols" "$role_w" "$profile_w" "$status_min" "$gap_w" "$cell_overhead" "$min_bar_w" "$max_bar_w")"
+  usage_fit_status_widths profile_w cell_w bar_width status_w "$cols" "$role_w" "$profile_min" "$status_min" "$gap_w" "$cell_overhead" "$min_bar_w"
+  status_w="$(usage_render_status_width "$show_status" "$cols" "$status_w")"
 
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$mode" "$role_w" "$profile_w" "$cell_w" "$status_w" "$bar_width"
 }
@@ -5521,86 +5602,186 @@ usage_summary_split_once() {
   fi
 }
 
-print_usage_summary_block() {
-  local summary="$1"
-  local total_w="$2"
-  local title="${3:-}"
-  local sep first rest best_subject active_part pool_part pool_head candidate value_candidate next_part
-  local frame=0 body_w="$total_w"
+usage_summary_extend_best_head() {
+  local -n first_ref="$1"
+  local -n rest_ref="$2"
+  local sep="$3"
+  local next_part
 
-  sep="$(usage_separator)"
-  IFS=$'\t' read -r first rest <<<"$(usage_summary_split_once "$summary" "$sep")"
-  case "$first" in
+  case "$first_ref" in
     best|"best active"|"best is active")
-      if [[ -n "$rest" ]]; then
-        IFS=$'\t' read -r next_part rest <<<"$(usage_summary_split_once "$rest" "$sep")"
-        first="$first $next_part"
+      if [[ -n "$rest_ref" ]]; then
+        IFS=$'\t' read -r next_part rest_ref <<<"$(usage_summary_split_once "$rest_ref" "$sep")"
+        first_ref="$first_ref $next_part"
       fi
       ;;
   esac
-  if [[ "$first" == "best active "* ]]; then
-    best_subject="${first#best active }"
-    first="best $best_subject"
-  elif [[ "$first" == "best is active "* ]]; then
-    best_subject="${first#best is active }"
-    first="best $best_subject"
-  fi
+  return 0
+}
 
-  active_part=""
-  pool_part="$rest"
-  if [[ -n "$pool_part" ]]; then
-    IFS=$'\t' read -r pool_head next_part <<<"$(usage_summary_split_once "$pool_part" "$sep")"
+usage_summary_normalize_best_active() {
+  local -n first_ref="$1"
+  local best_subject
+
+  if [[ "$first_ref" == "best active "* ]]; then
+    best_subject="${first_ref#best active }"
+    first_ref="best $best_subject"
+  elif [[ "$first_ref" == "best is active "* ]]; then
+    best_subject="${first_ref#best is active }"
+    first_ref="best $best_subject"
+  fi
+  return 0
+}
+
+usage_summary_take_active_part() {
+  local -n active_ref="$1"
+  local -n pool_ref="$2"
+  local sep="$3"
+  local pool_head next_part
+
+  active_ref=""
+  if [[ -n "$pool_ref" ]]; then
+    IFS=$'\t' read -r pool_head next_part <<<"$(usage_summary_split_once "$pool_ref" "$sep")"
     if [[ "$pool_head" == "active "* || "$pool_head" == "no active" ]]; then
-      active_part="$pool_head"
-      pool_part="$next_part"
+      active_ref="$pool_head"
+      pool_ref="$next_part"
     fi
   fi
-  if [[ -n "$pool_part" && -z "$active_part" ]]; then
-    IFS=$'\t' read -r pool_head next_part <<<"$(usage_summary_split_once "$pool_part" "$sep")"
-    case "$pool_head" in
-      ready*|capped*|cap*|login*|"no data"*|offline*|stale*|cache*)
-        ;;
-      *)
-        candidate="$first $pool_head"
-        value_candidate="$candidate"
-        [[ "$candidate" == "best "* ]] && value_candidate="${candidate#best }"
-        if (( ${#value_candidate} <= total_w - 7 )); then
-          first="$candidate"
-          pool_part="$next_part"
-        fi
-        ;;
-    esac
+  return 0
+}
+
+usage_summary_merge_pool_subject() {
+  local -n first_ref="$1"
+  local -n active_ref="$2"
+  local -n pool_ref="$3"
+  local total_w="$4"
+  local sep="$5"
+  local pool_head next_part candidate value_candidate
+
+  [[ -n "$pool_ref" && -z "$active_ref" ]] || return 0
+  IFS=$'\t' read -r pool_head next_part <<<"$(usage_summary_split_once "$pool_ref" "$sep")"
+  case "$pool_head" in
+    ready*|capped*|cap*|login*|"no data"*|offline*|stale*|cache*)
+      return 0
+      ;;
+  esac
+
+  candidate="$first_ref $pool_head"
+  value_candidate="$candidate"
+  [[ "$candidate" == "best "* ]] && value_candidate="${candidate#best }"
+  if (( ${#value_candidate} <= total_w - 7 )); then
+    first_ref="$candidate"
+    pool_ref="$next_part"
   fi
+  return 0
+}
+
+usage_summary_parts() {
+  local summary="$1"
+  local total_w="$2"
+  local -n first_ref="$3"
+  local -n active_ref="$4"
+  local -n pool_ref="$5"
+  local sep
+
+  sep="$(usage_separator)"
+  IFS=$'\t' read -r first_ref pool_ref <<<"$(usage_summary_split_once "$summary" "$sep")"
+  usage_summary_extend_best_head first_ref pool_ref "$sep"
+  usage_summary_normalize_best_active first_ref
+  usage_summary_take_active_part active_ref pool_ref "$sep"
+  usage_summary_merge_pool_subject first_ref active_ref pool_ref "$total_w" "$sep"
+}
+
+print_usage_summary_title_frame() {
+  local title="$1"
+  local total_w="$2"
+  local -n frame_ref="$3"
+  local -n body_w_ref="$4"
 
   if [[ -n "$title" ]] && (( total_w >= 42 )); then
-    frame=1
-    body_w=$((total_w - 4))
+    frame_ref=1
+    body_w_ref=$((total_w - 4))
     print_usage_frame_top "$title" "$total_w"
   else
     print_usage_title_line "$title" "$total_w"
   fi
+  return 0
+}
+
+print_usage_summary_body_wide() {
+  local first="$1"
+  local active_part="$2"
+  local pool_part="$3"
+  local body_w="$4"
+  local frame="$5"
+  local total_w="$6"
+
+  selector_header_primary_line "$first" "$body_w" 7 "$frame" "$total_w"
+  if [[ -n "$active_part" ]]; then
+    selector_header_primary_line "$active_part" "$body_w" 7 "$frame" "$total_w"
+  fi
+  if [[ -n "$pool_part" ]]; then
+    selector_header_meta_line "stats" "$pool_part" "$body_w" 7 "$frame" "$total_w"
+  fi
+  (( frame )) && print_usage_frame_bottom "$total_w"
+  printf '\n'
+  return 0
+}
+
+print_usage_summary_body_medium() {
+  local first="$1"
+  local active_part="$2"
+  local body_w="$3"
+  local frame="$4"
+  local total_w="$5"
+
+  selector_header_primary_line "$first" "$body_w" 6 "$frame" "$total_w"
+  if [[ -n "$active_part" ]]; then
+    selector_header_primary_line "$active_part" "$body_w" 6 "$frame" "$total_w"
+  fi
+  (( frame )) && print_usage_frame_bottom "$total_w"
+  printf '\n'
+  return 0
+}
+
+print_usage_summary_body_compact() {
+  local first="$1"
+  local body_w="$2"
+  local frame="$3"
+  local total_w="$4"
+
+  selector_header_primary_line "$first" "$body_w" 5 "$frame" "$total_w"
+  (( frame )) && print_usage_frame_bottom "$total_w"
+  return 0
+}
+
+print_usage_summary_body() {
+  local first="$1"
+  local active_part="$2"
+  local pool_part="$3"
+  local body_w="$4"
+  local frame="$5"
+  local total_w="$6"
 
   if (( body_w >= 64 )); then
-    selector_header_primary_line "$first" "$body_w" 7 "$frame" "$total_w"
-    if [[ -n "$active_part" ]]; then
-      selector_header_primary_line "$active_part" "$body_w" 7 "$frame" "$total_w"
-    fi
-    if [[ -n "$pool_part" ]]; then
-      selector_header_meta_line "stats" "$pool_part" "$body_w" 7 "$frame" "$total_w"
-    fi
-    (( frame )) && print_usage_frame_bottom "$total_w"
-    printf '\n'
+    print_usage_summary_body_wide "$first" "$active_part" "$pool_part" "$body_w" "$frame" "$total_w"
   elif (( body_w >= 40 )); then
-    selector_header_primary_line "$first" "$body_w" 6 "$frame" "$total_w"
-    if [[ -n "$active_part" ]]; then
-      selector_header_primary_line "$active_part" "$body_w" 6 "$frame" "$total_w"
-    fi
-    (( frame )) && print_usage_frame_bottom "$total_w"
-    printf '\n'
+    print_usage_summary_body_medium "$first" "$active_part" "$body_w" "$frame" "$total_w"
   else
-    selector_header_primary_line "$first" "$body_w" 5 "$frame" "$total_w"
-    (( frame )) && print_usage_frame_bottom "$total_w"
+    print_usage_summary_body_compact "$first" "$body_w" "$frame" "$total_w"
   fi
+}
+
+print_usage_summary_block() {
+  local summary="$1"
+  local total_w="$2"
+  local title="${3:-}"
+  local first active_part pool_part
+  local frame=0 body_w="$total_w"
+
+  usage_summary_parts "$summary" "$total_w" first active_part pool_part
+  print_usage_summary_title_frame "$title" "$total_w" frame body_w
+  print_usage_summary_body "$first" "$active_part" "$pool_part" "$body_w" "$frame" "$total_w"
   return 0
 }
 
@@ -6658,46 +6839,37 @@ selector_current_menu_row() {
   printf 'action\tskip\t-\t%s\n' "$display"
 }
 
-arrow_action_menu() {
-  local default_profile="${1:-}"
-  shift
-  local records=("$@")
+selector_prompt_available() {
+  [[ "${CODEX_AUTH_NO_PROMPT:-}" != "1" ]] || return 1
+  [[ -t 0 && -t 1 && -r /dev/tty ]]
+}
 
-  MENU_ACTION="skip"
-  MENU_PROFILE=""
+selector_fzf_available() {
+  command -v fzf >/dev/null 2>&1 || return 1
+  [[ "${CODEX_AUTH_NO_FZF:-}" != "1" ]]
+}
 
-  if [[ "${CODEX_AUTH_NO_PROMPT:-}" == "1" || ! -t 0 || ! -t 1 || ! -r /dev/tty ]]; then
+selector_palette_mode_for_fzf() {
+  local use_fzf="$1"
+
+  if (( ! use_fzf )); then
+    printf '1'
     return 0
   fi
+  case "${CODEX_AUTH_FZF_THEME:-}" in
+    codex|1|'')
+      printf '1'
+      ;;
+    *)
+      printf '0'
+      ;;
+  esac
+}
 
-  local mode role_w profile_w cell_w status_w bar_width total_w
-  local rows=()
-  local row active_row row_kind row_action row_profile_field row_display
-  local summary_text action_w selector_profile_w
-  local has_active_row=0
-  local use_fzf=0
-  local selector_palette_mode=0
-  if command -v fzf >/dev/null 2>&1 && [[ "${CODEX_AUTH_NO_FZF:-}" != "1" ]]; then
-    use_fzf=1
-  fi
-  USAGE_COLOR_ENABLED=0
-  (( use_fzf )) && color_enabled && USAGE_COLOR_ENABLED=1
-  local render_cols
-  render_cols="$(terminal_width)"
-  if (( render_cols < 32 )); then
-    use_fzf=0
-    USAGE_COLOR_ENABLED=0
-  fi
-
-  if (( use_fzf )); then
-    if [[ "${CODEX_AUTH_FZF_THEME:-}" == "codex" || "${CODEX_AUTH_FZF_THEME:-}" == "1" ]]; then
-      selector_palette_mode=1
-    elif [[ -z "${CODEX_AUTH_FZF_THEME:-}" ]]; then
-      selector_palette_mode=1
-    fi
-  else
-    selector_palette_mode=1
-  fi
+selector_render_columns() {
+  local use_fzf="$1"
+  local selector_palette_mode="$2"
+  local render_cols="$3"
 
   if (( use_fzf && selector_palette_mode )); then
     render_cols=$((render_cols - 3))
@@ -6706,31 +6878,106 @@ arrow_action_menu() {
     render_cols=$((render_cols - 4))
     (( render_cols < 16 )) && render_cols=16
   fi
+  printf '%s' "$render_cols"
+}
+
+selector_layout_fields() {
+  local render_cols="$1"
+  local mode role_w profile_w cell_w status_w bar_width total_w
+
   IFS=$'\t' read -r mode role_w profile_w cell_w status_w bar_width <<<"$(usage_render_widths "$render_cols")"
   total_w="$(usage_render_total_width "$role_w" "$profile_w" "$cell_w" "$status_w")"
-  if (( total_w > render_cols )); then
-    total_w="$render_cols"
+  (( total_w > render_cols )) && total_w="$render_cols"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$mode" "$role_w" "$profile_w" "$cell_w" "$status_w" "$bar_width" "$total_w"
+}
+
+selector_enable_palette_color() {
+  local use_fzf="$1"
+  local selector_palette_mode="$2"
+
+  USAGE_COLOR_ENABLED=0
+  (( use_fzf )) && color_enabled && USAGE_COLOR_ENABLED=1
+  if (( selector_palette_mode )) && color_enabled; then
+    USAGE_COLOR_ENABLED=1
   fi
+  return 0
+}
+
+selector_menu_rows() {
+  local -n rows_ref="$1"
+  local -n has_active_ref="$2"
+  local default_profile="$3"
+  local selector_palette_mode="$4"
+  local mode="$5"
+  local role_w="$6"
+  local profile_w="$7"
+  local cell_w="$8"
+  local status_w="$9"
+  local bar_width="${10}"
+  local total_w="${11}"
+  local selector_profile_w="${12}"
+  local action_w="${13}"
+  shift 13
+  local record row active_row row_kind row_action row_profile_field row_display
+
+  for record in "$@"; do
+    row="$(selector_menu_row_for_record "$default_profile" "$selector_palette_mode" "$mode" "$role_w" "$profile_w" "$cell_w" "$status_w" "$bar_width" "$total_w" "$selector_profile_w" "$action_w" "$record")" || continue
+    IFS=$'\037' read -r active_row row_kind row_action row_profile_field row_display <<<"$row"
+    (( active_row )) && has_active_ref=1
+    rows_ref+=("$row_kind"$'\t'"$row_action"$'\t'"$row_profile_field"$'\t'"$row_display")
+  done
+  return 0
+}
+
+selector_add_current_row_if_needed() {
+  local -n rows_ref="$1"
+  local has_active_row="$2"
+  local selector_palette_mode="$3"
+  local total_w="$4"
+  local selector_profile_w="$5"
+  local action_w="$6"
+
+  if (( ! has_active_row )) && [[ -f "$AUTH_FILE" ]]; then
+    rows_ref+=("$(selector_current_menu_row "$selector_palette_mode" "$total_w" "$selector_profile_w" "$action_w")")
+  fi
+  return 0
+}
+
+arrow_action_menu() {
+  local default_profile="${1:-}"
+  shift
+  local records=("$@")
+
+  MENU_ACTION="skip"
+  MENU_PROFILE=""
+
+  selector_prompt_available || return 0
+
+  local mode role_w profile_w cell_w status_w bar_width total_w
+  local rows=()
+  local summary_text action_w selector_profile_w
+  local has_active_row=0
+  local use_fzf=0
+  local selector_palette_mode=0
+  local render_cols
+
+  selector_fzf_available && use_fzf=1
+  render_cols="$(terminal_width)"
+  if (( render_cols < 32 )); then
+    use_fzf=0
+  fi
+
+  selector_palette_mode="$(selector_palette_mode_for_fzf "$use_fzf")"
+  selector_enable_palette_color "$use_fzf" "$selector_palette_mode"
+  render_cols="$(selector_render_columns "$use_fzf" "$selector_palette_mode" "$render_cols")"
+  IFS=$'\t' read -r mode role_w profile_w cell_w status_w bar_width total_w <<<"$(selector_layout_fields "$render_cols")"
   summary_text="$(usage_metadata_summary_line "$total_w" "$default_profile" "${records[@]}")"
   action_w=5
   selector_profile_w="$profile_w"
   (( selector_profile_w < 10 )) && selector_profile_w=10
-  if (( selector_palette_mode )); then
-    if color_enabled; then
-      USAGE_COLOR_ENABLED=1
-    fi
-  fi
 
-  for record in "${records[@]}"; do
-    row="$(selector_menu_row_for_record "$default_profile" "$selector_palette_mode" "$mode" "$role_w" "$profile_w" "$cell_w" "$status_w" "$bar_width" "$total_w" "$selector_profile_w" "$action_w" "$record")" || continue
-    IFS=$'\037' read -r active_row row_kind row_action row_profile_field row_display <<<"$row"
-    (( active_row )) && has_active_row=1
-    rows+=("$row_kind"$'\t'"$row_action"$'\t'"$row_profile_field"$'\t'"$row_display")
-  done
-
-  if (( ! has_active_row )) && [[ -f "$AUTH_FILE" ]]; then
-    rows+=("$(selector_current_menu_row "$selector_palette_mode" "$total_w" "$selector_profile_w" "$action_w")")
-  fi
+  selector_menu_rows rows has_active_row "$default_profile" "$selector_palette_mode" "$mode" "$role_w" "$profile_w" "$cell_w" "$status_w" "$bar_width" "$total_w" "$selector_profile_w" "$action_w" "${records[@]}"
+  selector_add_current_row_if_needed rows "$has_active_row" "$selector_palette_mode" "$total_w" "$selector_profile_w" "$action_w"
 
   if (( use_fzf )); then
     selector_fzf_menu rows "$summary_text" "$total_w" "$role_w" "$profile_w" "$cell_w" "$status_w" "$mode" "$selector_palette_mode"
@@ -6916,6 +7163,58 @@ usage_limit_sort_score() {
   fi
 }
 
+usage_record_is_best_candidate() {
+  local valid="$1"
+  local weekly_used="$2"
+  local short_used="$3"
+  local status="$4"
+
+  [[ "$valid" == "0" && "$status" == "ok" ]] || return 1
+  (( weekly_used < 100 && short_used < 100 ))
+}
+
+usage_skip_active_best_candidate() {
+  local include_active="$1"
+  local mark="$2"
+
+  [[ "$include_active" != "1" && ( "$mark" == "*" || "$mark" == "=" ) ]]
+}
+
+usage_best_candidate_scores() {
+  local weekly_used="$1"
+  local short_used="$2"
+  local weekly="$3"
+  local short="$4"
+  local coverage_rank
+
+  coverage_rank="$(usage_limit_coverage_rank "$weekly" "$short")"
+  (( coverage_rank < 9 )) || return 1
+  printf '%s\t%s\t%s\n' "$coverage_rank" "$(usage_limit_sort_score "$short_used" "$short")" "$(usage_limit_sort_score "$weekly_used" "$weekly")"
+}
+
+usage_best_candidate_wins() {
+  local include_active="$1"
+  local mark="$2"
+  local coverage_rank="$3"
+  local short_score="$4"
+  local week_score="$5"
+  local best_mark="$6"
+  local best_coverage="$7"
+  local best_short="$8"
+  local best_week="$9"
+
+  if (( coverage_rank < best_coverage )); then
+    return 0
+  fi
+  if (( coverage_rank == best_coverage && short_score < best_short )); then
+    return 0
+  fi
+  if (( coverage_rank == best_coverage && short_score == best_short && week_score < best_week )); then
+    return 0
+  fi
+  [[ "$include_active" == "1" && "$mark" == "*" && "$best_mark" != "*" && "$coverage_rank" == "$best_coverage" && "$short_score" == "$best_short" && "$week_score" == "$best_week" ]]
+}
+
 find_best_ok_profile() {
   local records="$1"
   local include_active="${2:-0}"
@@ -6925,28 +7224,20 @@ find_best_ok_profile() {
   local best_profile=""
   local best_mark=""
   local valid weekly_used short_used mark profile plan weekly short status short_label
-  local coverage_rank short_score week_score
+  local coverage_rank short_score week_score scores
 
   while IFS=$'\t' read -r valid weekly_used short_used mark profile plan weekly short status short_label; do
     [[ -n "$profile" ]] || continue
-    if [[ "$valid" == "0" && "$status" == "ok" ]] && (( weekly_used < 100 && short_used < 100 )); then
-	      if [[ "$include_active" != "1" && ( "$mark" == "*" || "$mark" == "=" ) ]]; then
-	        continue
-	      fi
-      coverage_rank="$(usage_limit_coverage_rank "$weekly" "$short")"
-      (( coverage_rank < 9 )) || continue
-      short_score="$(usage_limit_sort_score "$short_used" "$short")"
-      week_score="$(usage_limit_sort_score "$weekly_used" "$weekly")"
-      if (( coverage_rank < best_coverage \
-        || (coverage_rank == best_coverage && short_score < best_short) \
-        || (coverage_rank == best_coverage && short_score == best_short && week_score < best_week) )) \
-        || [[ "$include_active" == "1" && "$mark" == "*" && "$best_mark" != "*" && "$coverage_rank" == "$best_coverage" && "$short_score" == "$best_short" && "$week_score" == "$best_week" ]]; then
-        best_profile="$profile"
-        best_mark="$mark"
-        best_coverage="$coverage_rank"
-        best_week="$week_score"
-        best_short="$short_score"
-      fi
+    usage_record_is_best_candidate "$valid" "$weekly_used" "$short_used" "$status" || continue
+    usage_skip_active_best_candidate "$include_active" "$mark" && continue
+    scores="$(usage_best_candidate_scores "$weekly_used" "$short_used" "$weekly" "$short")" || continue
+    IFS=$'\t' read -r coverage_rank short_score week_score <<<"$scores"
+    if usage_best_candidate_wins "$include_active" "$mark" "$coverage_rank" "$short_score" "$week_score" "$best_mark" "$best_coverage" "$best_short" "$best_week"; then
+      best_profile="$profile"
+      best_mark="$mark"
+      best_coverage="$coverage_rank"
+      best_week="$week_score"
+      best_short="$short_score"
     fi
   done < <(printf '%s\n' "$records" | sed '/^[[:space:]]*$/d')
 
