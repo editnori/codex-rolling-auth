@@ -5641,22 +5641,6 @@ usage_summary_parts() {
   usage_summary_merge_pool_subject first_ref active_ref pool_ref "$total_w" "$sep"
 }
 
-print_usage_summary_title_frame() {
-  local title="$1"
-  local total_w="$2"
-  local -n frame_ref="$3"
-  local -n body_w_ref="$4"
-
-  if [[ -n "$title" ]] && (( total_w >= 42 )); then
-    frame_ref=1
-    body_w_ref=$((total_w - 4))
-    print_usage_frame_top "$title" "$total_w"
-  else
-    print_usage_title_line "$title" "$total_w"
-  fi
-  return 0
-}
-
 print_usage_summary_body() {
   local first="$1"
   local active_part="$2"
@@ -5697,7 +5681,13 @@ print_usage_summary_block() {
   local frame=0 body_w="$total_w"
 
   usage_summary_parts "$summary" "$total_w" first active_part pool_part
-  print_usage_summary_title_frame "$title" "$total_w" frame body_w
+  if [[ -n "$title" ]] && (( total_w >= 42 )); then
+    frame=1
+    body_w=$((total_w - 4))
+    print_usage_frame_top "$title" "$total_w"
+  else
+    print_usage_title_line "$title" "$total_w"
+  fi
   print_usage_summary_body "$first" "$active_part" "$pool_part" "$body_w" "$frame" "$total_w"
   return 0
 }
@@ -6682,17 +6672,6 @@ selector_render_columns() {
   printf '%s' "$render_cols"
 }
 
-selector_enable_palette_color() {
-  local use_fzf="$1"
-  local selector_palette_mode="$2"
-
-  USAGE_COLOR_ENABLED=0
-  if (( use_fzf || selector_palette_mode )) && color_enabled; then
-    USAGE_COLOR_ENABLED=1
-  fi
-  return 0
-}
-
 selector_menu_rows() {
   local -n rows_ref="$1"
   local -n has_active_ref="$2"
@@ -6746,7 +6725,10 @@ arrow_action_menu() {
   fi
 
   selector_palette_mode="$(selector_palette_mode_for_fzf "$use_fzf")"
-  selector_enable_palette_color "$use_fzf" "$selector_palette_mode"
+  USAGE_COLOR_ENABLED=0
+  if (( use_fzf || selector_palette_mode )) && color_enabled; then
+    USAGE_COLOR_ENABLED=1
+  fi
   render_cols="$(selector_render_columns "$use_fzf" "$selector_palette_mode" "$render_cols")"
   IFS=$'\t' read -r mode role_w profile_w cell_w status_w bar_width <<<"$(usage_render_widths "$render_cols")"
   total_w="$(usage_render_total_width "$role_w" "$profile_w" "$cell_w" "$status_w")"
