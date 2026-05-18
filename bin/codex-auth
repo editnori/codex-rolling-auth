@@ -748,20 +748,6 @@ profile_fit_alias_prefix() {
   fit_profile_text "$alias_label" "$((width - 1))"
 }
 
-profile_account_alias_compact_display() {
-  local alias_of="$1"
-  local width="$2"
-  local alias_label compact_alias
-
-  alias_label="$(usage_display_profile_name "$alias_of" "" "$((width - 2))")"
-  compact_alias="$(profile_compact_alias_text "$alias_label")"
-  if (( ${#compact_alias} <= width )); then
-    printf '%s' "$compact_alias"
-  else
-    profile_fit_alias_prefix "$alias_label" "$width"
-  fi
-}
-
 profile_account_alias_display() {
   local hint="$1"
   local width="$2"
@@ -782,7 +768,13 @@ profile_account_alias_display() {
   elif (( ${#compact_alias} <= width )); then
     printf '%s' "$compact_alias"
   elif (( width >= 5 )); then
-    profile_account_alias_compact_display "$alias_of" "$width"
+    alias_label="$(usage_display_profile_name "$alias_of" "" "$((width - 2))")"
+    compact_alias="$(profile_compact_alias_text "$alias_label")"
+    if (( ${#compact_alias} <= width )); then
+      printf '%s' "$compact_alias"
+    else
+      profile_fit_alias_prefix "$alias_label" "$width"
+    fi
   elif (( width >= 2 )); then
     profile_fit_alias_prefix "$alias_label" "$width"
   else
@@ -790,11 +782,17 @@ profile_account_alias_display() {
   fi
 }
 
-profile_account_hint_display() {
+profile_account_display() {
   local hint="$1"
   local width="$2"
-  local verbose="$3"
+  local verbose="${3:-0}"
+  local alias_of="${4:-}"
   local base
+
+  if [[ -n "$alias_of" ]]; then
+    profile_account_alias_display "$hint" "$width" "$verbose" "$alias_of"
+    return 0
+  fi
 
   [[ -n "$hint" ]] || return 0
   if (( verbose )); then
@@ -803,20 +801,6 @@ profile_account_hint_display() {
     base="$(short_account_hint "$hint" "$width")"
   fi
   fit_text "$base" "$width"
-}
-
-profile_account_display() {
-  local hint="$1"
-  local width="$2"
-  local verbose="${3:-0}"
-  local alias_of="${4:-}"
-
-  if [[ -n "$alias_of" ]]; then
-    profile_account_alias_display "$hint" "$width" "$verbose" "$alias_of"
-    return 0
-  fi
-
-  profile_account_hint_display "$hint" "$width" "$verbose"
 }
 
 print_profile_list_line() {
@@ -3607,10 +3591,10 @@ usage_fit_header_label() {
 usage_metric_header_cell() {
   local text="$1"
   local width="$2"
-  local mode="${3:-normal}"
+  local force_compact="${4:-0}"
   local display="$text"
 
-  if (( USAGE_VERBOSE )); then
+  if (( USAGE_VERBOSE > force_compact )); then
     usage_fit_header_label "$text" "$width"
     return 0
   fi
@@ -5166,29 +5150,6 @@ selector_palette_primary_header() {
   print_toned_fit_center "$profile_label" "$profile_w" muted
 }
 
-selector_palette_metric_header_cell() {
-  local text="$1"
-  local width="$2"
-  local display="$text"
-
-  (( width <= 0 )) && return 0
-  [[ "$display" == "week%" ]] && display="wk%"
-  if (( ${#display} > width )); then
-    if (( width <= 1 )); then
-      display="${display:0:width}"
-    elif [[ "$display" == *% ]]; then
-      display="${display:0:width-1}%"
-    else
-      display="${display:0:width}"
-    fi
-  fi
-
-  usage_tone_color muted
-  fit_text_center "$display" "$width"
-  usage_tone_reset
-  return 0
-}
-
 selector_palette_table_header() {
   local total_w="$1"
   local primary_w week_w short_w status_w short_label status_label status_gap metric_gap
@@ -5207,10 +5168,14 @@ selector_palette_table_header() {
   selector_palette_primary_header "$primary_w"
   printf ' '
   if (( week_w > 0 )); then
-    selector_palette_metric_header_cell "week%" "$week_w"
+    usage_tone_color muted
+    usage_metric_header_cell "week%" "$week_w" normal 1
+    usage_tone_reset
     printf '%*s' "$metric_gap" ''
   fi
-  selector_palette_metric_header_cell "$short_label" "$short_w"
+  usage_tone_color muted
+  usage_metric_header_cell "$short_label" "$short_w" normal 1
+  usage_tone_reset
   if (( status_w > 0 )); then
     printf '%*s' "$status_gap" ''
     print_toned_fit_center "$status_label" "$status_w" muted
@@ -6086,13 +6051,7 @@ summary_token_by_prefix() {
 
   sep="$(usage_separator)"
   while [[ -n "$summary" ]]; do
-    if [[ "$summary" == *"$sep"* ]]; then
-      token="${summary%%"$sep"*}"
-      summary="${summary#*"$sep"}"
-    else
-      token="$summary"
-      summary=""
-    fi
+    IFS=$'\t' read -r token summary <<<"$(usage_summary_split_once "$summary" "$sep")"
     token="${token//capped /cap }"
     if [[ "$token" == "$prefix "* ]]; then
       printf '%s' "$token"
@@ -6163,13 +6122,7 @@ print_flat_context_line() {
 
   sep="$(usage_separator)"
   while [[ -n "$summary" ]]; do
-    if [[ "$summary" == *"$sep"* ]]; then
-      token="${summary%%"$sep"*}"
-      summary="${summary#*"$sep"}"
-    else
-      token="$summary"
-      summary=""
-    fi
+    IFS=$'\t' read -r token summary <<<"$(usage_summary_split_once "$summary" "$sep")"
     token="${token//capped /cap }"
     [[ "$token" == cache\ * ]] && continue
     [[ -n "$token" ]] && parts+=("$token")
