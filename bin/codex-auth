@@ -1145,10 +1145,80 @@ result_summary_display() {
   fi
 }
 
+result_backup_value() {
+  local value="$1"
+  local value_w="$2"
+
+  if [[ "$value" == */* ]]; then
+    if [[ "${CODEX_AUTH_SHOW_BACKUP_PATH:-0}" != "1" ]]; then
+      printf 'created'
+    elif (( value_w < 46 )); then
+      printf 'created'
+    else
+      compact_display_path "$value" "$value_w"
+    fi
+  else
+    printf '%s' "$value"
+  fi
+}
+
+result_detail_value() {
+  local label="$1"
+  local value="$2"
+  local value_w="$3"
+
+  case "$label" in
+    backup)
+      result_backup_value "$value" "$value_w"
+      ;;
+    active|profile|source|dest|dir|auth|profiles|backups|state)
+      if [[ "$value" == */* ]]; then
+        result_value_path "$value" "$value_w"
+      else
+        printf '%s' "$value"
+      fi
+      ;;
+    *)
+      printf '%s' "$value"
+      ;;
+  esac
+}
+
+result_compact_active_value() {
+  local label="$1"
+  local value="$2"
+  local value_w="$3"
+
+  if [[ "$label" == "active" && "$value" == "unsaved auth" && "$value_w" -lt 12 ]]; then
+    printf 'unsaved'
+  elif [[ "$label" == "active" && "$value" == "already active" && "$value_w" -lt 14 ]]; then
+    printf 'already'
+  elif [[ "$label" == "active" && "$value" == saved\ * && "$value_w" -lt 12 ]]; then
+    printf 'saved'
+  else
+    printf '%s' "$value"
+  fi
+}
+
+print_result_row() {
+  local summary="$1"
+  local row="$2"
+  local label_w="$3"
+  local value_w="$4"
+  local label value tone display_label
+
+  IFS=$'\t' read -r label value tone <<<"$row"
+  [[ -n "$tone" ]] || tone="muted"
+  value="$(result_detail_value "$label" "$value" "$value_w")"
+  value="$(result_compact_active_value "$label" "$value" "$value_w")"
+  display_label="$(result_detail_label "$label" "$summary")"
+  print_detail_line "$display_label" "$value" "$label_w" "$value_w" "$tone"
+}
+
 print_result_block() {
   local summary="$1"
   shift
-  local cols label_w value_w total_w row label value tone title display_label display_summary
+  local cols label_w value_w total_w row title display_summary
 
   cols="$(terminal_width)"
   IFS=$'\t' read -r label_w value_w <<<"$(detail_widths "$cols")"
@@ -1160,37 +1230,7 @@ print_result_block() {
   display_summary="$(result_summary_display "$summary" "$total_w")"
   print_palette_summary_header "Auth" "$title" "$display_summary" "$total_w"
   for row in "$@"; do
-    IFS=$'\t' read -r label value tone <<<"$row"
-    [[ -n "$tone" ]] || tone="muted"
-    case "$label" in
-      backup)
-        if [[ "$value" == */* ]]; then
-          if [[ "${CODEX_AUTH_SHOW_BACKUP_PATH:-0}" != "1" ]]; then
-            value="created"
-          elif (( value_w < 46 )); then
-            value="created"
-          else
-            value="$(compact_display_path "$value" "$value_w")"
-          fi
-        fi
-        ;;
-      active|profile|source|dest|dir|auth|profiles|backups|state)
-        if [[ "$value" == */* ]]; then
-          value="$(result_value_path "$value" "$value_w")"
-        fi
-        ;;
-    esac
-    if [[ "$label" == "active" && "$value" == "unsaved auth" && "$value_w" -lt 12 ]]; then
-      value="unsaved"
-    fi
-    if [[ "$label" == "active" && "$value" == "already active" && "$value_w" -lt 14 ]]; then
-      value="already"
-    fi
-    if [[ "$label" == "active" && "$value" == saved\ * && "$value_w" -lt 12 ]]; then
-      value="saved"
-    fi
-    display_label="$(result_detail_label "$label" "$summary")"
-    print_detail_line "$display_label" "$value" "$label_w" "$value_w" "$tone"
+    print_result_row "$summary" "$row" "$label_w" "$value_w"
   done
 }
 
@@ -2780,10 +2820,57 @@ usage_profile_width_hint() {
   done
 }
 
+usage_width_row_matches() {
+  local row="$1"
+  local cols="$2"
+  local verbose="$3"
+  local row_min row_max row_verbose
+
+  read -r row_min row_max row_verbose _ <<<"$row"
+  (( cols >= row_min && cols <= row_max )) || return 1
+  (( row_verbose < 0 || row_verbose == verbose ))
+}
+
+usage_width_apply_status_defaults() {
+  local cols="$1"
+  local verbose="$2"
+  local -n mode_ref="$3"
+  local -n role_w_ref="$4"
+  local -n status_min_ref="$5"
+  local -n label_w_ref="$6"
+  local -n max_bar_w_ref="$7"
+
+  if (( verbose && cols >= 68 )) && [[ "$mode_ref" == "tight" ]]; then
+    status_min_ref=12
+  fi
+  if (( ! verbose )); then
+    if (( cols >= 61 )); then
+      role_w_ref=5
+      status_min_ref=12
+    else
+      role_w_ref=1
+    fi
+    return 0
+  fi
+  case "$mode_ref" in
+    pico|nano|micro|tiny|tight)
+      return 0
+      ;;
+  esac
+  label_w_ref=6
+  max_bar_w_ref=12
+  if (( cols >= 112 )); then
+    max_bar_w_ref=20
+  elif (( cols >= 94 )); then
+    max_bar_w_ref=14
+  fi
+  return 0
+}
+
 usage_width_mode_defaults() {
   local cols="$1"
   local verbose="${2:-0}"
-  local row row_min row_max row_verbose
+  local row
   local mode role_w profile_min status_min reset_w label_w min_bar_w max_bar_w
   local rows=(
     "0 25 -1 pico 1 4 3 0 4 0 0"
@@ -2800,34 +2887,12 @@ usage_width_mode_defaults() {
   )
 
   for row in "${rows[@]}"; do
-    read -r row_min row_max row_verbose mode role_w profile_min status_min reset_w label_w min_bar_w max_bar_w <<<"$row"
-    if (( cols >= row_min && cols <= row_max )); then
-      if (( row_verbose < 0 || row_verbose == verbose )); then
-        break
-      fi
-    fi
+    usage_width_row_matches "$row" "$cols" "$verbose" || continue
+    read -r _ _ _ mode role_w profile_min status_min reset_w label_w min_bar_w max_bar_w <<<"$row"
+    break
   done
 
-  if (( verbose && cols >= 68 )) && [[ "$mode" == "tight" ]]; then
-    status_min=12
-  fi
-  if (( ! verbose )); then
-    if (( cols >= 61 )); then
-      role_w=5
-      status_min=12
-    else
-      role_w=1
-    fi
-  fi
-  if (( verbose )) && [[ "$mode" != "pico" && "$mode" != "nano" && "$mode" != "micro" && "$mode" != "tiny" && "$mode" != "tight" ]]; then
-    label_w=6
-    max_bar_w=12
-    if (( cols >= 112 )); then
-      max_bar_w=20
-    elif (( cols >= 94 )); then
-      max_bar_w=14
-    fi
-  fi
+  usage_width_apply_status_defaults "$cols" "$verbose" mode role_w status_min label_w max_bar_w
 
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$mode" "$role_w" "$profile_min" "$status_min" "$reset_w" "$label_w" "$min_bar_w" "$max_bar_w"
 }
@@ -3413,52 +3478,81 @@ usage_header_profile() {
   fi
 }
 
+usage_header_week_percent() {
+  local mode="$1"
+
+  if [[ "$mode" == "pico" || "$mode" == "nano" ]]; then
+    printf 'wk%%'
+  else
+    printf 'week%%'
+  fi
+}
+
+usage_header_week_verbose_plain() {
+  local mode="$1"
+
+  case "$mode" in
+    pico|nano)
+      printf 'wk%%'
+      ;;
+    micro)
+      printf 'week%%'
+      ;;
+    tiny)
+      printf 'week%% reset'
+      ;;
+    tight)
+      printf 'week left reset'
+      ;;
+    compact)
+      printf 'week used/reset'
+      ;;
+    *)
+      printf 'week left/used reset'
+      ;;
+  esac
+}
+
+usage_header_week_verbose_reset() {
+  local mode="$1"
+  local reset_glyph="$2"
+
+  case "$mode" in
+    pico|nano)
+      printf 'wk%%'
+      ;;
+    micro)
+      printf 'week%%'
+      ;;
+    tiny)
+      printf 'week%%%s' "$reset_glyph"
+      ;;
+    tight)
+      printf 'week left%s' "$reset_glyph"
+      ;;
+    compact)
+      printf 'week left/used%s' "$reset_glyph"
+      ;;
+    *)
+      printf 'week left/used %s reset' "$reset_glyph"
+      ;;
+  esac
+}
+
 usage_header_week() {
   local mode="${1:-normal}"
   local reset_glyph
   reset_glyph="$(usage_reset_glyph)"
 
-	  if (( ! USAGE_VERBOSE )); then
-	    if [[ "$mode" == "pico" || "$mode" == "nano" ]]; then
-	      printf 'wk%%'
-	    else
-	      printf 'week%%'
-	    fi
-	    return 0
-	  fi
+  if (( ! USAGE_VERBOSE )); then
+    usage_header_week_percent "$mode"
+    return 0
+  fi
 
   if [[ -z "$reset_glyph" ]]; then
-    if [[ "$mode" == "pico" || "$mode" == "nano" ]]; then
-      printf 'wk%%'
-    elif [[ "$mode" == "micro" || "$mode" == "tiny" ]]; then
-      if [[ "$mode" == "tiny" ]]; then
-        printf 'week%% reset'
-      else
-        printf 'week%%'
-      fi
-    elif [[ "$mode" == "tight" ]]; then
-      printf 'week left reset'
-    elif [[ "$mode" == "compact" ]]; then
-      printf 'week used/reset'
-    elif (( USAGE_VERBOSE )); then
-      printf 'week left/used reset'
-    else
-      printf 'weekly left reset'
-    fi
-  elif [[ "$mode" == "pico" || "$mode" == "nano" ]]; then
-    printf 'wk%%'
-  elif [[ "$mode" == "micro" ]]; then
-    printf 'week%%'
-  elif [[ "$mode" == "tiny" ]]; then
-    printf 'week%%%s' "$reset_glyph"
-  elif [[ "$mode" == "tight" ]]; then
-    printf 'week left%s' "$reset_glyph"
-  elif [[ "$mode" == "compact" ]]; then
-    printf 'week left/used%s' "$reset_glyph"
-  elif (( USAGE_VERBOSE )); then
-    printf 'week left/used %s reset' "$reset_glyph"
+    usage_header_week_verbose_plain "$mode"
   else
-    printf 'weekly left %s reset' "$reset_glyph"
+    usage_header_week_verbose_reset "$mode" "$reset_glyph"
   fi
 }
 
@@ -5620,67 +5714,84 @@ selector_palette_badge() {
   usage_tone_reset
 }
 
+selector_action_role_narrow() {
+  local action="$1"
+
+  case "$action" in
+    switch)
+      printf ' '
+      ;;
+    best)
+      printf 'u'
+      ;;
+    cap)
+      printf 'c'
+      ;;
+    login)
+      printf 'l'
+      ;;
+    stay)
+      usage_active_glyph
+      ;;
+    *)
+      usage_meta_glyph
+      ;;
+  esac
+}
+
+selector_action_role_compact() {
+  local action="$1"
+
+  case "$action" in
+    best|switch)
+      printf 'use'
+      ;;
+    cap)
+      printf 'cap'
+      ;;
+    same)
+      printf 'same'
+      ;;
+    login)
+      printf 'login'
+      ;;
+    *)
+      printf 'stay'
+      ;;
+  esac
+}
+
+selector_action_role_full() {
+  local action="$1"
+
+  case "$action" in
+    switch|best)
+      printf 'use'
+      ;;
+    same)
+      printf 'same'
+      ;;
+    *)
+      printf '%s' "$action"
+      ;;
+  esac
+}
+
 selector_action_role() {
   local action="$1"
   local role_w="$2"
 
   if (( role_w <= 1 )); then
-    case "$action" in
-      switch)
-        printf ' '
-        ;;
-      best)
-        printf 'u'
-        ;;
-      cap)
-        printf 'c'
-        ;;
-      login)
-        printf 'l'
-        ;;
-      stay)
-        usage_active_glyph
-        ;;
-      *)
-        usage_meta_glyph
-        ;;
-    esac
+    selector_action_role_narrow "$action"
     return 0
   fi
 
   if (( role_w < 6 )); then
-    case "$action" in
-      best)
-        printf 'use'
-        ;;
-      cap)
-        printf 'cap'
-        ;;
-      same)
-        printf 'same'
-        ;;
-      switch)
-        printf 'use'
-        ;;
-      login)
-        printf 'login'
-        ;;
-      *)
-        printf 'stay'
-        ;;
-    esac
+    selector_action_role_compact "$action"
     return 0
   fi
 
-  if [[ "$action" == "switch" ]]; then
-    printf 'use'
-  elif [[ "$action" == "best" ]]; then
-    printf 'use'
-  elif [[ "$action" == "same" ]]; then
-    printf 'same'
-  else
-    printf '%s' "$action"
-  fi
+  selector_action_role_full "$action"
 }
 
 selector_header_action() {
