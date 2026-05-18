@@ -4290,6 +4290,22 @@ usage_json_from_home() {
   printf '%s\n' "$payload"
 }
 
+usage_limit_remaining_fields() {
+  local used="$1"
+  local window="$2"
+  local reset="$3"
+  local left
+
+  if [[ -z "$window" || "$window" == "-" || "$window" == "0" ]]; then
+    printf '0\t-\t-\n'
+    return 0
+  fi
+
+  left=$((100 - used))
+  (( left < 0 )) && left=0
+  printf '%s\t%s%%\t%s\n' "$used" "$left" "$(format_reset_time "$reset")"
+}
+
 usage_record_for_profile() {
   local profile_name="$1"
   local profile_file="$2"
@@ -4407,28 +4423,10 @@ usage_record_for_profile() {
     return 0
   fi
 
-  local short weekly status short_label weekly_reset_text short_reset_text short_left weekly_left stale_age_label
+  local short weekly status short_label weekly_reset_text short_reset_text stale_age_label
   short_label="$(window_label "$short_window")"
-  if [[ -z "$short_window" || "$short_window" == "-" || "$short_window" == "0" ]]; then
-    short="-"
-    short_reset_text="-"
-    short_used=0
-  else
-    short_left=$((100 - short_used))
-    (( short_left < 0 )) && short_left=0
-    short="${short_left}%"
-    short_reset_text="$(format_reset_time "$short_reset")"
-  fi
-  if [[ -z "$weekly_window" || "$weekly_window" == "-" || "$weekly_window" == "0" ]]; then
-    weekly="-"
-    weekly_reset_text="-"
-    weekly_used=0
-  else
-    weekly_left=$((100 - weekly_used))
-    (( weekly_left < 0 )) && weekly_left=0
-    weekly="${weekly_left}%"
-    weekly_reset_text="$(format_reset_time "$weekly_reset")"
-  fi
+  IFS=$'\t' read -r short_used short short_reset_text <<<"$(usage_limit_remaining_fields "$short_used" "$short_window" "$short_reset")"
+  IFS=$'\t' read -r weekly_used weekly weekly_reset_text <<<"$(usage_limit_remaining_fields "$weekly_used" "$weekly_window" "$weekly_reset")"
   status="ok"
   if (( weekly_used >= 100 && short_used >= 100 )); then
     status="week+5h cap"
