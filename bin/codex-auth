@@ -989,6 +989,52 @@ path_target_label() {
   fi
 }
 
+path_basename_if_fits() {
+  local path="$1"
+  local path_w="$2"
+  local base
+
+  [[ "$path" == */* ]] || return 1
+  base="${path##*/}"
+  (( ${#base} <= path_w )) || return 1
+  printf '%s' "$base"
+}
+
+path_render_prefers_basename() {
+  local target="$1"
+  local target_w="$2"
+  local path_w="$3"
+  local rendered="$4"
+
+  if (( target_w <= 0 && path_w < 24 )) && [[ "$target" != "auth" ]]; then
+    return 0
+  fi
+  [[ "$rendered" == "…/"* || "$rendered" == "*/"* ]]
+}
+
+path_rendered_value() {
+  local target="$1"
+  local path="$2"
+  local target_w="$3"
+  local path_w="$4"
+  local rendered base
+
+  rendered="$(compact_display_path "$path" "$path_w")"
+  if (( target_w <= 0 )) && path_render_prefers_basename "$target" "$target_w" "$path_w" "$rendered"; then
+    base="$(path_basename_if_fits "$path" "$path_w" || true)"
+    [[ -n "$base" ]] && rendered="$base"
+  fi
+  if (( ${#rendered} > path_w )); then
+    base="$(path_basename_if_fits "$path" "$path_w" || true)"
+    [[ -n "$base" ]] && rendered="$base"
+  fi
+  if (( target_w <= 0 )) && [[ "$target" == "usage" && "$path_w" -lt 15 ]]; then
+    base="state.json"
+    (( ${#base} <= path_w )) && rendered="$base"
+  fi
+  printf '%s' "$rendered"
+}
+
 print_path_line() {
   local role="$1"
   local target="$2"
@@ -997,33 +1043,9 @@ print_path_line() {
   local target_w="$5"
   local path_w="$6"
   local tone="${7:-muted}"
-  local rendered base
+  local rendered
 
-  rendered="$(compact_display_path "$path" "$path_w")"
-  if (( target_w <= 0 && path_w < 24 )) && [[ "$target" != "auth" && "$path" == */* ]]; then
-    base="${path##*/}"
-    if (( ${#base} <= path_w )); then
-      rendered="$base"
-    fi
-  fi
-  if (( target_w <= 0 )) && [[ "$rendered" == "…/"* || "$rendered" == "*/"* ]]; then
-    base="${path##*/}"
-    if (( ${#base} <= path_w )); then
-      rendered="$base"
-    fi
-  fi
-  if (( ${#rendered} > path_w )) && [[ "$path" == */* ]]; then
-    base="${path##*/}"
-    if (( ${#base} <= path_w )); then
-      rendered="$base"
-    fi
-  fi
-  if (( target_w <= 0 )) && [[ "$target" == "usage" && "$path_w" -lt 15 ]]; then
-    base="state.json"
-    if (( ${#base} <= path_w )); then
-      rendered="$base"
-    fi
-  fi
+  rendered="$(path_rendered_value "$target" "$path" "$target_w" "$path_w")"
   print_toned_fit "$(path_role_label "$role" "$role_w")" "$role_w" "$tone"
   printf ' '
   if (( target_w > 0 )); then
@@ -1897,10 +1919,10 @@ cmd_list() {
   done
 }
 
-cmd_current() {
-  ensure_dirs
-  local cols label_w value_w total_w
-  cols="$(terminal_width)"
+current_detail_widths() {
+  local cols="$1"
+  local label_w value_w total_w
+
   IFS=$'\t' read -r label_w value_w <<<"$(detail_widths "$cols")"
   if (( cols < 68 )); then
     label_w=7
@@ -1908,6 +1930,79 @@ cmd_current() {
     (( value_w < 10 )) && value_w=10
   fi
   total_w=$((label_w + 1 + value_w))
+  printf '%s\t%s\t%s\n' "$label_w" "$value_w" "$total_w"
+}
+
+current_meta_files_into() {
+  local -n files_ref="$1"
+  local path
+
+  shopt -s nullglob
+  files_ref+=("$AUTH_FILE")
+  for path in "$PROFILE_DIR"/*.json; do
+    files_ref+=("$path")
+  done
+}
+
+current_load_metadata() {
+  local -n files_ref="$1"
+  local -n fp_map_ref="$2"
+  local -n active_fp_ref="$3"
+  local -n active_mode_ref="$4"
+  local -n active_hint_ref="$5"
+  local fp meta_path secret meta_mode meta_hint
+
+  while IFS=$'\037' read -r meta_path meta_mode meta_hint secret; do
+    [[ -n "$meta_path" ]] || continue
+    fp="$(auth_record_fingerprint "$secret")"
+    fp_map_ref["$meta_path"]="$fp"
+    if [[ "$meta_path" == "$AUTH_FILE" ]]; then
+      active_fp_ref="$fp"
+      active_mode_ref="${meta_mode:-unknown}"
+      active_hint_ref="${meta_hint:-}"
+    fi
+  done < <(auth_metadata_records "${files_ref[@]}")
+}
+
+current_matched_profile() {
+  local active_fp="$1"
+  local -n fp_map_ref="$2"
+  local path fp
+
+  [[ -n "$active_fp" ]] || return 0
+  shopt -s nullglob
+  for path in "$PROFILE_DIR"/*.json; do
+    fp="${fp_map_ref["$path"]:-}"
+    if [[ "$fp" == "$active_fp" ]]; then
+      basename "$path" .json
+      return 0
+    fi
+  done
+}
+
+print_current_optional_details() {
+  local hint="$1"
+  local summary="$2"
+  local mode_display="$3"
+  local account_display="$4"
+  local label_w="$5"
+  local value_w="$6"
+  local status_text
+
+  if [[ -n "$hint" && "$summary" != *"account "* ]]; then
+    print_detail_line "account" "$account_display" "$label_w" "$value_w"
+  fi
+  status_text="$(current_codex_status "$mode_display" "$value_w")"
+  if [[ -n "$status_text" ]]; then
+    print_detail_text_line "codex" "$status_text" "$label_w" "$value_w"
+  fi
+}
+
+cmd_current() {
+  ensure_dirs
+  local cols label_w value_w total_w
+  cols="$(terminal_width)"
+  IFS=$'\t' read -r label_w value_w total_w <<<"$(current_detail_widths "$cols")"
   USAGE_COLOR_ENABLED=0
   color_enabled && USAGE_COLOR_ENABLED=1
 
@@ -1920,58 +2015,23 @@ cmd_current() {
     return 0
   fi
 
-  local active_fp mode mode_display matched hint account_display summary status_text show_account show_codex
-  local path fp meta_path secret meta_mode meta_hint active_mode="" active_hint=""
+  local active_fp="" mode mode_display matched hint account_display summary
+  local active_mode="" active_hint=""
   local meta_files=()
   local -A meta_fp=()
 
-  shopt -s nullglob
-  meta_files+=("$AUTH_FILE")
-  for path in "$PROFILE_DIR"/*.json; do
-    meta_files+=("$path")
-  done
-  while IFS=$'\037' read -r meta_path meta_mode meta_hint secret; do
-    [[ -n "$meta_path" ]] || continue
-    fp="$(auth_record_fingerprint "$secret")"
-    meta_fp["$meta_path"]="$fp"
-    if [[ "$meta_path" == "$AUTH_FILE" ]]; then
-      active_fp="$fp"
-      active_mode="${meta_mode:-unknown}"
-      active_hint="${meta_hint:-}"
-    fi
-  done < <(auth_metadata_records "${meta_files[@]}")
+  current_meta_files_into meta_files
+  current_load_metadata meta_files meta_fp active_fp active_mode active_hint
   mode="${active_mode:-unknown}"
   mode_display="$(auth_mode_display_label "$mode")"
   hint="${active_hint:-}"
   active_fp="${active_fp:-}"
   account_display="$(short_account_hint "$hint" "$value_w")"
-  matched=""
-
-  for path in "$PROFILE_DIR"/*.json; do
-    fp="${meta_fp["$path"]:-}"
-    if [[ -n "$active_fp" && "$fp" == "$active_fp" ]]; then
-      matched="$(basename "$path" .json)"
-      break
-    fi
-  done
-
+  matched="$(current_matched_profile "$active_fp" meta_fp)"
   summary="$(current_profile_summary "$matched" "$mode" "$hint" "$account_display" "$total_w" "$mode_display")"
 
-  show_account=0
-  show_codex=0
-  [[ -n "$hint" && "$summary" != *"account "* ]] && show_account=1
-
-  status_text="$(current_codex_status "$mode_display" "$value_w")"
-  [[ -n "$status_text" ]] && show_codex=1
-
   print_palette_summary_header "Auth" "Active profile" "$summary" "$total_w" flat 0
-  if (( show_account )); then
-    print_detail_line "account" "$account_display" "$label_w" "$value_w"
-  fi
-
-  if (( show_codex )); then
-    print_detail_text_line "codex" "$status_text" "$label_w" "$value_w"
-  fi
+  print_current_optional_details "$hint" "$summary" "$mode_display" "$account_display" "$label_w" "$value_w"
 }
 
 cmd_save() {
@@ -2085,6 +2145,57 @@ cmd_login() {
   rm -f "$hidden_auth"
 }
 
+parse_add_positional_arg() {
+  local arg="$1"
+  local -n add_source_ref="$2"
+  local -n add_source_seen_ref="$3"
+  local -n add_login_args_ref="$4"
+
+  if [[ -f "$arg" && -z "$add_source_ref" ]]; then
+    add_source_ref="$arg"
+    add_source_seen_ref=1
+  else
+    add_login_args_ref+=("$arg")
+  fi
+}
+
+parse_add_args() {
+  local source_var="$1"
+  local source_seen_var="$2"
+  local login_args_var="$3"
+  local -n source_ref="$source_var"
+  local -n source_seen_ref="$source_seen_var"
+  local -n login_args_ref="$login_args_var"
+  shift 3
+
+  while (( $# > 0 )); do
+    case "$1" in
+      --current)
+        (( source_seen_ref == 0 )) || die "add accepts one source: --current or --file"
+        source_ref="$AUTH_FILE"
+        source_seen_ref=1
+        shift
+        ;;
+      --file|--from)
+        [[ -n "${2:-}" ]] || die "usage: codex-auth add <name> --file <file>"
+        (( source_seen_ref == 0 )) || die "add accepts one source: --current or --file"
+        source_ref="$2"
+        source_seen_ref=1
+        shift 2
+        ;;
+      --)
+        shift
+        login_args_ref+=("$@")
+        break
+        ;;
+      *)
+        parse_add_positional_arg "$1" "$source_var" "$source_seen_var" "$login_args_var"
+        shift
+        ;;
+    esac
+  done
+}
+
 cmd_add() {
   local name="${1:-}"
   [[ -n "$name" ]] || die "usage: codex-auth add <name> [--current | --file <file> | codex login args...]"
@@ -2094,37 +2205,8 @@ cmd_add() {
   local source=""
   local source_seen=0
   local login_args=()
-  while (( $# > 0 )); do
-    case "$1" in
-      --current)
-        (( source_seen == 0 )) || die "add accepts one source: --current or --file"
-        source="$AUTH_FILE"
-        source_seen=1
-        shift
-        ;;
-      --file|--from)
-        [[ -n "${2:-}" ]] || die "usage: codex-auth add <name> --file <file>"
-        (( source_seen == 0 )) || die "add accepts one source: --current or --file"
-        source="$2"
-        source_seen=1
-        shift 2
-        ;;
-      --)
-        shift
-        login_args+=("$@")
-        break
-        ;;
-      *)
-        if [[ -f "$1" && -z "$source" ]]; then
-          source="$1"
-          source_seen=1
-        else
-          login_args+=("$1")
-        fi
-        shift
-        ;;
-    esac
-  done
+
+  parse_add_args source source_seen login_args "$@"
 
   if [[ -n "$source" ]]; then
     (( ${#login_args[@]} == 0 )) || die "add cannot mix --file/--current with login args"
@@ -3224,23 +3306,23 @@ usage_role_label() {
   local valid="${5:-0}"
   local status="${6:-}"
   local role_w="${7:-1}"
+  local action
 
+  action="$(usage_role_action "$mark" "$profile" "$default_profile" "$valid" "$status")"
   if (( role_w <= 1 )); then
-    if [[ "$mark" == "*" ]]; then
-      printf 's'
-    elif [[ "$mark" == "=" ]]; then
-      printf 'a'
-    elif [[ -n "$default_profile" && "$profile" == "$default_profile" ]]; then
-      printf 'u'
-    elif [[ "$status" == *cap* ]]; then
-      printf 'c'
-    elif [[ "$status" == "login" ]]; then
-      printf 'l'
-    elif [[ "$valid" == "0" && "$status" == "ok" ]]; then
-      printf 'u'
-    fi
+    usage_role_narrow_label "$action"
     return 0
   fi
+
+  printf '%s' "$action"
+}
+
+usage_role_action() {
+  local mark="$1"
+  local profile="$2"
+  local default_profile="$3"
+  local valid="$4"
+  local status="$5"
 
   if [[ "$mark" == "*" ]]; then
     printf 'stay'
@@ -3255,6 +3337,26 @@ usage_role_label() {
   elif [[ "$valid" == "0" && "$status" == "ok" ]]; then
     printf 'use'
   fi
+}
+
+usage_role_narrow_label() {
+  case "$1" in
+    stay)
+      printf 's'
+      ;;
+    same)
+      printf 'a'
+      ;;
+    use)
+      printf 'u'
+      ;;
+    cap)
+      printf 'c'
+      ;;
+    login)
+      printf 'l'
+      ;;
+  esac
 }
 
 usage_status_is_exact_cap() {
@@ -8388,37 +8490,29 @@ codex_run_limit_detected() {
   fi
 }
 
-codex_run_make_resume_args() {
-  CODEX_RUN_RESUME_ARGS=()
+codex_run_resume_option_takes_value() {
+  case "$1" in
+    -c|--config|--enable|--disable|--remote|--remote-auth-token-env|-i|--image|-m|--model|-p|--profile|--profile-v2|-s|--sandbox|-a|--ask-for-approval|-C|--cd|--cwd)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
 
-  while (( $# > 0 )); do
-    case "$1" in
-      --)
-        shift
-        break
-        ;;
-      -c|--config|--enable|--disable|--remote|--remote-auth-token-env|-i|--image|-m|--model|-p|--profile|--profile-v2|-s|--sandbox|-a|--ask-for-approval|-C|--cd|--cwd)
-        CODEX_RUN_RESUME_ARGS+=("$1")
-        shift
-        if (( $# > 0 )); then
-          CODEX_RUN_RESUME_ARGS+=("$1")
-          shift
-        fi
-        ;;
-      --dangerously-bypass-approvals-and-sandbox|--yolo|--oss|--strict-config|--dangerously-auto-approve-everything)
-        CODEX_RUN_RESUME_ARGS+=("$1")
-        shift
-        ;;
-      -*)
-        CODEX_RUN_RESUME_ARGS+=("$1")
-        shift
-        ;;
-      *)
-        break
-        ;;
-    esac
-  done
+codex_run_resume_flag_option() {
+  case "$1" in
+    --dangerously-bypass-approvals-and-sandbox|--yolo|--oss|--strict-config|--dangerously-auto-approve-everything)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
 
+codex_run_append_resume_target() {
   if [[ "${1:-}" == "resume" ]]; then
     shift
     if [[ "${1:-}" == "--last" ]]; then
@@ -8431,6 +8525,32 @@ codex_run_make_resume_args() {
   else
     CODEX_RUN_RESUME_ARGS+=(resume --last)
   fi
+}
+
+codex_run_make_resume_args() {
+  CODEX_RUN_RESUME_ARGS=()
+
+  while (( $# > 0 )); do
+    if [[ "$1" == "--" ]]; then
+      shift
+      break
+    fi
+    if codex_run_resume_option_takes_value "$1"; then
+      CODEX_RUN_RESUME_ARGS+=("$1")
+      shift
+      if (( $# > 0 )); then
+        CODEX_RUN_RESUME_ARGS+=("$1")
+        shift
+      fi
+    elif codex_run_resume_flag_option "$1" || [[ "$1" == -* ]]; then
+      CODEX_RUN_RESUME_ARGS+=("$1")
+      shift
+    else
+      break
+    fi
+  done
+
+  codex_run_append_resume_target "$@"
 }
 
 codex_run_write_launcher() {
