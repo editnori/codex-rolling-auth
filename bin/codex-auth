@@ -46,6 +46,7 @@ usage() {
   print_help_item "recover [session]" "Resume with best" "$width"
   print_help_item "run -- <args>" "Rolling session" "$width"
   print_help_item "remove <name> --yes" "Delete profile" "$width"
+  print_help_item "doctor" "Process audit" "$width"
   print_help_section "advanced" "$width"
   print_help_item "save <name> [file]" "Save auth file" "$width"
   print_help_item "import <name> <file>" "Import profile" "$width"
@@ -214,6 +215,9 @@ help_item_action() {
     remove*)
       printf 'delete'
       ;;
+    doctor)
+      printf 'audit'
+      ;;
     export*)
       printf 'write'
       ;;
@@ -231,7 +235,7 @@ help_action_tone() {
     use|save|view|cache|export|new|copy|load|write)
       printf 'good'
       ;;
-    auth|login|import|wide|refresh|resume|roll)
+    auth|login|import|wide|refresh|resume|roll|audit)
       printf 'warn'
       ;;
     delete|remove)
@@ -2058,7 +2062,7 @@ cmd_current() {
 
   codex_cli="$(codex_bin || true)"
   if [[ -n "$codex_cli" ]] && codex_launcher_ready "$codex_cli"; then
-    status_text="$("$codex_cli" login status 2>&1 || true)"
+    status_text="$(CODEX_AUTH_RUNNER=1 "$codex_cli" login status 2>&1 || true)"
     status_text="$(printf '%s\n' "$status_text" | sed '/^WARNING: proceeding, even though we could not update PATH:/d' | tr '\n\t' '  ' | sed 's/  */ /g; s/^ //; s/ $//')"
     status_text="$(compact_codex_status "$status_text" "$value_w")"
     if [[ -n "$status_text" && "$status_text" != "$mode_display" ]]; then
@@ -2165,7 +2169,7 @@ cmd_login() {
     chmod 600 "$hidden_auth"
   fi
 
-  if ! "$codex_cli" login "$@"; then
+  if ! CODEX_AUTH_RUNNER=1 "$codex_cli" login "$@"; then
     if restore_hidden_auth "$hidden_auth"; then
       print_error "login failed; restored previous auth"
     else
@@ -4409,7 +4413,7 @@ usage_json_from_home() {
   timeout_sec="${CODEX_AUTH_USAGE_TIMEOUT:-4}"
   [[ "$timeout_sec" =~ ^[0-9]+$ && "$timeout_sec" -gt 0 ]] || timeout_sec=4
 
-  if ! coproc CODEX_RATE { CODEX_HOME="$home_dir" "$codex_cli" app-server --listen stdio:// 2>/dev/null; }; then
+  if ! coproc CODEX_RATE { CODEX_AUTH_RUNNER=1 CODEX_HOME="$home_dir" "$codex_cli" app-server --listen stdio:// 2>/dev/null; }; then
     printf '%s\n' '{"error":{"message":"refresh unavailable"}}'
     return 0
   fi
@@ -6555,10 +6559,15 @@ collect_usage_records() {
   shift
   local profile_files=("$@")
   local records_dir profile_file profile_name payload fingerprint i failed=0
-  local max_jobs active_jobs=0
+  local max_jobs max_jobs_cap active_jobs=0
 
-  max_jobs="${CODEX_AUTH_REFRESH_JOBS:-8}"
-  [[ "$max_jobs" =~ ^[0-9]+$ && "$max_jobs" -gt 0 ]] || max_jobs=8
+  max_jobs="${CODEX_AUTH_REFRESH_JOBS:-2}"
+  max_jobs_cap="${CODEX_AUTH_REFRESH_JOBS_MAX:-4}"
+  [[ "$max_jobs" =~ ^[0-9]+$ && "$max_jobs" -gt 0 ]] || max_jobs=2
+  [[ "$max_jobs_cap" =~ ^[0-9]+$ && "$max_jobs_cap" -gt 0 ]] || max_jobs_cap=4
+  (( max_jobs > max_jobs_cap )) && max_jobs="$max_jobs_cap"
+  (( max_jobs > ${#profile_files[@]} )) && max_jobs="${#profile_files[@]}"
+  (( max_jobs < 1 )) && max_jobs=1
 
   records_dir="$(mktemp -d "$CODEX_HOME/.tmp/auth-records.XXXXXX")"
 
@@ -7063,11 +7072,13 @@ cache_stale_profile_names() {
 
 background_refresh_profiles() {
   local script="${BASH_SOURCE[0]}"
+  local background_jobs="${CODEX_AUTH_BACKGROUND_REFRESH_JOBS:-1}"
   (( USAGE_BACKGROUND )) || return 0
   [[ "${CODEX_AUTH_NO_BACKGROUND:-}" == "1" ]] && return 0
   (( $# > 0 )) || return 0
+  [[ "$background_jobs" =~ ^[0-9]+$ && "$background_jobs" -gt 0 ]] || background_jobs=1
 
-  nohup env CODEX_AUTH_REFRESH_LOCK=try CODEX_AUTH_NO_BACKGROUND=1 CODEX_AUTH_REFRESH_BLOCKED=1 CODEX_AUTH_REFRESH_FALLBACK_CACHE=1 "$script" refresh --quiet --fast "$@" >/dev/null 2>&1 &
+  nohup env CODEX_AUTH_REFRESH_LOCK=try CODEX_AUTH_NO_BACKGROUND=1 CODEX_AUTH_REFRESH_BLOCKED=1 CODEX_AUTH_REFRESH_FALLBACK_CACHE=1 CODEX_AUTH_REFRESH_JOBS="$background_jobs" "$script" refresh --quiet --fast "$@" >/dev/null 2>&1 &
 }
 
 cmd_refresh() {
@@ -7284,11 +7295,18 @@ cmd_auto() {
 
 codex_run_limit_detected() {
   local log_file="$1"
+  local scan_bytes="${CODEX_AUTH_ROLL_LOG_SCAN_BYTES:-1048576}"
 
   [[ -s "$log_file" ]] || return 1
-  LC_ALL=C grep -aEiq \
-    'usage limit|rate limit|rate.?limit reached|limit reached|reached[^[:alnum:]]+limit|exceeded[^[:alnum:]]+limit|too many requests|429|rateLimitReached|5h cap|weekly cap|week cap|quota' \
-    "$log_file"
+  [[ "$scan_bytes" =~ ^[1-9][0-9]*$ ]] || scan_bytes=1048576
+  if command -v tail >/dev/null 2>&1; then
+    LC_ALL=C tail -c "$scan_bytes" "$log_file" 2>/dev/null | grep -aEiq \
+      'usage limit|rate limit|rate.?limit reached|limit reached|reached[^[:alnum:]]+limit|exceeded[^[:alnum:]]+limit|too many requests|429|rateLimitReached|5h cap|weekly cap|week cap|quota'
+  else
+    LC_ALL=C grep -aEiq \
+      'usage limit|rate limit|rate.?limit reached|limit reached|reached[^[:alnum:]]+limit|exceeded[^[:alnum:]]+limit|too many requests|429|rateLimitReached|5h cap|weekly cap|week cap|quota' \
+      "$log_file"
+  fi
 }
 
 codex_run_make_resume_args() {
@@ -7362,8 +7380,39 @@ codex_run_watch_loop() {
   [[ "$interval" =~ ^[1-9][0-9]*$ ]] || interval=60
   while true; do
     sleep "$interval" || exit 0
-    CODEX_AUTH_NO_BACKGROUND=1 cmd_auto --quiet --ttl "$auto_ttl" --no-background || true
+    codex_run_auto_select 1 "$auto_ttl"
   done
+}
+
+codex_run_auto_args() {
+  local auto_ttl="${1:-}"
+
+  CODEX_RUN_AUTO_ARGS=(--quiet --no-background)
+  if [[ "$auto_ttl" =~ ^[0-9]+$ ]]; then
+    CODEX_RUN_AUTO_ARGS+=(--ttl "$auto_ttl")
+  fi
+  return 0
+}
+
+codex_run_auto_select() {
+  local run_auto="${1:-1}"
+  local auto_ttl="${2:-}"
+
+  [[ "$run_auto" != "0" && "${CODEX_AUTH_AUTO:-1}" != "0" ]] || return 0
+  codex_run_auto_args "$auto_ttl"
+  CODEX_AUTH_NO_BACKGROUND=1 cmd_auto "${CODEX_RUN_AUTO_ARGS[@]}" || true
+}
+
+codex_run_start_watch_if_enabled() {
+  local run_auto="${1:-1}"
+  local watch_enabled="${2:-0}"
+  local auto_ttl="${3:-}"
+
+  CODEX_RUN_WATCH_PID=""
+  if [[ "$run_auto" != "0" && "$watch_enabled" != "0" && "${CODEX_AUTH_AUTO:-1}" != "0" ]]; then
+    codex_run_watch_loop "$auto_ttl" &
+    CODEX_RUN_WATCH_PID=$!
+  fi
 }
 
 codex_run_stop_watch() {
@@ -7462,20 +7511,35 @@ codex_run_stop_limit_monitor() {
   wait "$monitor_pid" 2>/dev/null || true
 }
 
+codex_run_cleanup() {
+  local watch_pid="${1:-}"
+  local monitor_pid="${2:-}"
+  local run_file="${3:-}"
+  local log_file="${4:-}"
+  local keep_log="${5:-0}"
+
+  codex_run_stop_limit_monitor "$monitor_pid"
+  codex_run_stop_watch "$watch_pid"
+  [[ -n "$run_file" ]] && rm -f "$run_file" 2>/dev/null || true
+  if [[ "$keep_log" != "1" && -n "$log_file" ]]; then
+    rm -f "$log_file" 2>/dev/null || true
+  fi
+}
+
 cmd_run() {
   ensure_dirs
 
   local max_attempts="${CODEX_AUTH_ROLL_ATTEMPTS:-5}"
-  local auto_ttl="${CODEX_AUTH_ROLL_AUTO_TTL:-0}"
+  local auto_ttl="${CODEX_AUTH_ROLL_AUTO_TTL:-}"
   local run_auto="${CODEX_AUTH_RUN_AUTO:-1}"
-  local watch_enabled="${CODEX_AUTH_ROLL_WATCH:-1}"
+  local watch_enabled="${CODEX_AUTH_ROLL_WATCH:-0}"
   local keep_log="${CODEX_AUTH_KEEP_RUN_LOG:-0}"
   local log_enabled="${CODEX_AUTH_ROLL_LOG:-1}"
   local args=()
   local codex_cli attempt status log_file run_file watch_pid monitor_pid target_pid
 
   [[ "$max_attempts" =~ ^[1-9][0-9]*$ ]] || max_attempts=5
-  [[ "$auto_ttl" =~ ^[0-9]+$ ]] || auto_ttl=0
+  [[ -z "$auto_ttl" || "$auto_ttl" =~ ^[0-9]+$ ]] || auto_ttl=""
 
   while (( $# > 0 )); do
     case "$1" in
@@ -7510,19 +7574,23 @@ cmd_run() {
   local run_args=("${args[@]}")
   CODEX_RUN_RESUME_ARGS=()
   attempt=1
+  log_file=""
+  run_file=""
+  watch_pid=""
+  monitor_pid=""
+  target_pid=""
+  trap 'codex_run_cleanup "${watch_pid:-}" "${monitor_pid:-}" "${run_file:-}" "${log_file:-}" "${keep_log:-0}"' EXIT
+  trap 'codex_run_cleanup "${watch_pid:-}" "${monitor_pid:-}" "${run_file:-}" "${log_file:-}" "${keep_log:-0}"; exit 130' HUP INT TERM
 
   while true; do
-    if [[ "$run_auto" != "0" && "${CODEX_AUTH_AUTO:-1}" != "0" ]]; then
-      CODEX_AUTH_NO_BACKGROUND=1 cmd_auto --quiet --ttl "$auto_ttl" --no-background || true
-    fi
+    codex_run_auto_select "$run_auto" "$auto_ttl"
 
-    watch_pid=""
-    if [[ "$run_auto" != "0" && "$watch_enabled" != "0" && "${CODEX_AUTH_AUTO:-1}" != "0" ]]; then
-      codex_run_watch_loop "$auto_ttl" &
-      watch_pid=$!
-    fi
+    codex_run_start_watch_if_enabled "$run_auto" "$watch_enabled" "$auto_ttl"
+    watch_pid="$CODEX_RUN_WATCH_PID"
 
     log_file=""
+    run_file=""
+    monitor_pid=""
     if [[ "$log_enabled" != "0" ]]; then
       log_file="$(mktemp "$CODEX_HOME/.tmp/codex-run.XXXXXX.log")"
     fi
@@ -7537,9 +7605,12 @@ cmd_run() {
       script -qefc "$run_file" "$log_file"
       status=$?
       codex_run_stop_limit_monitor "$monitor_pid"
+      monitor_pid=""
       set -e
       codex_run_stop_watch "$watch_pid"
+      watch_pid=""
       rm -f "$run_file" 2>/dev/null || true
+      run_file=""
     elif [[ "$log_enabled" != "0" && -n "$log_file" && ! -t 1 ]]; then
       set +e
       CODEX_AUTH_RUNNER=1 "$codex_cli" "${run_args[@]}" > >(tee "$log_file") 2> >(tee -a "$log_file" >&2) &
@@ -7549,28 +7620,34 @@ cmd_run() {
       wait "$target_pid"
       status=$?
       codex_run_stop_limit_monitor "$monitor_pid"
+      monitor_pid=""
       set -e
       codex_run_stop_watch "$watch_pid"
+      watch_pid=""
     else
       set +e
       CODEX_AUTH_RUNNER=1 "$codex_cli" "${run_args[@]}"
       status=$?
       set -e
       codex_run_stop_watch "$watch_pid"
+      watch_pid=""
       [[ -n "$log_file" ]] && : > "$log_file"
     fi
 
     if (( status == 0 )); then
-      [[ "$keep_log" == "1" || -z "$log_file" ]] || rm -f "$log_file" 2>/dev/null || true
+      codex_run_cleanup "$watch_pid" "$monitor_pid" "$run_file" "$log_file" "$keep_log"
+      trap - EXIT HUP INT TERM
       return 0
     fi
 
     if [[ -z "$log_file" ]] || ! codex_run_limit_detected "$log_file" || (( attempt >= max_attempts )); then
-      [[ "$keep_log" == "1" || -z "$log_file" ]] || rm -f "$log_file" 2>/dev/null || true
+      codex_run_cleanup "$watch_pid" "$monitor_pid" "$run_file" "$log_file" "$keep_log"
+      trap - EXIT HUP INT TERM
       return "$status"
     fi
 
     [[ "$keep_log" == "1" ]] || rm -f "$log_file" 2>/dev/null || true
+    log_file=""
     print_status_note roll "usage limit, rotating" >&2
     codex_run_make_resume_args "${run_args[@]}"
     run_args=("${CODEX_RUN_RESUME_ARGS[@]}")
@@ -7587,15 +7664,16 @@ cmd_recover() {
   codex_cli="$(codex_bin)" || die "codex command not found"
   require_codex_launcher "$codex_cli"
 
-  cmd_auto --quiet
+  cmd_auto --quiet --no-background
 
+  export CODEX_AUTH_RUNNER=1
   if (( $# == 0 )); then
     print_status_note recover "latest session"
-    exec "$codex_cli" --yolo resume --last
+    exec "$codex_cli" resume --last
   fi
 
   print_status_note recover "session $*"
-  exec "$codex_cli" --yolo resume "$@"
+  exec "$codex_cli" resume "$@"
 }
 
 cmd_remove() {
@@ -7649,6 +7727,112 @@ cmd_remove() {
   fi
 }
 
+doctor_ps_rows() {
+  if [[ -n "${CODEX_AUTH_DOCTOR_PS_FILE:-}" ]]; then
+    cat "$CODEX_AUTH_DOCTOR_PS_FILE"
+  else
+    ps -eo pid=,ppid=,pgid=,sid=,tty=,stat=,etime=,args=
+  fi
+}
+
+doctor_is_legacy_codex() {
+  local args="$1"
+
+  [[ "$args" == *"codex-auth run"* ]] && return 0
+  [[ "$args" == *"/.bun/bin/codex --yolo"* ]] && return 0
+  [[ "$args" == *"/codex/codex --yolo"* ]] && return 0
+  return 1
+}
+
+doctor_is_sidecar() {
+  local args="$1"
+
+  case "$args" in
+    *"/outlook-mcp/"*|*"/webex-mcp/"*|*"/drfirst-mcp/"*|*"/gemini_ui_mcp.mjs"*|*"/run_event_mcp.py"*|*"claude-runner-mcp"*|*"playwright-repl-mcp"*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+cmd_doctor() {
+  local kill_sidecars=0 yes=0
+  while (( $# > 0 )); do
+    case "$1" in
+      --kill-sidecars)
+        kill_sidecars=1
+        shift
+        ;;
+      --yes)
+        yes=1
+        shift
+        ;;
+      *)
+        die "usage: codex-auth doctor [--kill-sidecars --yes]"
+        ;;
+    esac
+  done
+  if (( kill_sidecars && ! yes )); then
+    die "refusing to kill sidecars without --yes"
+  fi
+
+  local pid ppid pgid sid tty stat etime args root_count=0 sidecar_count=0 kill_count=0
+  local -A legacy_pid=()
+  local -A sidecar_by_parent=()
+  local -A sidecar_args_by_pid=()
+  local -a rows=()
+  local row
+
+  while read -r pid ppid pgid sid tty stat etime args; do
+    [[ "$pid" =~ ^[0-9]+$ ]] || continue
+    args="${args:-}"
+    row="$pid"$'\t'"$ppid"$'\t'"$pgid"$'\t'"$tty"$'\t'"$etime"$'\t'"$args"
+    rows+=("$row")
+    if doctor_is_legacy_codex "$args"; then
+      legacy_pid["$pid"]=1
+      root_count=$((root_count + 1))
+    fi
+  done < <(doctor_ps_rows)
+
+  for row in "${rows[@]}"; do
+    IFS=$'\t' read -r pid ppid pgid tty etime args <<<"$row"
+    if [[ -n "${legacy_pid["$ppid"]:-}" ]] && doctor_is_sidecar "$args"; then
+      sidecar_count=$((sidecar_count + 1))
+      sidecar_by_parent["$ppid"]="${sidecar_by_parent["$ppid"]:-} $pid"
+      sidecar_args_by_pid["$pid"]="$args"
+    fi
+  done
+
+  printf 'legacy codex processes: %s\n' "$root_count"
+  printf 'direct sidecars under legacy codex: %s\n' "$sidecar_count"
+
+  if (( root_count > 0 )); then
+    printf '\n'
+    printf 'pid\tppid\tpgid\ttty\tetime\tsidecars\tcommand\n'
+    for row in "${rows[@]}"; do
+      IFS=$'\t' read -r pid ppid pgid tty etime args <<<"$row"
+      [[ -n "${legacy_pid["$pid"]:-}" ]] || continue
+      local sidecars="${sidecar_by_parent["$pid"]:-}"
+      local sidecar_total=0
+      if [[ -n "$sidecars" ]]; then
+        sidecar_total="$(wc -w <<<"$sidecars" | tr -d ' ')"
+      fi
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$pid" "$ppid" "$pgid" "$tty" "$etime" "$sidecar_total" "$args"
+    done
+  fi
+
+  if (( kill_sidecars )); then
+    for pid in "${!sidecar_args_by_pid[@]}"; do
+      if kill "$pid" 2>/dev/null; then
+        kill_count=$((kill_count + 1))
+      fi
+    done
+    printf '\nterminated sidecars: %s\n' "$kill_count"
+  elif (( sidecar_count > 0 )); then
+    printf '\nrun: codex-auth doctor --kill-sidecars --yes\n'
+  fi
+}
+
 cmd_paths() {
   ensure_dirs
   local cols role_w target_w path_w total_w home_label
@@ -7687,6 +7871,7 @@ main() {
     run|wrap) cmd_run "$@" ;;
     recover) cmd_recover "$@" ;;
     refresh) cmd_refresh "$@" ;;
+    doctor) cmd_doctor "$@" ;;
     export) [[ $# -eq 2 ]] || die "usage: codex-auth export <name> <file>"; cmd_export "$@" ;;
     remove|rm) [[ $# -ge 1 && $# -le 2 ]] || die "usage: codex-auth remove <name> --yes"; cmd_remove "$@" ;;
     paths) cmd_paths ;;
