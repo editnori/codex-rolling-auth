@@ -1425,11 +1425,13 @@ print_error() {
   local cols prefix indent current word candidate rendered line_prefix line_width
   local wrote_line=0
   local words=()
+  local line_prefixes=()
 
   cols="$(terminal_width)"
   message="$(compact_error_message "$message" "$cols")"
   prefix="$(print_error_prefix "$cols")"
   indent="$(printf '%*s' "${#prefix}" '')"
+  line_prefixes=("$prefix" "$indent")
   current="$prefix"
   read -r -a words <<<"$message"
 
@@ -1452,11 +1454,7 @@ print_error() {
     fi
 
     if (( ${#prefix} + ${#word} > cols )); then
-      if (( wrote_line )); then
-        line_prefix="$indent"
-      else
-        line_prefix="$prefix"
-      fi
+      line_prefix="${line_prefixes[$wrote_line]}"
       line_width=$((cols - ${#line_prefix}))
       line_width=$(( line_width < 1 ? 1 : line_width ))
       rendered="$(fit_profile_text_rtrim "$word" "$line_width")"
@@ -2770,7 +2768,7 @@ usage_show_group_label() {
 usage_bar() {
   local percent="${1:-}"
   local width="${2:-8}"
-  local value units full partial empty_count
+  local value units max_units full partial empty_count
   local filled_glyph="█"
   local empty_glyph="░"
   local partial_glyphs=("" "▏" "▎" "▍" "▌" "▋" "▊" "▉")
@@ -2795,12 +2793,10 @@ usage_bar() {
   fi
 
   units=$(((value * width * 8 + 50) / 100))
+  max_units=$((width * 8))
+  units="$(clamp_int_between "$units" 0 "$max_units")"
   full=$((units / 8))
   partial=$((units % 8))
-  if (( full >= width )); then
-    full="$width"
-    partial=0
-  fi
   empty_count=$((width - full))
   (( partial > 0 && empty_count > 0 )) && empty_count=$((empty_count - 1))
 
@@ -4956,14 +4952,20 @@ usage_json_check_wait() {
   return 0
 }
 
+usage_json_codex_bin() {
+  local -n codex_cli_ref="$1"
+
+  codex_cli_ref="$(codex_bin)" || return 1
+  codex_launcher_ready "$codex_cli_ref"
+}
+
 usage_json_from_home() {
   local home_dir="$1"
   local codex_cli line payload rate_in rate_out rate_pid
   local requested=0 done=0
   local start timeout_sec
 
-  codex_cli="$(codex_bin)" || return 0
-  codex_launcher_ready "$codex_cli" || return 0
+  usage_json_codex_bin codex_cli || return 0
   timeout_sec="$(usage_json_timeout_seconds)"
 
   if ! coproc CODEX_RATE { CODEX_AUTH_RUNNER=1 CODEX_HOME="$home_dir" "$codex_cli" app-server --listen stdio:// 2>/dev/null; }; then
@@ -6427,6 +6429,7 @@ selector_palette_controls_line() {
   local fallback="$1"
   local total_w="$2"
   local left left_compact left_short left_tiny right compact sep tiny_controls tiny_line
+  local control_pair candidate_left candidate_right selected=0
 
   if usage_unicode_enabled; then
     left="Auth · Codex profiles"
@@ -6450,18 +6453,17 @@ selector_palette_controls_line() {
       ;;
   esac
 
-  if (( ${#left} + ${#right} + 3 <= total_w )); then
-    :
-  elif (( ${#left_compact} + ${#compact} + 3 <= total_w )); then
-    left="$left_compact"
-    right="$compact"
-  elif (( ${#left_short} + ${#compact} + 3 <= total_w )); then
-    left="$left_short"
-    right="$compact"
-  elif (( ${#left_tiny} + ${#compact} + 3 <= total_w )); then
-    left="$left_tiny"
-    right="$compact"
-  else
+  for control_pair in "$left"$'\t'"$right" "$left_compact"$'\t'"$compact" "$left_short"$'\t'"$compact" "$left_tiny"$'\t'"$compact"; do
+    IFS=$'\t' read -r candidate_left candidate_right <<<"$control_pair"
+    if (( ${#candidate_left} + ${#candidate_right} + 3 <= total_w )); then
+      left="$candidate_left"
+      right="$candidate_right"
+      selected=1
+      break
+    fi
+  done
+
+  if (( ! selected )); then
     sep="$(usage_separator)"
     tiny_controls="$compact"
     tiny_controls="${tiny_controls// | / }"
@@ -7417,13 +7419,7 @@ collect_usage_records_cached() {
 
   while IFS=$'\037' read -r meta_path mode hint secret; do
     [[ -n "$meta_path" ]] || continue
-    if [[ -n "$secret" && ! "$secret" =~ ^[0-9a-f]{64}$ ]]; then
-      fp="$(fingerprint_secret "$secret")"
-    elif [[ -n "$secret" ]]; then
-      fp="$secret"
-    else
-      fp="$(fingerprint_secret "")"
-    fi
+    fp="$(auth_record_fingerprint "$secret")"
     profile_name="$(basename "$meta_path" .json)"
     profile_fp["$meta_path"]="$fp"
     printf '%s\037%s\037%s\n' "$meta_path" "$profile_name" "$fp" >> "$map_file"
