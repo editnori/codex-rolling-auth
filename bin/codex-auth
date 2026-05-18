@@ -4675,18 +4675,6 @@ usage_payload_print_cache_hit() {
   return 1
 }
 
-usage_payload_update_cache_if_valid() {
-  local profile_name="$1"
-  local fingerprint="$2"
-  local payload="$3"
-
-  [[ -n "$fingerprint" ]] || return 0
-  if ! jq -e '.error? != null' >/dev/null 2>&1 <<<"$payload"; then
-    state_update_profile "$profile_name" "$fingerprint" "$payload"
-  fi
-  return 0
-}
-
 usage_payload_for_profile() {
   local profile_file="$1"
   local fingerprint="${2:-}"
@@ -4712,7 +4700,9 @@ usage_payload_for_profile() {
     return 0
   fi
 
-  usage_payload_update_cache_if_valid "$profile_name" "$fingerprint" "$payload"
+  if [[ -n "$fingerprint" ]] && ! jq -e '.error? != null' >/dev/null 2>&1 <<<"$payload"; then
+    state_update_profile "$profile_name" "$fingerprint" "$payload"
+  fi
   printf '%s\n' "$payload"
 }
 
@@ -4761,12 +4751,6 @@ usage_json_timeout_seconds() {
 
   [[ "$timeout_sec" =~ ^[0-9]+$ && "$timeout_sec" -gt 0 ]] || timeout_sec=4
   printf '%s' "$timeout_sec"
-}
-
-usage_json_send_initialize() {
-  local rate_in="$1"
-
-  printf '%s\n' '{"id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-auth","title":"Codex Auth","version":"0.1.0"},"capabilities":{"experimentalApi":true,"requestAttestation":false}}}' 2>/dev/null >&"$rate_in"
 }
 
 usage_json_handle_line() {
@@ -4836,7 +4820,7 @@ usage_json_from_home() {
   rate_pid="$CODEX_RATE_PID"
   start="$(now_epoch)"
 
-  if ! usage_json_send_initialize "$rate_in"; then
+  if ! printf '%s\n' '{"id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-auth","title":"Codex Auth","version":"0.1.0"},"capabilities":{"experimentalApi":true,"requestAttestation":false}}}' 2>/dev/null >&"$rate_in"; then
     usage_json_cleanup_coproc "$rate_in" "$rate_out" "$rate_pid"
     printf '%s\n' '{"error":{"message":"refresh unavailable"}}'
     return 0
@@ -4877,12 +4861,6 @@ usage_limit_remaining_fields() {
     reset_text="$(TZ="${TZ:-America/Chicago}" date -d "@$reset" '+%m-%d %H:%M' 2>/dev/null || printf '-')"
   fi
   printf '%s\t%s%%\t%s\n' "$used" "$left" "$reset_text"
-}
-
-usage_record_extract_payload() {
-  local payload="$1"
-
-  jq -r "$USAGE_RECORD_EXTRACT_JQ" <<<"$payload" 2>/dev/null || true
 }
 
 usage_record_error_status() {
@@ -4949,7 +4927,7 @@ usage_record_for_profile() {
   fi
 
   local extracted kind err cache_age stale plan short_used short_window short_reset weekly_used weekly_window weekly_reset credits reached
-  extracted="$(usage_record_extract_payload "$payload")"
+  extracted="$(jq -r "$USAGE_RECORD_EXTRACT_JQ" <<<"$payload" 2>/dev/null || true)"
   IFS=$'\037' read -r kind err cache_age stale plan short_used short_window short_reset weekly_used weekly_window weekly_reset credits reached <<<"$extracted"
 
   if [[ "$kind" == "error" ]]; then
@@ -7887,17 +7865,6 @@ acquire_refresh_command_lock() {
   fi
 }
 
-collect_refresh_records() {
-  local active_fp="$1"
-  shift
-
-  if [[ "$USAGE_FAST_REFRESH" == "1" ]]; then
-    collect_usage_records "$active_fp" "$@"
-  else
-    collect_usage_records_synced "$active_fp" "$@"
-  fi
-}
-
 cmd_refresh() {
   ensure_dirs
   command -v jq >/dev/null 2>&1 || die "jq is required for usage refresh"
@@ -7929,7 +7896,11 @@ cmd_refresh() {
   active_fp="$(active_auth_fingerprint)"
 
   local records default_profile active_is_best
-  records="$(collect_refresh_records "$active_fp" "${profile_files[@]}")"
+  if [[ "$USAGE_FAST_REFRESH" == "1" ]]; then
+    records="$(collect_usage_records "$active_fp" "${profile_files[@]}")"
+  else
+    records="$(collect_usage_records_synced "$active_fp" "${profile_files[@]}")"
+  fi
   usage_best_selection_into "$records" default_profile active_is_best
 
   [[ "$USAGE_QUIET" == "1" ]] || render_usage_records "$records" "$default_profile" "$active_is_best"
