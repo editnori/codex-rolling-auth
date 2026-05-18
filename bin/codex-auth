@@ -165,66 +165,38 @@ print_help_compact_line() {
 help_item_action() {
   local cmd="$1"
   local desc="$2"
+  local row pattern action
+  local rows=(
+    "usage --refresh --select"$'\t'"select"
+    "usage --cached"$'\t'"cache"
+    "usage --refresh -v"$'\t'"wide"
+    "add <name>"$'\t'"new"
+    "current"$'\t'"view"
+    "list*"$'\t'"view"
+    "paths"$'\t'"view"
+    "use <name>"$'\t'"use"
+    "add <name> --current"$'\t'"save"
+    "save*"$'\t'"copy"
+    "add <name> --file <file>"$'\t'"import"
+    "import*"$'\t'"load"
+    "login <name>"$'\t'"auth"
+    "refresh"$'\t'"sync"
+    "auto"$'\t'"best"
+    "recover*"$'\t'"resume"
+    "run -- <args>"$'\t'"roll"
+    "remove*"$'\t'"delete"
+    "doctor"$'\t'"audit"
+    "export*"$'\t'"write"
+  )
 
-  case "$cmd" in
-    "usage --refresh --select")
-      printf 'select'
-      ;;
-    "usage --cached")
-      printf 'cache'
-      ;;
-    "usage --refresh -v")
-      printf 'wide'
-      ;;
-    "add <name>")
-      printf 'new'
-      ;;
-    current|list*|paths)
-      printf 'view'
-      ;;
-    "use <name>")
-      printf 'use'
-      ;;
-    "add <name> --current")
-      printf 'save'
-      ;;
-    save*)
-      printf 'copy'
-      ;;
-    "add <name> --file <file>")
-      printf 'import'
-      ;;
-    import*)
-      printf 'load'
-      ;;
-    "login <name>")
-      printf 'auth'
-      ;;
-    refresh)
-      printf 'sync'
-      ;;
-    auto)
-      printf 'best'
-      ;;
-    recover*)
-      printf 'resume'
-      ;;
-    "run -- <args>")
-      printf 'roll'
-      ;;
-    remove*)
-      printf 'delete'
-      ;;
-    doctor)
-      printf 'audit'
-      ;;
-    export*)
-      printf 'write'
-      ;;
-    *)
-      printf '%s' "${desc%% *}"
-      ;;
-  esac
+  for row in "${rows[@]}"; do
+    IFS=$'\t' read -r pattern action <<<"$row"
+    if [[ "$cmd" == $pattern ]]; then
+      printf '%s' "$action"
+      return 0
+    fi
+  done
+  printf '%s' "${desc%% *}"
 }
 
 help_action_tone() {
@@ -720,77 +692,119 @@ auth_mode_display_label() {
   esac
 }
 
-profile_account_display() {
+profile_alias_base() {
+  local hint="$1"
+  local verbose="$2"
+
+  if (( verbose )) && [[ -n "$hint" ]]; then
+    printf '%s' "$hint"
+  else
+    short_account_hint "$hint" 13
+  fi
+}
+
+profile_alias_text() {
+  local base="$1"
+  local alias_label="$2"
+
+  if usage_unicode_enabled; then
+    printf '%s ↔ %s' "$base" "$alias_label"
+  else
+    printf '%s = %s' "$base" "$alias_label"
+  fi
+}
+
+profile_compact_alias_text() {
+  local alias_label="$1"
+
+  if usage_unicode_enabled; then
+    printf '↔ %s' "$alias_label"
+  else
+    printf '= %s' "$alias_label"
+  fi
+}
+
+profile_fit_alias_prefix() {
+  local alias_label="$1"
+  local width="$2"
+
+  if usage_unicode_enabled; then
+    printf '↔'
+  else
+    printf '='
+  fi
+  fit_profile_text "$alias_label" "$((width - 1))"
+}
+
+profile_account_alias_compact_display() {
+  local alias_of="$1"
+  local width="$2"
+  local alias_label compact_alias
+
+  alias_label="$(usage_display_profile_name "$alias_of" "" "$((width - 2))")"
+  compact_alias="$(profile_compact_alias_text "$alias_label")"
+  if (( ${#compact_alias} <= width )); then
+    printf '%s' "$compact_alias"
+  else
+    profile_fit_alias_prefix "$alias_label" "$width"
+  fi
+}
+
+profile_account_alias_display() {
   local hint="$1"
   local width="$2"
-  local verbose="${3:-0}"
-  local alias_of="${4:-}"
-  local base alias_label alias_text compact_alias
+  local verbose="$3"
+  local alias_of="$4"
+  local alias_label base alias_text compact_alias
 
-  if [[ -n "$alias_of" ]]; then
-    alias_label="$(usage_display_profile_name "$alias_of" "" "$width")"
-    if (( verbose )) && [[ -n "$hint" ]]; then
-      base="$hint"
-    else
-      base="$(short_account_hint "$hint" 13)"
-    fi
-    if usage_unicode_enabled; then
-      alias_text="$base ↔ $alias_label"
-      compact_alias="↔ $alias_label"
-    else
-      alias_text="$base = $alias_label"
-      compact_alias="= $alias_label"
-    fi
-    if (( ${#alias_text} > width )) && (( verbose )); then
-      base="$(short_account_hint "$hint" 13)"
-      if usage_unicode_enabled; then
-        alias_text="$base ↔ $alias_label"
-      else
-        alias_text="$base = $alias_label"
-      fi
-    fi
-    if (( ${#alias_text} <= width )); then
-      printf '%s' "$alias_text"
-    elif (( ${#compact_alias} <= width )); then
-      printf '%s' "$compact_alias"
-    elif (( width >= 5 )); then
-      alias_label="$(usage_display_profile_name "$alias_of" "" "$((width - 2))")"
-      if usage_unicode_enabled; then
-        compact_alias="↔ $alias_label"
-      else
-        compact_alias="= $alias_label"
-      fi
-      if (( ${#compact_alias} <= width )); then
-        printf '%s' "$compact_alias"
-      elif usage_unicode_enabled; then
-        printf '↔'
-        fit_profile_text "$alias_label" "$((width - 1))"
-      else
-        printf '='
-        fit_profile_text "$alias_label" "$((width - 1))"
-      fi
-    elif usage_unicode_enabled && (( width >= 2 )); then
-      printf '↔'
-      fit_profile_text "$alias_label" "$((width - 1))"
-    elif (( width >= 2 )); then
-      printf '='
-      fit_profile_text "$alias_label" "$((width - 1))"
-    else
-      fit_text "$(short_account_hint "$hint" "$width")" "$width"
-    fi
-    return 0
+  alias_label="$(usage_display_profile_name "$alias_of" "" "$width")"
+  base="$(profile_alias_base "$hint" "$verbose")"
+  alias_text="$(profile_alias_text "$base" "$alias_label")"
+  compact_alias="$(profile_compact_alias_text "$alias_label")"
+  if (( ${#alias_text} > width )) && (( verbose )); then
+    base="$(short_account_hint "$hint" 13)"
+    alias_text="$(profile_alias_text "$base" "$alias_label")"
   fi
-
-  if [[ -z "$hint" ]]; then
-    return 0
+  if (( ${#alias_text} <= width )); then
+    printf '%s' "$alias_text"
+  elif (( ${#compact_alias} <= width )); then
+    printf '%s' "$compact_alias"
+  elif (( width >= 5 )); then
+    profile_account_alias_compact_display "$alias_of" "$width"
+  elif (( width >= 2 )); then
+    profile_fit_alias_prefix "$alias_label" "$width"
+  else
+    fit_text "$(short_account_hint "$hint" "$width")" "$width"
   fi
+}
 
+profile_account_hint_display() {
+  local hint="$1"
+  local width="$2"
+  local verbose="$3"
+  local base
+
+  [[ -n "$hint" ]] || return 0
   if (( verbose )); then
     base="$(verbose_account_hint "$hint" "$width")"
   else
     base="$(short_account_hint "$hint" "$width")"
   fi
   fit_text "$base" "$width"
+}
+
+profile_account_display() {
+  local hint="$1"
+  local width="$2"
+  local verbose="${3:-0}"
+  local alias_of="${4:-}"
+
+  if [[ -n "$alias_of" ]]; then
+    profile_account_alias_display "$hint" "$width" "$verbose" "$alias_of"
+    return 0
+  fi
+
+  profile_account_hint_display "$hint" "$width" "$verbose"
 }
 
 print_profile_list_line() {
@@ -7840,58 +7854,60 @@ parse_usage_args() {
   shift 2
 
   while (( $# > 0 )); do
-    case "$1" in
-      --auto)
-        auto_switch_ref=1
-        shift
-        ;;
-      --cached)
-        USAGE_CACHED=1
-        shift
-        ;;
-      --refresh)
-        USAGE_REFRESH=1
-        shift
-        ;;
-      --fast)
-        USAGE_FAST_REFRESH=1
-        shift
-        ;;
-      --sync)
-        USAGE_FAST_REFRESH=0
-        shift
-        ;;
-      --quiet|-q)
-        USAGE_QUIET=1
-        shift
-        ;;
-      --ttl)
-        [[ "${2:-}" =~ ^[0-9]+$ ]] || die "usage: --ttl seconds"
-        CACHE_TTL="$2"
-        shift 2
-        ;;
-      --verbose|-v)
-        USAGE_VERBOSE=1
-        shift
-        ;;
-      --select|--menu)
-        USAGE_SELECT=1
-        shift
-        ;;
-      --)
-        shift
-        args_ref+=("$@")
-        break
-        ;;
-      -*)
-        die "unknown usage option: $1"
-        ;;
-      *)
-        args_ref+=("$1")
-        shift
-        ;;
-    esac
+    if parse_usage_simple_option "$1" auto_switch_ref; then
+      shift
+      continue
+    fi
+    if [[ "$1" == "--ttl" ]]; then
+      [[ "${2:-}" =~ ^[0-9]+$ ]] || die "usage: --ttl seconds"
+      CACHE_TTL="$2"
+      shift 2
+    elif [[ "$1" == "--" ]]; then
+      shift
+      args_ref+=("$@")
+      break
+    elif [[ "$1" == -* ]]; then
+      die "unknown usage option: $1"
+    else
+      args_ref+=("$1")
+      shift
+    fi
   done
+}
+
+parse_usage_simple_option() {
+  local option="$1"
+  local -n auto_switch_target_ref="$2"
+
+  case "$option" in
+    --auto)
+      auto_switch_target_ref=1
+      ;;
+    --cached)
+      USAGE_CACHED=1
+      ;;
+    --refresh)
+      USAGE_REFRESH=1
+      ;;
+    --fast)
+      USAGE_FAST_REFRESH=1
+      ;;
+    --sync)
+      USAGE_FAST_REFRESH=0
+      ;;
+    --quiet|-q)
+      USAGE_QUIET=1
+      ;;
+    --verbose|-v)
+      USAGE_VERBOSE=1
+      ;;
+    --select|--menu)
+      USAGE_SELECT=1
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 usage_profile_files_for_args() {
