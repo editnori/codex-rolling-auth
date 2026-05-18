@@ -6356,21 +6356,13 @@ selector_palette_controls_line() {
   local left left_compact left_short left_tiny right compact sep tiny_controls tiny_line
   local control_pair candidate_left candidate_right selected=0
 
-  if usage_unicode_enabled; then
-    left="Auth · Codex profiles"
-    left_compact="Auth · profiles"
-    left_short="Auth · prof"
-    left_tiny="Auth"
-    right="enter select · esc stay"
-    compact="enter · esc"
-  else
-    left="Auth | Codex profiles"
-    left_compact="Auth | profiles"
-    left_short="Auth | prof"
-    left_tiny="Auth"
-    right="enter select | esc stay"
-    compact="enter | esc"
-  fi
+  sep="$(usage_separator)"
+  left="Auth${sep}Codex profiles"
+  left_compact="Auth${sep}profiles"
+  left_short="Auth${sep}prof"
+  left_tiny="Auth"
+  right="enter select${sep}esc stay"
+  compact="enter${sep}esc"
   case "$fallback" in
     number*|num*|[0-9]*)
       right="$fallback"
@@ -6389,10 +6381,8 @@ selector_palette_controls_line() {
   done
 
   if (( ! selected )); then
-    sep="$(usage_separator)"
     tiny_controls="$compact"
-    tiny_controls="${tiny_controls// | / }"
-    tiny_controls="${tiny_controls// · / }"
+    tiny_controls="${tiny_controls//$sep/ }"
     if (( ${#left_tiny} + ${#tiny_controls} + 3 > total_w )); then
       tiny_controls="${tiny_controls/ q stay/ q}"
     fi
@@ -6463,11 +6453,7 @@ print_palette_title_line() {
   local total_w="$4"
   local sep left compact_label compact_left gap
 
-  if usage_unicode_enabled; then
-    sep=" · "
-  else
-    sep=" | "
-  fi
+  sep="$(usage_separator)"
   left="$namespace$sep$label"
   if (( ${#left} > total_w || ( ${#right} > 0 && ${#left} + ${#right} + 2 > total_w ) )); then
     compact_label="$(palette_compact_label "$label")"
@@ -6596,14 +6582,13 @@ selector_fzf_controls() {
   local total_w="$1"
   local fzf_prompt fzf_pointer selector_control_sep selector_controls
 
+  selector_control_sep="$(usage_separator)"
   if usage_unicode_enabled; then
     fzf_prompt='filter ▸ '
     fzf_pointer='▸'
-    selector_control_sep=' · '
   else
     fzf_prompt='filter > '
     fzf_pointer='>'
-    selector_control_sep=' | '
   fi
   if (( total_w < 32 )); then
     selector_controls="enter${selector_control_sep}esc stay${selector_control_sep}filter"
@@ -6801,11 +6786,7 @@ selector_numbered_controls() {
   local cols="$2"
   local sep
 
-  if usage_unicode_enabled; then
-    sep=' · '
-  else
-    sep=' | '
-  fi
+  sep="$(usage_separator)"
   if (( cols < 36 )); then
     printf '1-%s%sq stay' "$row_count" "$sep"
   else
@@ -8580,24 +8561,19 @@ cmd_run() {
 
     codex_run_execute_attempt "$codex_cli" "$log_enabled" run_args status log_file run_file watch_pid monitor_pid target_pid
 
-    if (( status == 0 )); then
-      codex_run_cleanup "$watch_pid" "$monitor_pid" "$run_file" "$log_file" "$keep_log"
-      trap - EXIT HUP INT TERM
-      return 0
+    if (( status != 0 && attempt < max_attempts )) && [[ -n "$log_file" ]] && codex_run_limit_detected "$log_file"; then
+      [[ "$keep_log" == "1" ]] || rm -f "$log_file" 2>/dev/null || true
+      log_file=""
+      print_status_note roll "usage limit, rotating" >&2
+      codex_run_make_resume_args "${run_args[@]}"
+      run_args=("${CODEX_RUN_RESUME_ARGS[@]}")
+      attempt=$((attempt + 1))
+      continue
     fi
 
-    if [[ -z "$log_file" ]] || ! codex_run_limit_detected "$log_file" || (( attempt >= max_attempts )); then
-      codex_run_cleanup "$watch_pid" "$monitor_pid" "$run_file" "$log_file" "$keep_log"
-      trap - EXIT HUP INT TERM
-      return "$status"
-    fi
-
-    [[ "$keep_log" == "1" ]] || rm -f "$log_file" 2>/dev/null || true
-    log_file=""
-    print_status_note roll "usage limit, rotating" >&2
-    codex_run_make_resume_args "${run_args[@]}"
-    run_args=("${CODEX_RUN_RESUME_ARGS[@]}")
-    attempt=$((attempt + 1))
+    codex_run_cleanup "$watch_pid" "$monitor_pid" "$run_file" "$log_file" "$keep_log"
+    trap - EXIT HUP INT TERM
+    return "$status"
   done
 }
 
