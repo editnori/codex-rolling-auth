@@ -26,13 +26,6 @@ write_codex_real_launcher() {
   chmod 0755 "$real"
 }
 
-same_path() {
-  local left="$1"
-  local right="$2"
-
-  [[ "$(realpath "$left" 2>/dev/null || printf '%s' "$left")" == "$(realpath "$right" 2>/dev/null || printf '%s' "$right")" ]]
-}
-
 promote_real_candidate() {
   local current="$1"
   local real="$2"
@@ -40,7 +33,7 @@ promote_real_candidate() {
   local target
 
   [[ -x "$candidate" ]] || return 1
-  same_path "$candidate" "$current" && return 1
+  [[ "$(realpath "$candidate" 2>/dev/null || printf '%s' "$candidate")" == "$(realpath "$current" 2>/dev/null || printf '%s' "$current")" ]] && return 1
   is_codex_auth_shim "$candidate" && return 1
   target="$(realpath "$candidate" 2>/dev/null || printf '%s' "$candidate")"
   write_codex_real_launcher "$target" "$real"
@@ -53,16 +46,6 @@ promote_real_backup() {
   [[ -e "$backup" ]] || return 1
   is_codex_auth_shim "$backup" && return 1
   cp -P "$backup" "$real"
-  chmod 0755 "$real" 2>/dev/null || true
-}
-
-promote_current_codex() {
-  local current="$1"
-  local real="$2"
-
-  [[ -e "$current" ]] || return 1
-  is_codex_auth_shim "$current" && return 1
-  cp -P "$current" "$real"
   chmod 0755 "$real" 2>/dev/null || true
 }
 
@@ -109,7 +92,7 @@ promote_real_codex() {
 
   [[ -x "$real" ]] && return 0
 
-  promote_current_codex "$current" "$real" && return 0
+  promote_real_backup "$real" "$current" && return 0
   promote_real_backups "$real" && return 0
   promote_listed_real_candidates "$current" "$real" \
     "$HOME/.bun/bin/codex-real" \

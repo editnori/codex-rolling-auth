@@ -2324,16 +2324,6 @@ terminal_width() {
   printf '%s\n' "$cols"
 }
 
-strip_ansi() {
-  LC_ALL=C sed $'s/\033\\[[0-9;]*m//g' <<<"${1:-}"
-}
-
-ansi_visible_length() {
-  local plain
-  plain="$(strip_ansi "${1:-}")"
-  printf '%s' "${#plain}"
-}
-
 repeat_glyph() {
   local glyph="$1"
   local width="${2:-0}"
@@ -2348,50 +2338,39 @@ usage_unicode_enabled() {
   [[ "${CODEX_AUTH_ASCII:-0}" != "1" ]]
 }
 
-usage_rule_glyph() {
+usage_glyph() {
+  local unicode="$1"
+  local ascii="${2:-}"
+
   if usage_unicode_enabled; then
-    printf '─'
+    printf '%s' "$unicode"
   else
-    printf '-'
+    printf '%s' "$ascii"
   fi
+}
+
+usage_rule_glyph() {
+  usage_glyph '─' '-'
 }
 
 usage_meta_glyph() {
-  if usage_unicode_enabled; then
-    printf '·'
-  else
-    printf '.'
-  fi
+  usage_glyph '·' '.'
 }
 
 usage_active_glyph() {
-  if usage_unicode_enabled; then
-    printf '●'
-  else
-    printf '*'
-  fi
+  usage_glyph '●' '*'
 }
 
 usage_reset_glyph() {
-  if usage_unicode_enabled; then
-    printf '↺'
-  fi
+  usage_glyph '↺'
 }
 
 usage_separator() {
-  if usage_unicode_enabled; then
-    printf ' · '
-  else
-    printf ' | '
-  fi
+  usage_glyph ' · ' ' | '
 }
 
 usage_trunc_glyph() {
-  if usage_unicode_enabled; then
-    printf '…'
-  else
-    printf '~'
-  fi
+  usage_glyph '…' '~'
 }
 
 fit_text() {
@@ -2487,83 +2466,39 @@ fit_profile_text_rtrim() {
   rtrim_spaces "$rendered"
 }
 
-usage_tone_color() {
-  local tone="${1:-}"
+usage_tone_code() {
+  local mode="$1"
+  local tone="${2:-}"
+  local color=""
 
-  if ! usage_color_active; then
-    return 0
-  fi
-
+  usage_color_active || return 0
   case "$tone" in
-    good)
-      printf '\033[38;2;166;227;161m'
-      ;;
-    warn)
-      printf '\033[38;2;250;178;131m'
-      ;;
-    active)
-      printf '\033[38;2;157;124;216m'
-      ;;
-    bad)
-      printf '\033[38;2;224;108;117m'
-      ;;
-    accent)
-      printf '\033[38;2;250;178;131m'
-      ;;
-    secondary)
-      printf '\033[38;2;157;124;216m'
-      ;;
-    border)
-      printf '\033[38;2;50;50;50m'
-      ;;
-    track_edge)
-      printf '\033[38;2;16;16;16m'
-      ;;
-    muted)
-      printf '\033[38;2;128;128;128m'
-      ;;
+    good) color="166;227;161" ;;
+    warn|accent) color="250;178;131" ;;
+    active|secondary) color="157;124;216" ;;
+    bad) color="224;108;117" ;;
+    track_edge) color="16;16;16" ;;
   esac
+  case "$mode:$tone" in
+    38:border) color="50;50;50" ;;
+    38:muted) color="128;128;128" ;;
+    48:track) color="35;35;35" ;;
+  esac
+  [[ -n "$color" ]] && printf '\033[%s;2;%sm' "$mode" "$color"
   return 0
 }
 
+usage_tone_color() {
+  usage_tone_code 38 "${1:-}"
+}
+
 usage_tone_reset() {
-  if usage_color_active; then
-    printf '\033[0m'
-  fi
+  usage_color_active && printf '\033[0m'
   return 0
 }
 
 usage_tone_bg() {
-  local tone="${1:-}"
-
-  if ! usage_color_active; then
-    return 0
-  fi
-
-  case "$tone" in
-    good)
-      printf '\033[48;2;166;227;161m'
-      ;;
-    warn)
-      printf '\033[48;2;250;178;131m'
-      ;;
-    active)
-      printf '\033[48;2;157;124;216m'
-      ;;
-    bad)
-      printf '\033[48;2;224;108;117m'
-      ;;
-    accent)
-      printf '\033[48;2;250;178;131m'
-      ;;
-    track)
-      printf '\033[48;2;35;35;35m'
-      ;;
-    track_edge)
-      printf '\033[48;2;16;16;16m'
-      ;;
-  esac
-  return 0
+  usage_tone_code 48 "${1:-}"
 }
 
 usage_limit_tone() {
@@ -2633,23 +2568,6 @@ usage_status_tone() {
   fi
 }
 
-usage_group_tone() {
-  case "${1:-}" in
-    limited|cap)
-      printf 'bad'
-      ;;
-    login|offline)
-      printf 'warn'
-      ;;
-    ready)
-      printf 'good'
-      ;;
-    *)
-      printf 'muted'
-      ;;
-  esac
-}
-
 print_toned_fit() {
   local text="$1"
   local width="$2"
@@ -2680,29 +2598,6 @@ print_toned_fit_center() {
   usage_tone_reset
 }
 
-usage_section_label() {
-  case "${1:-}" in
-    limited)
-      printf 'limits'
-      ;;
-    login)
-      printf 'auth'
-      ;;
-    stale)
-      printf 'stale cache'
-      ;;
-    offline)
-      printf 'offline'
-      ;;
-    unavailable)
-      printf 'no data'
-      ;;
-    *)
-      printf '%s' "${1:-}"
-      ;;
-  esac
-}
-
 usage_record_group() {
   local valid="${1:-0}"
   local status="${2:-}"
@@ -2725,11 +2620,18 @@ usage_record_group() {
 usage_section_rule() {
   local width="$1"
   local label="${2:-}"
-  local text remaining rule_glyph
+  local text rule_glyph
   rule_glyph="$(usage_rule_glyph)"
 
   if [[ -n "$label" ]]; then
-    printf '%s' "$(usage_section_label "$label")"
+    case "$label" in
+      limited) text="limits" ;;
+      login) text="auth" ;;
+      stale) text="stale cache" ;;
+      unavailable) text="no data" ;;
+      *) text="$label" ;;
+    esac
+    printf '%s' "$text"
   else
     repeat_glyph "$rule_glyph" "$width"
   fi
@@ -2738,22 +2640,17 @@ usage_section_rule() {
 print_usage_section_rule() {
   local width="$1"
   local label="${2:-}"
+  local tone="muted"
 
-  usage_tone_color "$(usage_group_tone "$label")"
+  case "$label" in
+    limited|cap) tone="bad" ;;
+    login|offline) tone="warn" ;;
+    ready) tone="good" ;;
+  esac
+  usage_tone_color "$tone"
   usage_section_rule "$width" "$label"
   usage_tone_reset
   printf '\n'
-}
-
-usage_show_group_label() {
-  case "${1:-}" in
-    ready|limited)
-      return 1
-      ;;
-    *)
-      return 0
-      ;;
-  esac
 }
 
 usage_bar() {
@@ -4990,33 +4887,10 @@ print_selector_row() {
   fit_text_rtrim "$detail" "$detail_w"
 }
 
-selector_palette_action_tone() {
-  case "${1:-}" in
-    best)
-      printf 'accent'
-      ;;
-    stay)
-      printf 'active'
-      ;;
-    use)
-      printf 'good'
-      ;;
-    cap)
-      printf 'bad'
-      ;;
-    login|warn)
-      printf 'warn'
-      ;;
-    *)
-      printf 'muted'
-      ;;
-  esac
-}
-
 print_selector_palette_primary() {
   local primary="$1"
   local width="$2"
-  local action display_action profile action_w profile_w profile_render gap
+  local action display_action profile action_w profile_w profile_render gap action_tone
 
   if (( width <= 0 )); then
     return 0
@@ -5031,15 +4905,17 @@ print_selector_palette_primary() {
     best|stay|use|same|cap|login|warn)
       display_action="$action"
       [[ "$action" == "best" ]] && display_action="use"
+      action_tone="$(usage_role_tone "$action")"
+      [[ "$action" == "warn" ]] && action_tone="warn"
       action_w=5
       gap=2
       if (( action_w + gap >= width )); then
-        usage_tone_color "$(selector_palette_action_tone "$action")"
+        usage_tone_color "$action_tone"
         fit_text "$display_action" "$width"
         usage_tone_reset
         return 0
       fi
-      usage_tone_color "$(selector_palette_action_tone "$action")"
+      usage_tone_color "$action_tone"
       fit_text "$display_action" "$action_w"
       usage_tone_reset
       printf '%*s' "$gap" ''
@@ -5285,19 +5161,9 @@ selector_palette_primary_header() {
     profile_label="profile"
   fi
 
-  selector_palette_center_header_cell "act" "$action_w"
+  print_toned_fit_center "act" "$action_w" muted
   printf '%*s' "$gap" ''
-  selector_palette_center_header_cell "$profile_label" "$profile_w"
-}
-
-selector_palette_center_header_cell() {
-  local text="$1"
-  local width="$2"
-
-  (( width <= 0 )) && return 0
-  usage_tone_color muted
-  fit_text_center "$text" "$width"
-  usage_tone_reset
+  print_toned_fit_center "$profile_label" "$profile_w" muted
 }
 
 selector_palette_metric_header_cell() {
@@ -5347,7 +5213,7 @@ selector_palette_table_header() {
   selector_palette_metric_header_cell "$short_label" "$short_w"
   if (( status_w > 0 )); then
     printf '%*s' "$status_gap" ''
-    selector_palette_center_header_cell "$status_label" "$status_w"
+    print_toned_fit_center "$status_label" "$status_w" muted
   fi
   printf '\n'
 }
@@ -5425,22 +5291,6 @@ selector_palette_bar_bg_segments() {
   return 0
 }
 
-selector_palette_bar_unicode_plain() {
-  local tone="$1"
-  local width="$2"
-  local full="$3"
-  local partial="$4"
-  local used="$5"
-  local partial_glyphs=("" "▏" "▎" "▍" "▌" "▋" "▊" "▉")
-
-  usage_tone_color "$tone"
-  repeat_glyph "█" "$full"
-  (( partial > 0 && full < width )) && printf '%s' "${partial_glyphs[$partial]}"
-  usage_tone_reset
-  (( width > used )) && printf '%*s' "$((width - used))" ''
-  return 0
-}
-
 selector_palette_bar_unicode() {
   local value="$1"
   local width="$2"
@@ -5448,6 +5298,7 @@ selector_palette_bar_unicode() {
   local bg_style="$4"
   local bar_border_glyph="$5"
   local units full partial used
+  local partial_glyphs=("" "▏" "▎" "▍" "▌" "▋" "▊" "▉")
 
   units=$(((value * width * 8 + 50) / 100))
   full=$((units / 8))
@@ -5461,20 +5312,12 @@ selector_palette_bar_unicode() {
   if usage_color_active && [[ "$bg_style" == "bg" ]]; then
     selector_palette_bar_bg_segments "$tone" "$width" "$used" "$bar_border_glyph"
   else
-    selector_palette_bar_unicode_plain "$tone" "$width" "$full" "$partial" "$used"
+    usage_tone_color "$tone"
+    repeat_glyph "█" "$full"
+    (( partial > 0 && full < width )) && printf '%s' "${partial_glyphs[$partial]}"
+    usage_tone_reset
+    (( width > used )) && printf '%*s' "$((width - used))" ''
   fi
-  return 0
-}
-
-selector_palette_bar_ascii_plain() {
-  local tone="$1"
-  local width="$2"
-  local full="$3"
-
-  usage_tone_color "$tone"
-  repeat_glyph "#" "$full"
-  usage_tone_reset
-  (( width > full )) && printf '%*s' "$((width - full))" ''
   return 0
 }
 
@@ -5491,23 +5334,10 @@ selector_palette_bar_ascii() {
   if usage_color_active && [[ "$bg_style" == "bg" ]]; then
     selector_palette_bar_bg_segments "$tone" "$width" "$full" "$bar_border_glyph"
   else
-    selector_palette_bar_ascii_plain "$tone" "$width" "$full"
-  fi
-  return 0
-}
-
-selector_palette_bar_empty() {
-  local width="$1"
-  local bg_style="$2"
-  local bar_border_glyph="$3"
-
-  if usage_color_active && [[ "$bg_style" == "bg" ]]; then
-    usage_tone_bg track
-    usage_tone_color track_edge
-    repeat_glyph "$bar_border_glyph" "$width"
+    usage_tone_color "$tone"
+    repeat_glyph "#" "$full"
     usage_tone_reset
-  else
-    printf '%*s' "$width" ''
+    (( width > full )) && printf '%*s' "$((width - full))" ''
   fi
   return 0
 }
@@ -5526,72 +5356,14 @@ selector_palette_bar() {
     else
       selector_palette_bar_ascii "$value" "$width" "$tone" "$bg_style" "$bar_border_glyph"
     fi
+  elif usage_color_active && [[ "$bg_style" == "bg" ]]; then
+    usage_tone_bg track
+    usage_tone_color track_edge
+    repeat_glyph "$bar_border_glyph" "$width"
+    usage_tone_reset
   else
-    selector_palette_bar_empty "$width" "$bg_style" "$bar_border_glyph"
+    printf '%*s' "$width" ''
   fi
-}
-
-selector_action_role_narrow() {
-  local action="$1"
-
-  case "$action" in
-    switch)
-      printf ' '
-      ;;
-    best)
-      printf 'u'
-      ;;
-    cap)
-      printf 'c'
-      ;;
-    login)
-      printf 'l'
-      ;;
-    stay)
-      usage_active_glyph
-      ;;
-    *)
-      usage_meta_glyph
-      ;;
-  esac
-}
-
-selector_action_role_compact() {
-  local action="$1"
-
-  case "$action" in
-    best|switch)
-      printf 'use'
-      ;;
-    cap)
-      printf 'cap'
-      ;;
-    same)
-      printf 'same'
-      ;;
-    login)
-      printf 'login'
-      ;;
-    *)
-      printf 'stay'
-      ;;
-  esac
-}
-
-selector_action_role_full() {
-  local action="$1"
-
-  case "$action" in
-    switch|best)
-      printf 'use'
-      ;;
-    same)
-      printf 'same'
-      ;;
-    *)
-      printf '%s' "$action"
-      ;;
-  esac
 }
 
 selector_action_role() {
@@ -5599,16 +5371,29 @@ selector_action_role() {
   local role_w="$2"
 
   if (( role_w <= 1 )); then
-    selector_action_role_narrow "$action"
-    return 0
+    case "$action" in
+      switch) printf ' ' ;;
+      best) printf 'u' ;;
+      cap) printf 'c' ;;
+      login) printf 'l' ;;
+      stay) usage_active_glyph ;;
+      *) usage_meta_glyph ;;
+    esac
+  elif (( role_w < 6 )); then
+    case "$action" in
+      best|switch) printf 'use' ;;
+      cap) printf 'cap' ;;
+      same) printf 'same' ;;
+      login) printf 'login' ;;
+      *) printf 'stay' ;;
+    esac
+  else
+    case "$action" in
+      switch|best) printf 'use' ;;
+      same) printf 'same' ;;
+      *) printf '%s' "$action" ;;
+    esac
   fi
-
-  if (( role_w < 6 )); then
-    selector_action_role_compact "$action"
-    return 0
-  fi
-
-  selector_action_role_full "$action"
 }
 
 selector_header_action() {
@@ -5699,23 +5484,6 @@ selector_header_identity_text() {
   fit_text "$detail" "$detail_w"
 }
 
-selector_header_label_tone() {
-  case "${1:-}" in
-    best)
-      printf 'accent'
-      ;;
-    active)
-      printf 'active'
-      ;;
-    old)
-      printf 'warn'
-      ;;
-    *)
-      printf 'muted'
-      ;;
-  esac
-}
-
 selector_header_meta_line() {
   local label="$1"
   local text="$2"
@@ -5723,7 +5491,7 @@ selector_header_meta_line() {
   local label_w="$4"
   local frame="${5:-0}"
   local outer_w="${6:-$total_w}"
-  local value_w value tl tr bl br vl vr glyph
+  local value_w value label_tone="muted" tl tr bl br vl vr glyph
 
   (( label_w < 1 )) && label_w=1
   value_w=$((total_w - label_w - 2))
@@ -5736,6 +5504,11 @@ selector_header_meta_line() {
       value="$(selector_header_spaced_text "$text")"
       ;;
   esac
+  case "$label" in
+    best) label_tone="accent" ;;
+    active) label_tone="active" ;;
+    old) label_tone="warn" ;;
+  esac
 
   if (( frame )); then
     IFS=$'\t' read -r tl tr bl br vl vr glyph <<<"$(usage_frame_chars)"
@@ -5743,7 +5516,7 @@ selector_header_meta_line() {
     printf '%s ' "$vl"
     usage_tone_reset
   fi
-  print_toned_fit "$label" "$label_w" "$(selector_header_label_tone "$label")"
+  print_toned_fit "$label" "$label_w" "$label_tone"
   printf '  '
   fit_text "$value" "$value_w"
   if (( frame )); then
@@ -6722,12 +6495,14 @@ selector_numbered_header() {
 selector_numbered_print_display() {
   local display="$1"
   local line_w="$2"
+  local plain
 
   if [[ "$display" == *$'\033'* ]]; then
-    if (( $(ansi_visible_length "$display") <= line_w )); then
+    plain="$(LC_ALL=C sed $'s/\033\\[[0-9;]*m//g' <<<"$display")"
+    if (( ${#plain} <= line_w )); then
       printf '%s' "$display"
     else
-      fit_text_rtrim "$(strip_ansi "$display")" "$line_w"
+      fit_text_rtrim "$plain" "$line_w"
     fi
   else
     fit_text_rtrim "$display" "$line_w"
@@ -7513,13 +7288,13 @@ render_usage_records() {
   for record in "${SORTED_USAGE_RECORDS[@]}"; do
     IFS=$'\t' read -r valid weekly_used short_used mark profile plan weekly short status record_short_label weekly_reset short_reset cache_age <<<"$record"
 	    group="$(usage_record_group "$valid" "$status")"
-	    if [[ -z "$previous_group" ]]; then
-	      if usage_show_group_label "$group"; then
-	        print_usage_section_rule "$total_w" "$group"
-	      fi
-	    elif [[ "$group" != "$previous_group" ]] && usage_show_group_label "$group"; then
-	      print_usage_section_rule "$total_w" "$group"
-	    fi
+    if [[ -z "$previous_group" ]]; then
+      if [[ "$group" != "ready" && "$group" != "limited" ]]; then
+        print_usage_section_rule "$total_w" "$group"
+      fi
+    elif [[ "$group" != "$previous_group" && "$group" != "ready" && "$group" != "limited" ]]; then
+      print_usage_section_rule "$total_w" "$group"
+    fi
     previous_group="$group"
 
     display_role="$(usage_role_label "$mark" "$profile" "$default_profile" "$mode" "$valid" "$status" "$role_w")"
