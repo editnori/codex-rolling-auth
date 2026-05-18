@@ -532,6 +532,18 @@ auth_metadata_records() {
   fi
 }
 
+auth_record_fingerprint() {
+  local secret="$1"
+
+  if [[ -n "$secret" && ! "$secret" =~ ^[0-9a-f]{64}$ ]]; then
+    fingerprint_secret "$secret"
+  elif [[ -n "$secret" ]]; then
+    printf '%s' "$secret"
+  else
+    fingerprint_secret ""
+  fi
+}
+
 auth_mode() {
   local path="$1"
   if command -v jq >/dev/null 2>&1; then
@@ -1489,109 +1501,127 @@ print_bad_active_auth() {
   print_detail_text_line "$action" "$(compact_command_display "$next_command" "$value_w")" "$label_w" "$value_w" active
 }
 
-print_status_note() {
+status_note_base() {
   local kind="$1"
-  local detail="${2:-}"
-  local cols line glyph tone="muted" compact_detail
+  local -n line_ref="$2"
+  local -n tone_ref="$3"
+  local glyph
 
-  cols="$(terminal_width)"
   case "$kind" in
     refresh)
       if usage_unicode_enabled; then
-        line="↻ refresh"
+        line_ref="↻ refresh"
       else
-        line="refresh"
+        line_ref="refresh"
       fi
-      tone="accent"
+      tone_ref="accent"
       ;;
     ready)
-      line="ready"
-      tone="good"
+      line_ref="ready"
+      tone_ref="good"
       ;;
     blocked)
-      if usage_unicode_enabled; then
-        glyph="!"
-      else
-        glyph="!"
-      fi
-      line="$glyph blocked"
-      tone="bad"
+      line_ref="! blocked"
+      tone_ref="bad"
       ;;
     cache)
-      line="cache"
-      tone="warn"
+      line_ref="cache"
+      tone_ref="warn"
       ;;
     recover)
       if usage_unicode_enabled; then
-        line="↳ recover"
+        line_ref="↳ recover"
       else
-        line="recover"
+        line_ref="recover"
       fi
-      tone="accent"
+      tone_ref="accent"
       ;;
     roll)
-      line="roll"
-      tone="warn"
+      line_ref="roll"
+      tone_ref="warn"
       ;;
     *)
       glyph="$(usage_meta_glyph)"
-      line="$glyph $kind"
+      line_ref="$glyph $kind"
       ;;
   esac
-  case "$kind:$detail" in
+}
+
+status_note_apply_detail() {
+  local kind="$1"
+  local cols="$2"
+  local -n line_ref="$3"
+  local -n detail_ref="$4"
+
+  case "$kind:$detail_ref" in
     "ready:already on best profile")
       if (( cols < 28 )); then
-        line="already best"
+        line_ref="already best"
       else
-        line="already on best profile"
+        line_ref="already on best profile"
       fi
-      detail=""
+      detail_ref=""
       ;;
     "blocked:no ready profile")
-      line="! no ready profile"
-      detail=""
+      line_ref="! no ready profile"
+      detail_ref=""
       ;;
     "blocked:choose switch/login/skip")
-      line="! choose row"
-      detail=""
+      line_ref="! choose row"
+      detail_ref=""
       ;;
     "cache:refresh busy")
-      detail="busy"
+      detail_ref="busy"
       ;;
     "roll:usage limit, rotating")
-      if (( cols < 32 )); then
-        line="roll auth"
+      line_ref="roll auth"
+      (( cols >= 32 )) && detail_ref="resume"
+      ;;
+  esac
+}
+
+status_note_compact_overflow() {
+  local kind="$1"
+  local detail="$2"
+  local -n line_ref="$3"
+  local compact_detail
+
+  case "$kind:$detail" in
+    "blocked:no ready profile")
+      line_ref="! no ready profile"
+      ;;
+    "ready:already on best profile")
+      line_ref="ready already best"
+      ;;
+    "recover:latest session")
+      if usage_unicode_enabled; then
+        line_ref="↳ recover latest"
       else
-        line="roll auth"
-        detail="resume"
+        line_ref="recover latest"
+      fi
+      ;;
+    "recover:session "*)
+      compact_detail="${detail#session }"
+      if usage_unicode_enabled; then
+        line_ref="↳ recover $compact_detail"
+      else
+        line_ref="recover $compact_detail"
       fi
       ;;
   esac
+}
+
+print_status_note() {
+  local kind="$1"
+  local detail="${2:-}"
+  local cols line tone="muted"
+
+  cols="$(terminal_width)"
+  status_note_base "$kind" line tone
+  status_note_apply_detail "$kind" "$cols" line detail
   [[ -n "$detail" ]] && line+=" $detail"
   if (( ${#line} > cols )); then
-    case "$kind:$detail" in
-      "blocked:no ready profile")
-        line="! no ready profile"
-        ;;
-      "ready:already on best profile")
-        line="ready already best"
-        ;;
-      "recover:latest session")
-        if usage_unicode_enabled; then
-          line="↳ recover latest"
-        else
-          line="recover latest"
-        fi
-        ;;
-      "recover:session "*)
-        compact_detail="${detail#session }"
-        if usage_unicode_enabled; then
-          line="↳ recover $compact_detail"
-        else
-          line="recover $compact_detail"
-        fi
-        ;;
-    esac
+    status_note_compact_overflow "$kind" "$detail" line
   fi
 
   USAGE_COLOR_ENABLED=0
@@ -1632,6 +1662,98 @@ profile_list_summary() {
   printf '%s' "$summary"
 }
 
+profile_list_note_account() {
+  local name="$1"
+  local hint="$2"
+  local -n account_count_ref="$3"
+  local -n account_primary_ref="$4"
+  local -n alias_count_ref="$5"
+
+  [[ -n "$hint" ]] || return 0
+  account_count_ref["$hint"]=$(( ${account_count_ref["$hint"]:-0} + 1 ))
+  if (( account_count_ref["$hint"] > 1 )); then
+    alias_count_ref=$((alias_count_ref + 1))
+  fi
+  if [[ -z "${account_primary_ref["$hint"]:-}" || ( "${account_primary_ref["$hint"]:-}" == "current" && "$name" != "current" ) ]]; then
+    account_primary_ref["$hint"]="$name"
+  fi
+}
+
+profile_list_alias_of() {
+  local hint="$1"
+  local name="$2"
+  local -n account_count_ref="$3"
+  local -n account_primary_ref="$4"
+
+  if [[ -n "$hint" && "${account_count_ref["$hint"]:-0}" -gt 1 && "$name" != "${account_primary_ref["$hint"]:-}" ]]; then
+    printf '%s' "${account_primary_ref["$hint"]}"
+  fi
+}
+
+profile_list_row_action() {
+  local active_name="$1"
+  local name="$2"
+  local alias_of="$3"
+  local active_fp="$4"
+  local fp="$5"
+
+  if [[ -n "$active_name" && "$name" == "$active_name" ]]; then
+    printf 'stay'
+  elif [[ -n "$alias_of" ]]; then
+    printf 'alias'
+  elif [[ -n "$active_fp" && "$fp" == "$active_fp" ]]; then
+    printf 'alias'
+  else
+    printf 'use'
+  fi
+}
+
+current_profile_summary() {
+  local matched="$1"
+  local mode="$2"
+  local hint="$3"
+  local account_display="$4"
+  local total_w="$5"
+  local mode_display="$6"
+  local mode_summary_display="$mode_display"
+  local matched_display summary
+
+  if (( total_w < 24 )); then
+    mode_summary_display="$(profile_list_mode_label "$mode" 4)"
+  fi
+  matched_display="$matched"
+  if [[ -n "$matched_display" && "$total_w" -lt 22 ]]; then
+    matched_display="$(usage_display_profile_name "$matched_display" "" 6)"
+  fi
+  if [[ -n "$matched" ]]; then
+    summary="active $matched_display$(usage_separator)$mode_summary_display"
+  elif (( total_w < 22 )); then
+    summary="unsaved$(usage_separator)$mode_summary_display"
+  else
+    summary="active unsaved$(usage_separator)$mode_summary_display"
+  fi
+  if [[ -n "$hint" ]] && (( ${#summary} + ${#account_display} + 11 <= total_w )); then
+    summary+="$(usage_separator)account $account_display"
+  fi
+  printf '%s' "$summary"
+}
+
+current_codex_status() {
+  local mode_display="$1"
+  local value_w="$2"
+  local codex_cli status_text
+
+  codex_cli="$(codex_bin || true)"
+  [[ -n "$codex_cli" ]] || return 0
+  codex_launcher_ready "$codex_cli" || return 0
+  status_text="$(CODEX_AUTH_RUNNER=1 "$codex_cli" login status 2>&1 || true)"
+  status_text="$(printf '%s\n' "$status_text" | sed '/^WARNING: proceeding, even though we could not update PATH:/d' | tr '\n\t' '  ' | sed 's/  */ /g; s/^ //; s/ $//')"
+  status_text="$(compact_codex_status "$status_text" "$value_w")"
+  if [[ -n "$status_text" && "$status_text" != "$mode_display" ]]; then
+    printf '%s' "$status_text"
+  fi
+}
+
 cmd_list() {
   ensure_dirs
   local list_verbose=0
@@ -1669,13 +1791,7 @@ cmd_list() {
   meta_files+=("${profiles[@]}")
   while IFS=$'\037' read -r meta_path mode hint secret; do
     [[ -n "$meta_path" ]] || continue
-    if [[ -n "$secret" && ! "$secret" =~ ^[0-9a-f]{64}$ ]]; then
-      fp="$(fingerprint_secret "$secret")"
-    elif [[ -n "$secret" ]]; then
-      fp="$secret"
-    else
-      fp="$(fingerprint_secret "")"
-    fi
+    fp="$(auth_record_fingerprint "$secret")"
     if [[ "$meta_path" == "$AUTH_FILE" ]]; then
       active_fp="$fp"
     else
@@ -1696,15 +1812,7 @@ cmd_list() {
     if [[ -z "$active_name" && -n "$active_fp" && "$fp" == "$active_fp" ]]; then
       active_name="$name"
     fi
-    if [[ -n "$hint" ]]; then
-      account_count["$hint"]=$(( ${account_count["$hint"]:-0} + 1 ))
-      if (( account_count["$hint"] > 1 )); then
-        alias_count=$((alias_count + 1))
-      fi
-      if [[ -z "${account_primary["$hint"]:-}" || ( "${account_primary["$hint"]:-}" == "current" && "$name" != "current" ) ]]; then
-        account_primary["$hint"]="$name"
-      fi
-    fi
+    profile_list_note_account "$name" "$hint" account_count account_primary alias_count
     count=$((count + 1))
   done
 
@@ -1728,18 +1836,8 @@ cmd_list() {
     mode="${profile_mode["$name"]:-unknown}"
     hint="${profile_hint["$name"]:-}"
     fp="${profile_fp["$name"]:-}"
-    alias_of=""
-    if [[ -n "$hint" && "${account_count["$hint"]:-0}" -gt 1 && "$name" != "${account_primary["$hint"]:-}" ]]; then
-      alias_of="${account_primary["$hint"]}"
-    fi
-    action="use"
-    if [[ -n "$active_name" && "$name" == "$active_name" ]]; then
-      action="stay"
-    elif [[ -n "$alias_of" ]]; then
-      action="alias"
-    elif [[ -n "$active_fp" && "$fp" == "$active_fp" ]]; then
-      action="alias"
-    fi
+    alias_of="$(profile_list_alias_of "$hint" "$name" account_count account_primary)"
+    action="$(profile_list_row_action "$active_name" "$name" "$alias_of" "$active_fp" "$fp")"
     account_display="$(profile_account_display "$hint" "$account_w" "$list_verbose" "$alias_of")"
     print_profile_list_line "$(profile_list_action_label "$action" "$role_w")" "$name" "$mode" "$account_display" "$role_w" "$profile_w" "$mode_w" "$account_w"
   done
@@ -1768,7 +1866,7 @@ cmd_current() {
     return 0
   fi
 
-  local active_fp mode mode_display mode_summary_display matched matched_display hint account_display summary status_text codex_cli show_account show_codex
+  local active_fp mode mode_display matched hint account_display summary status_text show_account show_codex
   local path fp meta_path secret meta_mode meta_hint active_mode="" active_hint=""
   local meta_files=()
   local -A meta_fp=()
@@ -1780,13 +1878,7 @@ cmd_current() {
   done
   while IFS=$'\037' read -r meta_path meta_mode meta_hint secret; do
     [[ -n "$meta_path" ]] || continue
-    if [[ -n "$secret" && ! "$secret" =~ ^[0-9a-f]{64}$ ]]; then
-      fp="$(fingerprint_secret "$secret")"
-    elif [[ -n "$secret" ]]; then
-      fp="$secret"
-    else
-      fp="$(fingerprint_secret "")"
-    fi
+    fp="$(auth_record_fingerprint "$secret")"
     meta_fp["$meta_path"]="$fp"
     if [[ "$meta_path" == "$AUTH_FILE" ]]; then
       active_fp="$fp"
@@ -1796,10 +1888,6 @@ cmd_current() {
   done < <(auth_metadata_records "${meta_files[@]}")
   mode="${active_mode:-unknown}"
   mode_display="$(auth_mode_display_label "$mode")"
-  mode_summary_display="$mode_display"
-  if (( total_w < 24 )); then
-    mode_summary_display="$(profile_list_mode_label "$mode" 4)"
-  fi
   hint="${active_hint:-}"
   active_fp="${active_fp:-}"
   account_display="$(short_account_hint "$hint" "$value_w")"
@@ -1813,36 +1901,14 @@ cmd_current() {
     fi
   done
 
-  matched_display="$matched"
-  if [[ -n "$matched_display" && "$total_w" -lt 22 ]]; then
-    matched_display="$(usage_display_profile_name "$matched_display" "" 6)"
-  fi
-  if [[ -n "$matched" ]]; then
-    summary="active $matched_display$(usage_separator)$mode_summary_display"
-  else
-    if (( total_w < 22 )); then
-      summary="unsaved$(usage_separator)$mode_summary_display"
-    else
-      summary="active unsaved$(usage_separator)$mode_summary_display"
-    fi
-  fi
-  if [[ -n "$hint" ]] && (( ${#summary} + ${#account_display} + 11 <= total_w )); then
-    summary+="$(usage_separator)account $account_display"
-  fi
+  summary="$(current_profile_summary "$matched" "$mode" "$hint" "$account_display" "$total_w" "$mode_display")"
 
   show_account=0
   show_codex=0
   [[ -n "$hint" && "$summary" != *"account "* ]] && show_account=1
 
-  codex_cli="$(codex_bin || true)"
-  if [[ -n "$codex_cli" ]] && codex_launcher_ready "$codex_cli"; then
-    status_text="$(CODEX_AUTH_RUNNER=1 "$codex_cli" login status 2>&1 || true)"
-    status_text="$(printf '%s\n' "$status_text" | sed '/^WARNING: proceeding, even though we could not update PATH:/d' | tr '\n\t' '  ' | sed 's/  */ /g; s/^ //; s/ $//')"
-    status_text="$(compact_codex_status "$status_text" "$value_w")"
-    if [[ -n "$status_text" && "$status_text" != "$mode_display" ]]; then
-      show_codex=1
-    fi
-  fi
+  status_text="$(current_codex_status "$mode_display" "$value_w")"
+  [[ -n "$status_text" ]] && show_codex=1
 
   print_palette_summary_header "Auth" "Active profile" "$summary" "$total_w" flat 0
   if (( show_account )); then
@@ -2766,6 +2832,103 @@ usage_width_mode_defaults() {
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$mode" "$role_w" "$profile_min" "$status_min" "$reset_w" "$label_w" "$min_bar_w" "$max_bar_w"
 }
 
+usage_limit_cell_reset_label() {
+  local mode="$1"
+  local reset_label="$2"
+
+  if [[ "$mode" == "micro" || "$mode" == "nano" ]]; then
+    reset_label=""
+  elif [[ ( "$mode" == "compact" || "$mode" == "tight" || "$mode" == "tiny" ) && "$reset_label" == *" "* ]]; then
+    reset_label="${reset_label##* }"
+  fi
+  (( USAGE_VERBOSE )) || reset_label=""
+
+  printf '%s' "$reset_label"
+}
+
+usage_limit_cell_set_labels() {
+  local percent="$1"
+  local mode="$2"
+  local used_percent="${3:-}"
+  local -n percent_label_ref="$4"
+  local -n reset_label_ref="$5"
+  local -n reset_prefix_ref="$6"
+  local -n label_w_ref="$7"
+
+  if [[ "$percent" == "-" ]]; then
+    percent_label_ref="$(usage_meta_glyph)"
+    [[ "$mode" == "micro" || "$mode" == "nano" ]] || reset_label_ref="$(usage_meta_glyph)"
+  elif (( USAGE_VERBOSE )) && [[ "$mode" != "pico" && "$mode" != "nano" && "$mode" != "micro" && "$mode" != "tiny" && "$mode" != "tight" && "$used_percent" =~ ^[0-9]+$ ]]; then
+    percent_label_ref="${percent%\%}/${used_percent}%"
+    label_w_ref=6
+  elif (( ! USAGE_VERBOSE )); then
+    percent_label_ref="${percent%\%}"
+  elif [[ -n "$reset_label_ref" ]]; then
+    reset_prefix_ref="$(usage_reset_glyph)"
+  fi
+  if [[ -n "$reset_label_ref" && -z "$reset_prefix_ref" && "$percent" != "-" ]]; then
+    reset_prefix_ref="$(usage_reset_glyph)"
+  fi
+}
+
+usage_print_limit_cell_reset() {
+  local reset_label="$1"
+  local reset_prefix="$2"
+  local -n visible_ref="$3"
+
+  [[ -n "$reset_label" ]] || return 0
+  usage_tone_color muted
+  if [[ -n "$reset_prefix" ]]; then
+    printf ' %s%s' "$reset_prefix" "$reset_label"
+    visible_ref=$((visible_ref + 1 + ${#reset_prefix} + ${#reset_label}))
+  else
+    printf ' %s' "$reset_label"
+    visible_ref=$((visible_ref + 1 + ${#reset_label}))
+  fi
+  usage_tone_reset
+  return 0
+}
+
+usage_print_limit_empty_cell() {
+  local percent_label="$1"
+  local reset_label="$2"
+  local label_w="$3"
+  local cell_w="$4"
+  local tone="$5"
+  local visible pad
+
+  usage_tone_color "$tone"
+  printf "%${label_w}s" "$percent_label"
+  usage_tone_reset
+  visible="$label_w"
+  usage_print_limit_cell_reset "$reset_label" "" visible
+  pad=$((cell_w - visible))
+  (( pad > 0 )) && printf '%*s' "$pad" ''
+  return 0
+}
+
+usage_print_limit_bar_cell() {
+  local percent="$1"
+  local percent_label="$2"
+  local reset_label="$3"
+  local reset_prefix="$4"
+  local label_w="$5"
+  local bar_width="$6"
+  local cell_w="$7"
+  local tone="$8"
+  local visible pad
+
+  usage_tone_color "$tone"
+  printf "%${label_w}s " "$percent_label"
+  usage_tone_reset
+  usage_bar_rail "$percent" "$bar_width" "$tone"
+  visible=$((label_w + 1 + bar_width))
+  usage_print_limit_cell_reset "$reset_label" "$reset_prefix" visible
+  pad=$((cell_w - visible))
+  (( pad > 0 )) && printf '%*s' "$pad" ''
+  return 0
+}
+
 print_usage_limit_cell() {
   local percent="$1"
   local reset_time="$2"
@@ -2777,32 +2940,10 @@ print_usage_limit_cell() {
   local percent_label="$percent"
   local reset_prefix=""
   local label_w=4
-  local tone visible pad
+  local tone
 
-  if [[ "$mode" == "micro" || "$mode" == "nano" ]]; then
-    reset_label=""
-  elif [[ ( "$mode" == "compact" || "$mode" == "tight" || "$mode" == "tiny" ) && "$reset_label" == *" "* ]]; then
-    reset_label="${reset_label##* }"
-  fi
-  if (( ! USAGE_VERBOSE )); then
-    reset_label=""
-  fi
-
-  if [[ "$percent" == "-" ]]; then
-    percent_label="$(usage_meta_glyph)"
-    [[ "$mode" == "micro" || "$mode" == "nano" ]] || reset_label="$(usage_meta_glyph)"
-  elif (( USAGE_VERBOSE )) && [[ "$mode" != "pico" && "$mode" != "nano" && "$mode" != "micro" && "$mode" != "tiny" && "$mode" != "tight" && "$used_percent" =~ ^[0-9]+$ ]]; then
-    percent_label="${percent%\%}/${used_percent}%"
-    label_w=6
-  elif (( ! USAGE_VERBOSE )); then
-    percent_label="${percent%\%}"
-  elif [[ -n "$reset_label" ]]; then
-    reset_prefix="$(usage_reset_glyph)"
-  fi
-  if [[ -n "$reset_label" && -z "$reset_prefix" && "$percent" != "-" ]]; then
-    reset_prefix="$(usage_reset_glyph)"
-  fi
-
+  reset_label="$(usage_limit_cell_reset_label "$mode" "$reset_label")"
+  usage_limit_cell_set_labels "$percent" "$mode" "$used_percent" percent_label reset_label reset_prefix label_w
   tone="$(usage_limit_tone "$percent")"
   if [[ "$mode" == "pico" || "$mode" == "nano" ]]; then
     [[ "$percent" == "-" ]] && percent_label="$(usage_meta_glyph)"
@@ -2813,40 +2954,11 @@ print_usage_limit_cell() {
   fi
 
   if [[ "$percent" == "-" ]]; then
-    usage_tone_color "$tone"
-    printf "%${label_w}s" "$percent_label"
-    usage_tone_reset
-    visible="$label_w"
-    if [[ -n "$reset_label" ]]; then
-      usage_tone_color muted
-      printf ' %s' "$reset_label"
-      usage_tone_reset
-      visible=$((visible + 1 + ${#reset_label}))
-    fi
-    pad=$((cell_w - visible))
-    (( pad > 0 )) && printf '%*s' "$pad" ''
+    usage_print_limit_empty_cell "$percent_label" "$reset_label" "$label_w" "$cell_w" "$tone"
     return 0
   fi
 
-  usage_tone_color "$tone"
-  printf "%${label_w}s " "$percent_label"
-  usage_tone_reset
-  usage_bar_rail "$percent" "$bar_width" "$tone"
-  visible=$((label_w + 1 + bar_width))
-  if [[ -n "$reset_label" ]]; then
-    usage_tone_color muted
-    if [[ -n "$reset_prefix" ]]; then
-      printf ' %s%s' "$reset_prefix" "$reset_label"
-      visible=$((visible + 1 + ${#reset_prefix} + ${#reset_label}))
-    else
-      printf ' %s' "$reset_label"
-      visible=$((visible + 1 + ${#reset_label}))
-    fi
-    usage_tone_reset
-  fi
-
-  pad=$((cell_w - visible))
-  (( pad > 0 )) && printf '%*s' "$pad" ''
+  usage_print_limit_bar_cell "$percent" "$percent_label" "$reset_label" "$reset_prefix" "$label_w" "$bar_width" "$cell_w" "$tone"
   return 0
 }
 
@@ -3007,6 +3119,88 @@ usage_stale_ok_label() {
   fi
 }
 
+usage_display_stale_status() {
+  local status="$1"
+  local mode="$2"
+  local stale_age="$3"
+
+  if [[ "$mode" == "pico" || "$mode" == "nano" ]]; then
+    if [[ "$status" == *cap ]]; then
+      printf 'cap'
+    else
+      printf 'old'
+    fi
+  elif [[ "$mode" == "micro" || "$mode" == "tiny" ]]; then
+    if [[ "$status" == "ok" ]]; then
+      usage_stale_ok_label "$stale_age"
+    elif usage_status_is_exact_cap "$status"; then
+      printf 'cap'
+    else
+      printf 'stale'
+    fi
+  elif [[ "$status" == "ok" ]]; then
+    usage_stale_ok_label "$stale_age" 'old %s'
+  elif usage_status_is_exact_cap "$status"; then
+    printf 'old cap'
+  else
+    printf 'stale'
+  fi
+}
+
+usage_display_pico_status() {
+  case "$1" in
+    ok)
+      printf 'ok'
+      ;;
+    stale\ *\ cap)
+      printf 'old'
+      ;;
+    login)
+      printf 'auth'
+      ;;
+    no\ usage|no\ data)
+      printf 'n/a'
+      ;;
+    *)
+      printf '%s' "$1"
+      ;;
+  esac
+}
+
+usage_display_micro_status() {
+  case "$1" in
+    ok)
+      printf 'ready'
+      ;;
+    stale\ *\ cap)
+      printf 'stale'
+      ;;
+    login)
+      printf 'auth'
+      ;;
+    *)
+      printf '%s' "$1"
+      ;;
+  esac
+}
+
+usage_display_normal_status() {
+  case "$1" in
+    ok)
+      printf 'ready'
+      ;;
+    offline)
+      printf 'offline'
+      ;;
+    login)
+      printf 'login'
+      ;;
+    *)
+      printf '%s' "$1"
+      ;;
+  esac
+}
+
 usage_display_status() {
   local status="$1"
   local mode="${2:-normal}"
@@ -3023,30 +3217,7 @@ usage_display_status() {
   fi
 
   if (( stale_status )); then
-    if [[ "$mode" == "pico" || "$mode" == "nano" ]]; then
-      if [[ "$status" == *cap ]]; then
-        printf 'cap'
-      else
-        printf 'old'
-      fi
-      return 0
-    elif [[ "$mode" == "micro" || "$mode" == "tiny" ]]; then
-      if [[ "$status" == "ok" ]]; then
-        usage_stale_ok_label "$stale_age"
-      elif usage_status_is_exact_cap "$status"; then
-        printf 'cap'
-      else
-        printf 'stale'
-      fi
-      return 0
-    fi
-    if [[ "$status" == "ok" ]]; then
-      usage_stale_ok_label "$stale_age" 'old %s'
-    elif usage_status_is_exact_cap "$status"; then
-      printf 'old cap'
-    else
-      printf 'stale'
-    fi
+    usage_display_stale_status "$status" "$mode" "$stale_age"
     return 0
   fi
 
@@ -3056,58 +3227,16 @@ usage_display_status() {
   fi
 
   if [[ "$mode" == "pico" || "$mode" == "nano" ]]; then
-    case "$status" in
-      ok)
-        printf 'ok'
-        ;;
-      stale\ *\ cap)
-        printf 'old'
-        ;;
-      login)
-        printf 'auth'
-        ;;
-      no\ usage|no\ data)
-        printf 'n/a'
-        ;;
-      *)
-        printf '%s' "$status"
-        ;;
-    esac
+    usage_display_pico_status "$status"
     return 0
   fi
 
   if [[ "$mode" == "micro" || "$mode" == "tiny" ]]; then
-    case "$status" in
-      ok)
-        printf 'ready'
-        ;;
-      stale\ *\ cap)
-        printf 'stale'
-        ;;
-      login)
-        printf 'auth'
-        ;;
-      *)
-        printf '%s' "$status"
-        ;;
-    esac
+    usage_display_micro_status "$status"
     return 0
   fi
 
-  case "$status" in
-    ok)
-      printf 'ready'
-      ;;
-    offline)
-      printf 'offline'
-      ;;
-    login)
-      printf 'login'
-      ;;
-    *)
-      printf '%s' "$status"
-      ;;
-  esac
+  usage_display_normal_status "$status"
 }
 
 usage_display_profile_name() {
@@ -4104,6 +4233,43 @@ usage_payload_transient_error() {
   ' <<<"$payload" >/dev/null 2>&1
 }
 
+usage_payload_print_transient_fallback() {
+  local payload="$1"
+  local cached_payload="$2"
+
+  [[ -n "$payload" && "$payload" != "null" ]] || return 1
+  usage_payload_transient_error "$payload" || return 1
+  if [[ -n "$cached_payload" ]]; then
+    if [[ "$USAGE_REFRESH" == "1" && "${CODEX_AUTH_REFRESH_FALLBACK_CACHE:-1}" == "1" ]]; then
+      mark_stale_payload "$cached_payload"
+    else
+      printf '%s\n' "$cached_payload"
+    fi
+  else
+    printf '%s\n' "$payload"
+  fi
+}
+
+usage_payload_print_empty_fallback() {
+  local payload="$1"
+  local cached_payload="$2"
+
+  [[ -z "$payload" || "$payload" == "null" ]] || return 1
+  if [[ -n "$cached_payload" ]]; then
+    if [[ "$USAGE_REFRESH" == "1" ]]; then
+      if [[ "${CODEX_AUTH_REFRESH_FALLBACK_CACHE:-1}" == "1" ]]; then
+        mark_stale_payload "$cached_payload"
+      else
+        printf '%s\n' '{"error":{"message":"no response"}}'
+      fi
+    else
+      printf '%s\n' "$cached_payload"
+    fi
+  else
+    printf '%s\n' '{"error":{"message":"no response"}}'
+  fi
+}
+
 usage_payload_for_profile() {
   local profile_file="$1"
   local fingerprint="${2:-}"
@@ -4143,32 +4309,10 @@ usage_payload_for_profile() {
   fi
 
   payload="$(usage_json_for_profile "$profile_file")"
-  if [[ -n "$payload" && "$payload" != "null" ]] && usage_payload_transient_error "$payload"; then
-    if [[ -n "$cached_payload" ]]; then
-      if [[ "$USAGE_REFRESH" == "1" && "${CODEX_AUTH_REFRESH_FALLBACK_CACHE:-1}" == "1" ]]; then
-        mark_stale_payload "$cached_payload"
-      else
-        printf '%s\n' "$cached_payload"
-      fi
-      return 0
-    fi
-    printf '%s\n' "$payload"
+  if usage_payload_print_transient_fallback "$payload" "$cached_payload"; then
     return 0
   fi
-  if [[ -z "$payload" || "$payload" == "null" ]]; then
-    if [[ -n "$cached_payload" ]]; then
-      if [[ "$USAGE_REFRESH" == "1" ]]; then
-        if [[ "${CODEX_AUTH_REFRESH_FALLBACK_CACHE:-1}" == "1" ]]; then
-          mark_stale_payload "$cached_payload"
-        else
-          printf '%s\n' '{"error":{"message":"no response"}}'
-        fi
-        return 0
-      fi
-      printf '%s\n' "$cached_payload"
-      return 0
-    fi
-    printf '%s\n' '{"error":{"message":"no response"}}'
+  if usage_payload_print_empty_fallback "$payload" "$cached_payload"; then
     return 0
   fi
 
@@ -5636,86 +5780,94 @@ print_selector_palette_context_line() {
   printf '\n'
 }
 
-selector_palette_context_line() {
+selector_palette_context_summary_parts() {
   local summary="$1"
-  local total_w="$2"
-  local sep first rest active_part stats_part stats_head line best_value active_value compact_active_value compact_best_value stat_token prefix added_stats=0
-  local best_parts=()
+  local sep="$2"
+  local -n first_ref="$3"
+  local -n rest_ref="$4"
+  local next_part
 
-  sep="$(usage_separator)"
-  first="$summary"
-  rest=""
-  if [[ "$summary" == *"$sep"* ]]; then
-    first="${summary%%"$sep"*}"
-    rest="${summary#*"$sep"}"
-  fi
-  if [[ ( "$first" == "best" || "$first" == "best active" || "$first" == "best is active" ) && -n "$rest" ]]; then
-    if [[ "$rest" == *"$sep"* ]]; then
-      first="$first ${rest%%"$sep"*}"
-      rest="${rest#*"$sep"}"
-    else
-      first="$first $rest"
-      rest=""
-    fi
-  fi
-  case "$first" in
-    "best active "*)
-      first="best ${first#best active }"
-      ;;
-    "best is active "*)
-      first="best ${first#best is active }"
+  IFS=$'\t' read -r first_ref rest_ref <<<"$(usage_summary_split_once "$summary" "$sep")"
+  case "$first_ref" in
+    best|"best active"|"best is active")
+      if [[ -n "$rest_ref" ]]; then
+        IFS=$'\t' read -r next_part rest_ref <<<"$(usage_summary_split_once "$rest_ref" "$sep")"
+        first_ref="$first_ref $next_part"
+      fi
       ;;
   esac
+  case "$first_ref" in
+    "best active "*)
+      first_ref="best ${first_ref#best active }"
+      ;;
+    "best is active "*)
+      first_ref="best ${first_ref#best is active }"
+      ;;
+  esac
+}
 
-  active_part=""
-  stats_part="$rest"
-  if [[ -n "$stats_part" ]]; then
-    stats_head="$stats_part"
-    [[ "$stats_part" == *"$sep"* ]] && stats_head="${stats_part%%"$sep"*}"
-    if [[ "$stats_head" == active\ * || "$stats_head" == "no active" ]]; then
-      active_part="$stats_head"
-      if [[ "$stats_part" == *"$sep"* ]]; then
-        stats_part="${stats_part#*"$sep"}"
-      else
-        stats_part=""
-      fi
-    fi
+selector_palette_context_active_parts() {
+  local sep="$1"
+  local -n active_part_ref="$2"
+  local -n stats_part_ref="$3"
+  local stats_head next_part
+
+  [[ -n "$stats_part_ref" ]] || return 0
+  IFS=$'\t' read -r stats_head next_part <<<"$(usage_summary_split_once "$stats_part_ref" "$sep")"
+  if [[ "$stats_head" == active\ * || "$stats_head" == "no active" ]]; then
+    active_part_ref="$stats_head"
+    stats_part_ref="$next_part"
   fi
+}
 
-  best_value="$first"
-  [[ "$best_value" == best\ * ]] && best_value="best $(selector_palette_take_short_limit "${best_value#best }")"
-  compact_best_value="$best_value"
+selector_palette_context_compact_best() {
+  local best_value="$1"
+  local best_parts=()
+
   if [[ "$best_value" == best\ * ]]; then
     read -r -a best_parts <<<"${best_value#best }"
     if (( ${#best_parts[@]} > 0 )); then
-      compact_best_value="best ${best_parts[0]}"
+      printf 'best %s' "${best_parts[0]}"
+      return 0
     fi
   fi
+  printf '%s' "$best_value"
+}
+
+selector_palette_context_add_active() {
+  local -n line_ref="$1"
+  local active_part="$2"
+  local best_value="$3"
+  local compact_best_value="$4"
+  local total_w="$5"
+  local active_value compact_active_value
+
+  [[ -n "$active_part" ]] || return 0
   active_value="$active_part"
   [[ "$active_value" == active\ * ]] && active_value="active $(selector_palette_take_short_limit "${active_value#active }")"
-
-  line="$best_value"
-  if [[ -n "$active_value" ]]; then
-    if (( ${#line} + ${#active_value} + 3 <= total_w )); then
-      line+="   $active_value"
-    else
-      compact_active_value="$(selector_palette_compact_active_limit "${active_part#active }")"
-      if [[ -n "$compact_active_value" ]] && (( ${#line} + ${#compact_active_value} + 3 <= total_w )); then
-        line+="   $compact_active_value"
-      elif [[ -n "$compact_active_value" && "$compact_best_value" != "$best_value" ]] \
-        && (( ${#compact_best_value} + ${#compact_active_value} + 3 <= total_w )); then
-        line="$compact_best_value   $compact_active_value"
-      fi
-    fi
+  if (( ${#line_ref} + ${#active_value} + 3 <= total_w )); then
+    line_ref+="   $active_value"
+    return 0
   fi
+  compact_active_value="$(selector_palette_compact_active_limit "${active_part#active }")"
+  if [[ -n "$compact_active_value" ]] && (( ${#line_ref} + ${#compact_active_value} + 3 <= total_w )); then
+    line_ref+="   $compact_active_value"
+  elif [[ -n "$compact_active_value" && "$compact_best_value" != "$best_value" ]] \
+    && (( ${#compact_best_value} + ${#compact_active_value} + 3 <= total_w )); then
+    line_ref="$compact_best_value   $compact_active_value"
+  fi
+}
+
+selector_palette_context_add_stats() {
+  local -n line_ref="$1"
+  local stats_part="$2"
+  local sep="$3"
+  local total_w="$4"
+  local stat_token next_part prefix added_stats=0
+
   while [[ -n "$stats_part" ]]; do
-    if [[ "$stats_part" == *"$sep"* ]]; then
-      stat_token="${stats_part%%"$sep"*}"
-      stats_part="${stats_part#*"$sep"}"
-    else
-      stat_token="$stats_part"
-      stats_part=""
-    fi
+    IFS=$'\t' read -r stat_token next_part <<<"$(usage_summary_split_once "$stats_part" "$sep")"
+    stats_part="$next_part"
     stat_token="${stat_token//capped /cap }"
     [[ "$stat_token" == cache\ * ]] && continue
     [[ -n "$stat_token" ]] || continue
@@ -5724,13 +5876,30 @@ selector_palette_context_line() {
     else
       prefix="   "
     fi
-    if (( ${#line} + ${#stat_token} + ${#prefix} <= total_w )); then
-      line+="$prefix$stat_token"
+    if (( ${#line_ref} + ${#stat_token} + ${#prefix} <= total_w )); then
+      line_ref+="$prefix$stat_token"
       added_stats=1
     else
       break
     fi
   done
+}
+
+selector_palette_context_line() {
+  local summary="$1"
+  local total_w="$2"
+  local sep first rest active_part="" stats_part line best_value compact_best_value
+
+  sep="$(usage_separator)"
+  selector_palette_context_summary_parts "$summary" "$sep" first rest
+  stats_part="$rest"
+  selector_palette_context_active_parts "$sep" active_part stats_part
+  best_value="$first"
+  [[ "$best_value" == best\ * ]] && best_value="best $(selector_palette_take_short_limit "${best_value#best }")"
+  compact_best_value="$(selector_palette_context_compact_best "$best_value")"
+  line="$best_value"
+  selector_palette_context_add_active line "$active_part" "$best_value" "$compact_best_value" "$total_w"
+  selector_palette_context_add_stats line "$stats_part" "$sep" "$total_w"
   print_selector_palette_context_line "$line" "$total_w"
 }
 
@@ -6272,6 +6441,94 @@ selector_numbered_menu() {
   MENU_PROFILE="${fallback_profiles[$selected]}"
 }
 
+selector_valid_palette_role() {
+  local default_profile="$1"
+  local profile="$2"
+  local mark="$3"
+  local display_status="$4"
+
+  if [[ "$mark" == "*" ]]; then
+    printf 'stay'
+  elif [[ "$mark" == "=" ]]; then
+    printf 'same'
+  else
+    case "$display_status" in
+      ready|ok)
+        if [[ -n "$default_profile" && "$profile" == "$default_profile" ]]; then
+          printf 'best'
+        else
+          printf 'use'
+        fi
+        ;;
+      cap|old\ cap|both\ cap)
+        printf 'cap'
+        ;;
+      *)
+        printf 'warn'
+        ;;
+    esac
+  fi
+}
+
+selector_valid_plain_role() {
+  local default_profile="$1"
+  local profile="$2"
+  local mark="$3"
+  local display_status="$4"
+  local role_w="$5"
+
+  if [[ "$mark" == "*" ]]; then
+    selector_action_role "stay" "$role_w"
+  elif [[ "$mark" == "=" ]]; then
+    selector_action_role "same" "$role_w"
+  elif [[ "$display_status" == "cap" || "$display_status" == "old cap" || "$display_status" == "both cap" ]]; then
+    selector_action_role "cap" "$role_w"
+  elif [[ -n "$default_profile" && "$profile" == "$default_profile" ]]; then
+    selector_action_role "best" "$role_w"
+  else
+    selector_action_role "switch" "$role_w"
+  fi
+}
+
+selector_invalid_palette_role() {
+  local mark="$1"
+
+  if [[ "$mark" == "*" ]]; then
+    printf 'stay'
+  elif [[ "$mark" == "=" ]]; then
+    printf 'same'
+  else
+    printf 'use'
+  fi
+}
+
+selector_invalid_plain_role() {
+  local mark="$1"
+
+  if [[ "$mark" == "=" ]]; then
+    printf 'same'
+  else
+    printf 'use'
+  fi
+}
+
+selector_row_action_fields() {
+  local mark="$1"
+  local profile="$2"
+  local -n active_row_ref="$3"
+  local -n row_action_ref="$4"
+  local -n row_profile_field_ref="$5"
+
+  if [[ "$mark" == "*" || "$mark" == "=" ]]; then
+    active_row_ref=1
+    row_action_ref="skip"
+    row_profile_field_ref="-"
+  else
+    row_action_ref="switch"
+    row_profile_field_ref="$profile"
+  fi
+}
+
 selector_menu_row_for_record() {
   local default_profile="$1"
   local selector_palette_mode="$2"
@@ -6305,79 +6562,27 @@ selector_menu_row_for_record() {
     if (( selector_palette_mode )); then
       display_status="$(usage_display_status "$status" "normal")"
       palette_profile="$(selector_palette_profile_label "$profile" "$total_w" "$selector_profile_w")"
-      if [[ "$mark" == "*" ]]; then
-        display="$(print_selector_palette_table_row "stay $palette_profile" "$weekly" "$short" "$display_status" "$status" "$valid" "$total_w")"
-      elif [[ "$mark" == "=" ]]; then
-        display="$(print_selector_palette_table_row "same $palette_profile" "$weekly" "$short" "$display_status" "$status" "$valid" "$total_w")"
-      else
-        case "$display_status" in
-          ready|ok)
-            if [[ -n "$default_profile" && "$profile" == "$default_profile" ]]; then
-              action_role="best"
-            else
-              action_role="use"
-            fi
-            ;;
-          cap|old\ cap|both\ cap)
-            action_role="cap"
-            ;;
-          *)
-            action_role="warn"
-            ;;
-        esac
-        display="$(print_selector_palette_table_row "$action_role $palette_profile" "$weekly" "$short" "$display_status" "$status" "$valid" "$total_w")"
-      fi
+      action_role="$(selector_valid_palette_role "$default_profile" "$profile" "$mark" "$display_status")"
+      display="$(print_selector_palette_table_row "$action_role $palette_profile" "$weekly" "$short" "$display_status" "$status" "$valid" "$total_w")"
     else
       display_status="$(usage_display_status "$status" "$mode")"
-      if [[ "$mark" == "*" ]]; then
-        action_role="$(selector_action_role "stay" "$role_w")"
-      elif [[ "$mark" == "=" ]]; then
-        action_role="$(selector_action_role "same" "$role_w")"
-      elif [[ "$display_status" == "cap" || "$display_status" == "old cap" || "$display_status" == "both cap" ]]; then
-        action_role="$(selector_action_role "cap" "$role_w")"
-      elif [[ -n "$default_profile" && "$profile" == "$default_profile" ]]; then
-        action_role="$(selector_action_role "best" "$role_w")"
-      else
-        action_role="$(selector_action_role "switch" "$role_w")"
-      fi
+      action_role="$(selector_valid_plain_role "$default_profile" "$profile" "$mark" "$display_status" "$role_w")"
       display="$(print_usage_render_data_line "$action_role" "$profile" "$weekly" "$weekly_reset" "$short" "$short_reset" \
         "$display_status" "$status" "$valid" "$weekly_used" "$short_used" "$role_w" "$profile_w" "$cell_w" "$status_w" "$bar_width" "$mode")"
     fi
-    if [[ "$mark" == "*" || "$mark" == "=" ]]; then
-      active_row=1
-      row_action="skip"
-      row_profile_field="-"
-    else
-      row_action="switch"
-      row_profile_field="$profile"
-    fi
+    selector_row_action_fields "$mark" "$profile" active_row row_action row_profile_field
   else
     if (( selector_palette_mode )); then
       display_status="$(usage_display_status "$status" "normal")"
       palette_profile="$(selector_palette_profile_label "$profile" "$total_w" "$selector_profile_w")"
-      if [[ "$mark" == "*" ]]; then
-        display="$(print_selector_palette_table_row "stay $palette_profile" "-" "-" "$display_status" "$status" "$valid" "$total_w")"
-      elif [[ "$mark" == "=" ]]; then
-        display="$(print_selector_palette_table_row "same $palette_profile" "-" "-" "$display_status" "$status" "$valid" "$total_w")"
-      else
-        display="$(print_selector_palette_table_row "use $palette_profile" "-" "-" "$display_status" "$status" "$valid" "$total_w")"
-      fi
+      action_role="$(selector_invalid_palette_role "$mark")"
+      display="$(print_selector_palette_table_row "$action_role $palette_profile" "-" "-" "$display_status" "$status" "$valid" "$total_w")"
     else
       display_status="$(usage_display_status "$status" "$mode")"
-      if [[ "$mark" == "=" ]]; then
-        display="$(print_selector_row "same" "$(usage_display_profile_name "$profile" "" "$selector_profile_w")" "$display_status" "$action_w" "$selector_profile_w" "$total_w")"
-      else
-        display="$(print_selector_row "use" "$(usage_display_profile_name "$profile" "" "$selector_profile_w")" "$display_status" "$action_w" "$selector_profile_w" "$total_w")"
-      fi
+      action_role="$(selector_invalid_plain_role "$mark")"
+      display="$(print_selector_row "$action_role" "$(usage_display_profile_name "$profile" "" "$selector_profile_w")" "$display_status" "$action_w" "$selector_profile_w" "$total_w")"
     fi
-    if [[ "$mark" == "*" || "$mark" == "=" ]]; then
-      active_row=1
-      row_action="skip"
-      row_profile_field="-"
-    else
-      row_action="switch"
-      row_profile_field="$profile"
-    fi
+    selector_row_action_fields "$mark" "$profile" active_row row_action row_profile_field
   fi
 
   printf '%s\037action\037%s\037%s\037%s\n' "$active_row" "$row_action" "$row_profile_field" "$display"
@@ -6873,6 +7078,30 @@ usage_profile_files_for_args() {
   (( ${#profile_files[@]} == 0 )) || printf '%s\n' "${profile_files[@]}"
 }
 
+profile_files_for_args_into() {
+  local -n profile_files_ref="$1"
+  local quiet_missing="$2"
+  shift 2
+  local name profile_file
+
+  profile_files_ref=()
+  if (( $# > 0 )); then
+    for name in "$@"; do
+      require_name "$name"
+      profile_file="$(profile_path "$name")"
+      if [[ ! -f "$profile_file" ]]; then
+        [[ "$quiet_missing" == "1" && "$USAGE_QUIET" == "1" ]] && return 1
+        die "profile not found: $name"
+      fi
+      profile_files_ref+=("$profile_file")
+    done
+  else
+    shopt -s nullglob
+    profile_files_ref=("$PROFILE_DIR"/*.json)
+    shopt -u nullglob
+  fi
+}
+
 active_auth_fingerprint() {
   local active_meta=()
 
@@ -6932,6 +7161,24 @@ usage_best_selection() {
   fi
 
   printf '%s\t%s\n' "$default_profile" "$active_is_best"
+}
+
+usage_best_selection_into() {
+  local records="$1"
+  local -n default_profile_ref="$2"
+  local -n active_is_best_ref="$3"
+  local best_profile best_mark best_week best_short
+
+  IFS=$'\t' read -r best_profile best_mark best_week best_short <<<"$(find_best_ok_profile "$records" 1)"
+  default_profile_ref=""
+  active_is_best_ref=0
+  if [[ -n "$best_profile" ]]; then
+    if [[ "$best_mark" == "*" ]]; then
+      active_is_best_ref=1
+    else
+      default_profile_ref="$best_profile"
+    fi
+  fi
 }
 
 usage_render_or_prepare() {
@@ -7008,7 +7255,7 @@ cmd_usage() {
   set -- "${args[@]}"
 
   local profile_files=()
-  mapfile -t profile_files < <(usage_profile_files_for_args "$@")
+  profile_files_for_args_into profile_files 0 "$@"
 
   if (( ${#profile_files[@]} == 0 )); then
     [[ "$USAGE_QUIET" == "1" ]] || print_empty_profiles
@@ -7028,7 +7275,7 @@ cmd_usage() {
     fi
 
     local default_profile active_is_best
-    IFS=$'\t' read -r default_profile active_is_best <<<"$(usage_best_selection "$records")"
+    usage_best_selection_into "$records" default_profile active_is_best
 
     local rendered_output=0
     usage_render_or_prepare "$records" "$default_profile" "$active_is_best" rendered_output
@@ -7076,17 +7323,10 @@ background_refresh_profiles() {
   nohup env CODEX_AUTH_REFRESH_LOCK=try CODEX_AUTH_NO_BACKGROUND=1 CODEX_AUTH_REFRESH_BLOCKED=1 CODEX_AUTH_REFRESH_FALLBACK_CACHE=1 CODEX_AUTH_REFRESH_JOBS="$background_jobs" "$script" refresh --quiet --fast "$@" >/dev/null 2>&1 &
 }
 
-cmd_refresh() {
-  ensure_dirs
-  command -v jq >/dev/null 2>&1 || die "jq is required for usage refresh"
+parse_refresh_args() {
+  local -n args_ref="$1"
+  shift
 
-  USAGE_QUIET=0
-  USAGE_CACHED=0
-  USAGE_REFRESH=1
-  USAGE_BACKGROUND=0
-  USAGE_FAST_REFRESH=1
-
-  local args=()
   while (( $# > 0 )); do
     case "$1" in
       --quiet|-q)
@@ -7103,45 +7343,63 @@ cmd_refresh() {
         ;;
       --)
         shift
-        args+=("$@")
+        args_ref+=("$@")
         break
         ;;
       *)
-        args+=("$1")
+        args_ref+=("$1")
         shift
         ;;
     esac
   done
-  set -- "${args[@]}"
+}
 
+acquire_refresh_command_lock() {
   if [[ "${CODEX_AUTH_REFRESH_LOCK:-}" == "try" ]]; then
     exec 9>"$CODEX_HOME/.tmp/codex-auth-refresh.lock"
-    flock -n 9 || return 0
-  else
-    exec 9>"$CODEX_HOME/.tmp/codex-auth-refresh.lock"
-    local refresh_lock_wait
-    refresh_lock_wait="${CODEX_AUTH_REFRESH_LOCK_WAIT:-1}"
-    [[ "$refresh_lock_wait" =~ ^[0-9]+$ ]] || refresh_lock_wait=1
-    if ! flock -w "$refresh_lock_wait" 9; then
-      [[ "$USAGE_QUIET" == "1" ]] || print_status_note cache "refresh busy" >&2
-      return 0
-    fi
+    flock -n 9 || return 1
+    return 0
   fi
 
-  local profile_files=()
-  if (( $# > 0 )); then
-    local name profile_file
-    for name in "$@"; do
-      require_name "$name"
-      profile_file="$(profile_path "$name")"
-      [[ -f "$profile_file" ]] || die "profile not found: $name"
-      profile_files+=("$profile_file")
-    done
-  else
-    shopt -s nullglob
-    profile_files=("$PROFILE_DIR"/*.json)
-    shopt -u nullglob
+  exec 9>"$CODEX_HOME/.tmp/codex-auth-refresh.lock"
+  local refresh_lock_wait
+  refresh_lock_wait="${CODEX_AUTH_REFRESH_LOCK_WAIT:-1}"
+  [[ "$refresh_lock_wait" =~ ^[0-9]+$ ]] || refresh_lock_wait=1
+  if ! flock -w "$refresh_lock_wait" 9; then
+    [[ "$USAGE_QUIET" == "1" ]] || print_status_note cache "refresh busy" >&2
+    return 1
   fi
+}
+
+collect_refresh_records() {
+  local active_fp="$1"
+  shift
+
+  if [[ "$USAGE_FAST_REFRESH" == "1" ]]; then
+    collect_usage_records "$active_fp" "$@"
+  else
+    collect_usage_records_synced "$active_fp" "$@"
+  fi
+}
+
+cmd_refresh() {
+  ensure_dirs
+  command -v jq >/dev/null 2>&1 || die "jq is required for usage refresh"
+
+  USAGE_QUIET=0
+  USAGE_CACHED=0
+  USAGE_REFRESH=1
+  USAGE_BACKGROUND=0
+  USAGE_FAST_REFRESH=1
+
+  local args=()
+  parse_refresh_args args "$@"
+  set -- "${args[@]}"
+
+  acquire_refresh_command_lock || return 0
+
+  local profile_files=()
+  profile_files_for_args_into profile_files 0 "$@"
 
   if (( ${#profile_files[@]} == 0 )); then
     [[ "$USAGE_QUIET" == "1" ]] || print_empty_profiles
@@ -7156,24 +7414,66 @@ cmd_refresh() {
     active_fp="$(credential_fingerprint "$AUTH_FILE" || true)"
   fi
 
-  local records best_profile best_mark best_week best_short default_profile active_is_best
-  if [[ "$USAGE_FAST_REFRESH" == "1" ]]; then
-    records="$(collect_usage_records "$active_fp" "${profile_files[@]}")"
-  else
-    records="$(collect_usage_records_synced "$active_fp" "${profile_files[@]}")"
-  fi
-  IFS=$'\t' read -r best_profile best_mark best_week best_short <<<"$(find_best_ok_profile "$records" 1)"
-  default_profile=""
-  active_is_best=0
-  if [[ -n "$best_profile" ]]; then
-    if [[ "$best_mark" == "*" ]]; then
-      active_is_best=1
-    else
-      default_profile="$best_profile"
-    fi
-  fi
+  local records default_profile active_is_best
+  records="$(collect_refresh_records "$active_fp" "${profile_files[@]}")"
+  usage_best_selection_into "$records" default_profile active_is_best
 
   [[ "$USAGE_QUIET" == "1" ]] || render_usage_records "$records" "$default_profile" "$active_is_best"
+}
+
+parse_auto_args() {
+  local -n args_ref="$1"
+  shift
+
+  while (( $# > 0 )); do
+    case "$1" in
+      --quiet|-q)
+        USAGE_QUIET=1
+        shift
+        ;;
+      --ttl)
+        [[ "${2:-}" =~ ^[0-9]+$ ]] || return 1
+        CACHE_TTL="$2"
+        USAGE_CACHED=0
+        shift 2
+        ;;
+      --no-background)
+        USAGE_BACKGROUND=0
+        shift
+        ;;
+      --)
+        shift
+        args_ref+=("$@")
+        break
+        ;;
+      *)
+        args_ref+=("$1")
+        shift
+        ;;
+    esac
+  done
+}
+
+auto_apply_selection() {
+  local rendered_output="$1"
+  local default_profile="$2"
+  local active_is_best="$3"
+
+  if [[ -n "$default_profile" ]]; then
+    (( rendered_output )) && printf '\n'
+    if [[ "$USAGE_QUIET" == "1" ]]; then
+      cmd_use "$default_profile" >/dev/null
+    else
+      cmd_use "$default_profile"
+    fi
+  elif [[ "$USAGE_QUIET" != "1" ]]; then
+    (( rendered_output )) && printf '\n'
+    if [[ "$active_is_best" == "1" ]]; then
+      print_status_note ready "already on best profile"
+    else
+      print_status_note blocked "no ready profile"
+    fi
+  fi
 }
 
 cmd_auto() {
@@ -7186,52 +7486,11 @@ cmd_auto() {
   USAGE_BACKGROUND=1
 
   local args=()
-  while (( $# > 0 )); do
-    case "$1" in
-      --quiet|-q)
-        USAGE_QUIET=1
-        shift
-        ;;
-      --ttl)
-        [[ "${2:-}" =~ ^[0-9]+$ ]] || return 0
-        CACHE_TTL="$2"
-        USAGE_CACHED=0
-        shift 2
-        ;;
-      --no-background)
-        USAGE_BACKGROUND=0
-        shift
-        ;;
-      --)
-        shift
-        args+=("$@")
-        break
-        ;;
-      *)
-        args+=("$1")
-        shift
-        ;;
-    esac
-  done
+  parse_auto_args args "$@" || return 0
   set -- "${args[@]}"
 
   local profile_files=()
-  if (( $# > 0 )); then
-    local name profile_file
-    for name in "$@"; do
-      require_name "$name" || return 0
-      profile_file="$(profile_path "$name")"
-      if [[ ! -f "$profile_file" ]]; then
-        [[ "$USAGE_QUIET" == "1" ]] && return 0
-        die "profile not found: $name"
-      fi
-      profile_files+=("$profile_file")
-    done
-  else
-    shopt -s nullglob
-    profile_files=("$PROFILE_DIR"/*.json)
-    shopt -u nullglob
-  fi
+  profile_files_for_args_into profile_files 1 "$@" || return 0
   if (( ${#profile_files[@]} == 0 )); then
     [[ "$USAGE_QUIET" == "1" ]] || print_empty_profiles
     return 0
@@ -7242,18 +7501,9 @@ cmd_auto() {
     active_fp="$(credential_fingerprint "$AUTH_FILE" || true)"
   fi
 
-  local records best_profile best_mark best_week best_short default_profile active_is_best
+  local records default_profile active_is_best
   records="$(collect_usage_records "$active_fp" "${profile_files[@]}")"
-  IFS=$'\t' read -r best_profile best_mark best_week best_short <<<"$(find_best_ok_profile "$records" 1)"
-  default_profile=""
-  active_is_best=0
-  if [[ -n "$best_profile" ]]; then
-    if [[ "$best_mark" == "*" ]]; then
-      active_is_best=1
-    else
-      default_profile="$best_profile"
-    fi
-  fi
+  usage_best_selection_into "$records" default_profile active_is_best
 
   local rendered_output=0
   if [[ "$USAGE_QUIET" != "1" ]]; then
@@ -7261,25 +7511,7 @@ cmd_auto() {
     rendered_output=1
   fi
 
-  if [[ -n "$default_profile" ]]; then
-    if (( rendered_output )); then
-      printf '\n'
-    fi
-    if [[ "$USAGE_QUIET" == "1" ]]; then
-      cmd_use "$default_profile" >/dev/null
-    else
-      cmd_use "$default_profile"
-    fi
-  elif [[ "$USAGE_QUIET" != "1" ]]; then
-    if (( rendered_output )); then
-      printf '\n'
-    fi
-    if [[ "$active_is_best" == "1" ]]; then
-      print_status_note ready "already on best profile"
-    else
-      print_status_note blocked "no ready profile"
-    fi
-  fi
+  auto_apply_selection "$rendered_output" "$default_profile" "$active_is_best"
 
   local stale_names=()
   mapfile -t stale_names < <(cache_stale_profile_names "${profile_files[@]}")
@@ -7521,6 +7753,99 @@ codex_run_cleanup() {
   fi
 }
 
+parse_run_args() {
+  local -n max_attempts_ref="$1"
+  local -n run_auto_ref="$2"
+  local -n log_enabled_ref="$3"
+  local -n args_ref="$4"
+  shift 4
+
+  while (( $# > 0 )); do
+    case "$1" in
+      --attempts)
+        [[ "${2:-}" =~ ^[1-9][0-9]*$ ]] || die "usage: codex-auth run [--attempts n] -- <codex args>"
+        max_attempts_ref="$2"
+        shift 2
+        ;;
+      --no-auto)
+        run_auto_ref=0
+        shift
+        ;;
+      --no-log)
+        log_enabled_ref=0
+        shift
+        ;;
+      --)
+        shift
+        args_ref+=("$@")
+        break
+        ;;
+      *)
+        args_ref+=("$1")
+        shift
+        ;;
+    esac
+  done
+}
+
+codex_run_execute_attempt() {
+  local codex_cli="$1"
+  local log_enabled="$2"
+  local -n run_args_ref="$3"
+  local -n status_ref="$4"
+  local -n log_file_ref="$5"
+  local -n run_file_ref="$6"
+  local -n watch_pid_ref="$7"
+  local -n monitor_pid_ref="$8"
+  local -n target_pid_ref="$9"
+
+  log_file_ref=""
+  run_file_ref=""
+  monitor_pid_ref=""
+  if [[ "$log_enabled" != "0" ]]; then
+    log_file_ref="$(mktemp "$CODEX_HOME/.tmp/codex-run.XXXXXX.log")"
+  fi
+
+  status_ref=0
+  if [[ "$log_enabled" != "0" && -n "$log_file_ref" && -t 0 && -t 1 && -r /dev/tty ]] && command -v script >/dev/null 2>&1; then
+    run_file_ref="$(mktemp "$CODEX_HOME/.tmp/codex-run.XXXXXX.sh")"
+    codex_run_write_launcher "$run_file_ref" "$codex_cli" "${run_args_ref[@]}"
+    set +e
+    codex_run_start_limit_monitor "$log_file_ref" "" "$$" "$run_file_ref"
+    monitor_pid_ref="$CODEX_RUN_LIMIT_MONITOR_PID"
+    script -qefc "$run_file_ref" "$log_file_ref"
+    status_ref=$?
+    codex_run_stop_limit_monitor "$monitor_pid_ref"
+    monitor_pid_ref=""
+    set -e
+    codex_run_stop_watch "$watch_pid_ref"
+    watch_pid_ref=""
+    rm -f "$run_file_ref" 2>/dev/null || true
+    run_file_ref=""
+  elif [[ "$log_enabled" != "0" && -n "$log_file_ref" && ! -t 1 ]]; then
+    set +e
+    CODEX_AUTH_RUNNER=1 "$codex_cli" "${run_args_ref[@]}" > >(tee "$log_file_ref") 2> >(tee -a "$log_file_ref" >&2) &
+    target_pid_ref=$!
+    codex_run_start_limit_monitor "$log_file_ref" "$target_pid_ref"
+    monitor_pid_ref="$CODEX_RUN_LIMIT_MONITOR_PID"
+    wait "$target_pid_ref"
+    status_ref=$?
+    codex_run_stop_limit_monitor "$monitor_pid_ref"
+    monitor_pid_ref=""
+    set -e
+    codex_run_stop_watch "$watch_pid_ref"
+    watch_pid_ref=""
+  else
+    set +e
+    CODEX_AUTH_RUNNER=1 "$codex_cli" "${run_args_ref[@]}"
+    status_ref=$?
+    set -e
+    codex_run_stop_watch "$watch_pid_ref"
+    watch_pid_ref=""
+    [[ -n "$log_file_ref" ]] && : > "$log_file_ref"
+  fi
+}
+
 cmd_run() {
   ensure_dirs
 
@@ -7536,32 +7861,7 @@ cmd_run() {
   [[ "$max_attempts" =~ ^[1-9][0-9]*$ ]] || max_attempts=5
   [[ -z "$auto_ttl" || "$auto_ttl" =~ ^[0-9]+$ ]] || auto_ttl=""
 
-  while (( $# > 0 )); do
-    case "$1" in
-      --attempts)
-        [[ "${2:-}" =~ ^[1-9][0-9]*$ ]] || die "usage: codex-auth run [--attempts n] -- <codex args>"
-        max_attempts="$2"
-        shift 2
-        ;;
-      --no-auto)
-        run_auto=0
-        shift
-        ;;
-      --no-log)
-        log_enabled=0
-        shift
-        ;;
-      --)
-        shift
-        args+=("$@")
-        break
-        ;;
-      *)
-        args+=("$1")
-        shift
-        ;;
-    esac
-  done
+  parse_run_args max_attempts run_auto log_enabled args "$@"
 
   codex_cli="$(codex_bin)" || die "codex command not found"
   require_codex_launcher "$codex_cli"
@@ -7583,51 +7883,7 @@ cmd_run() {
     codex_run_start_watch_if_enabled "$run_auto" "$watch_enabled" "$auto_ttl"
     watch_pid="$CODEX_RUN_WATCH_PID"
 
-    log_file=""
-    run_file=""
-    monitor_pid=""
-    if [[ "$log_enabled" != "0" ]]; then
-      log_file="$(mktemp "$CODEX_HOME/.tmp/codex-run.XXXXXX.log")"
-    fi
-
-    status=0
-    if [[ "$log_enabled" != "0" && -n "$log_file" && -t 0 && -t 1 && -r /dev/tty ]] && command -v script >/dev/null 2>&1; then
-      run_file="$(mktemp "$CODEX_HOME/.tmp/codex-run.XXXXXX.sh")"
-      codex_run_write_launcher "$run_file" "$codex_cli" "${run_args[@]}"
-      set +e
-      codex_run_start_limit_monitor "$log_file" "" "$$" "$run_file"
-      monitor_pid="$CODEX_RUN_LIMIT_MONITOR_PID"
-      script -qefc "$run_file" "$log_file"
-      status=$?
-      codex_run_stop_limit_monitor "$monitor_pid"
-      monitor_pid=""
-      set -e
-      codex_run_stop_watch "$watch_pid"
-      watch_pid=""
-      rm -f "$run_file" 2>/dev/null || true
-      run_file=""
-    elif [[ "$log_enabled" != "0" && -n "$log_file" && ! -t 1 ]]; then
-      set +e
-      CODEX_AUTH_RUNNER=1 "$codex_cli" "${run_args[@]}" > >(tee "$log_file") 2> >(tee -a "$log_file" >&2) &
-      target_pid=$!
-      codex_run_start_limit_monitor "$log_file" "$target_pid"
-      monitor_pid="$CODEX_RUN_LIMIT_MONITOR_PID"
-      wait "$target_pid"
-      status=$?
-      codex_run_stop_limit_monitor "$monitor_pid"
-      monitor_pid=""
-      set -e
-      codex_run_stop_watch "$watch_pid"
-      watch_pid=""
-    else
-      set +e
-      CODEX_AUTH_RUNNER=1 "$codex_cli" "${run_args[@]}"
-      status=$?
-      set -e
-      codex_run_stop_watch "$watch_pid"
-      watch_pid=""
-      [[ -n "$log_file" ]] && : > "$log_file"
-    fi
+    codex_run_execute_attempt "$codex_cli" "$log_enabled" run_args status log_file run_file watch_pid monitor_pid target_pid
 
     if (( status == 0 )); then
       codex_run_cleanup "$watch_pid" "$monitor_pid" "$run_file" "$log_file" "$keep_log"

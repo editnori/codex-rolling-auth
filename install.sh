@@ -26,10 +26,40 @@ write_codex_real_launcher() {
   chmod 0755 "$real"
 }
 
+same_path() {
+  local left="$1"
+  local right="$2"
+
+  [[ "$(realpath "$left" 2>/dev/null || printf '%s' "$left")" == "$(realpath "$right" 2>/dev/null || printf '%s' "$right")" ]]
+}
+
+promote_real_candidate() {
+  local current="$1"
+  local real="$2"
+  local candidate="$3"
+  local target
+
+  [[ -x "$candidate" ]] || return 1
+  same_path "$candidate" "$current" && return 1
+  is_codex_auth_shim "$candidate" && return 1
+  target="$(realpath "$candidate" 2>/dev/null || printf '%s' "$candidate")"
+  write_codex_real_launcher "$target" "$real"
+}
+
+promote_real_backup() {
+  local real="$1"
+  local backup="$2"
+
+  [[ -e "$backup" ]] || return 1
+  is_codex_auth_shim "$backup" && return 1
+  cp -P "$backup" "$real"
+  chmod 0755 "$real" 2>/dev/null || true
+}
+
 promote_real_codex() {
   local current="$bindir/codex"
   local real="$bindir/codex-real"
-  local backup candidate path_dir target
+  local backup candidate path_dir
 
   [[ -x "$real" ]] && return 0
 
@@ -40,11 +70,7 @@ promote_real_codex() {
   fi
 
   for backup in "$bindir"/codex.backup.*; do
-    [[ -e "$backup" ]] || continue
-    is_codex_auth_shim "$backup" && continue
-    cp -P "$backup" "$real"
-    chmod 0755 "$real" 2>/dev/null || true
-    return 0
+    promote_real_backup "$real" "$backup" && return 0
   done
 
   for candidate in \
@@ -52,33 +78,18 @@ promote_real_codex() {
     "$HOME/.bun/bin/codex" \
     "$HOME/.npm-global/bin/codex"
   do
-    [[ -x "$candidate" ]] || continue
-    [[ "$(realpath "$candidate" 2>/dev/null || printf '%s' "$candidate")" != "$(realpath "$current" 2>/dev/null || printf '%s' "$current")" ]] || continue
-    is_codex_auth_shim "$candidate" && continue
-    target="$(realpath "$candidate" 2>/dev/null || printf '%s' "$candidate")"
-    write_codex_real_launcher "$target" "$real"
-    return 0
+    promote_real_candidate "$current" "$real" "$candidate" && return 0
   done
 
   IFS=':' read -r -a path_dirs <<<"${PATH:-}"
   for path_dir in "${path_dirs[@]}"; do
     [[ -n "$path_dir" ]] || path_dir='.'
     candidate="$path_dir/codex"
-    [[ -x "$candidate" ]] || continue
-    [[ "$(realpath "$candidate" 2>/dev/null || printf '%s' "$candidate")" != "$(realpath "$current" 2>/dev/null || printf '%s' "$current")" ]] || continue
-    is_codex_auth_shim "$candidate" && continue
-    target="$(realpath "$candidate" 2>/dev/null || printf '%s' "$candidate")"
-    write_codex_real_launcher "$target" "$real"
-    return 0
+    promote_real_candidate "$current" "$real" "$candidate" && return 0
   done
 
   for candidate in /usr/local/bin/codex /usr/bin/codex /bin/codex; do
-    [[ -x "$candidate" ]] || continue
-    [[ "$(realpath "$candidate" 2>/dev/null || printf '%s' "$candidate")" != "$(realpath "$current" 2>/dev/null || printf '%s' "$current")" ]] || continue
-    is_codex_auth_shim "$candidate" && continue
-    target="$(realpath "$candidate" 2>/dev/null || printf '%s' "$candidate")"
-    write_codex_real_launcher "$target" "$real"
-    return 0
+    promote_real_candidate "$current" "$real" "$candidate" && return 0
   done
 }
 
