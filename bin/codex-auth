@@ -933,30 +933,6 @@ path_row_widths() {
   printf '%s\t%s\t%s\n' "$role_w" "$target_w" "$path_w"
 }
 
-path_target_label() {
-  local target="$1"
-  local width="$2"
-
-  if (( width <= 4 )); then
-    case "$target" in
-      profiles)
-        printf 'prof'
-        ;;
-      backups)
-        printf 'back'
-        ;;
-      usage)
-        printf 'usg'
-        ;;
-      *)
-        fit_text "$target" "$width"
-        ;;
-    esac
-  else
-    fit_text "$target" "$width"
-  fi
-}
-
 path_basename_if_fits() {
   local path="$1"
   local path_w="$2"
@@ -990,7 +966,7 @@ path_rendered_value() {
 
 print_path_line() {
   local role="$1" target="$2" path="$3" role_w="$4" target_w="$5" path_w="$6"
-  local tone="${7:-muted}" rendered role_label
+  local tone="${7:-muted}" rendered role_label target_label
 
   rendered="$(path_rendered_value "$target" "$path" "$target_w" "$path_w")"
   role_label="$role"
@@ -1003,7 +979,15 @@ print_path_line() {
   print_toned_fit "$role_label" "$role_w" "$tone"
   printf ' '
   if (( target_w > 0 )); then
-    path_target_label "$target" "$target_w"
+    target_label="$target"
+    if (( target_w <= 4 )); then
+      case "$target" in
+        profiles) target_label="prof" ;;
+        backups) target_label="back" ;;
+        usage) target_label="usg" ;;
+      esac
+    fi
+    fit_text "$target_label" "$target_w"
     printf ' '
   fi
   fit_profile_text_rtrim "$rendered" "$path_w"
@@ -5068,28 +5052,10 @@ selector_palette_metric_cell() {
   selector_palette_bar "$percent" "$bar_w"
 }
 
-selector_palette_primary_header() {
-  local primary_w="$1"
-  local action_w=5
-  local gap=2
-  local profile_w profile_label
-
-  profile_w=$((primary_w - action_w - gap))
-  (( profile_w < 1 )) && profile_w=1
-  if (( profile_w <= 6 )); then
-    profile_label="name"
-  else
-    profile_label="profile"
-  fi
-
-  print_toned_fit_center "act" "$action_w" muted
-  printf '%*s' "$gap" ''
-  print_toned_fit_center "$profile_label" "$profile_w" muted
-}
-
 selector_palette_table_header() {
   local total_w="$1"
   local primary_w week_w short_w status_w short_label status_label status_gap metric_gap
+  local action_w=5 primary_gap=2 primary_profile_w profile_label
 
   IFS=$'\t' read -r primary_w week_w short_w status_w <<<"$(selector_palette_table_widths "$total_w")"
   status_gap="$(selector_palette_status_gap "$total_w")"
@@ -5102,7 +5068,16 @@ selector_palette_table_header() {
     status_label="st"
   fi
 
-  selector_palette_primary_header "$primary_w"
+  primary_profile_w=$((primary_w - action_w - primary_gap))
+  (( primary_profile_w < 1 )) && primary_profile_w=1
+  if (( primary_profile_w <= 6 )); then
+    profile_label="name"
+  else
+    profile_label="profile"
+  fi
+  print_toned_fit_center "act" "$action_w" muted
+  printf '%*s' "$primary_gap" ''
+  print_toned_fit_center "$profile_label" "$primary_profile_w" muted
   printf ' '
   if (( week_w > 0 )); then
     usage_tone_color muted
