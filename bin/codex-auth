@@ -20,6 +20,48 @@ USAGE_FAST_REFRESH=0
 MUTATION_LOCK_HELD=0
 MUTATION_LOCK_FD=""
 
+USAGE_RECORD_EXTRACT_JQ='
+  def blanks: "", "", "", "", "", "", "", "", "";
+  def no_usage($age; $stale): ["no_usage", "", $age, $stale, blanks];
+  def empty_limit: {used: 0, window: "-", window_num: 0, reset: "-"};
+  def limit_row: {used: ((.usedPercent // 0) | tonumber? // 0 | floor), window: (.windowDurationMins // "-"), window_num: ((.windowDurationMins // 0) | tonumber? // 0), reset: (.resetsAt // "-")};
+  def credit_label: if . == null then "-" elif .unlimited then "unlimited" elif .hasCredits then (.balance // "yes") else "0" end;
+  def error_label: ((.error.message // .error.data.message // .error.data.error.message // .error // "error") | tostring | gsub("[\n\t]+"; " ") | gsub("  +"; " ") | gsub("^ "; "") | gsub(" $"; ""));
+  (._codexAuthAgeSec // "") as $age
+  | (._codexAuthStale // false | tostring) as $stale
+  | if .error? != null then
+      ["error", error_label, $age, $stale, blanks]
+    else
+      (.rateLimitsByLimitId.codex // .rateLimits // null) as $r
+      | if $r == null then
+          no_usage($age; $stale)
+        else
+          [($r.primary // empty), ($r.secondary // empty)]
+          | map(select(type == "object") | limit_row)
+          | map(select(.window_num > 0))
+          | sort_by(if .window_num == 0 then 999999999 else .window_num end) as $limits
+          | if ($limits | length) == 0 then
+              no_usage($age; $stale)
+            else
+              (if ($limits | length) == 1 and ($limits[0].window_num >= 1440)
+               then empty_limit
+               else $limits[0]
+               end) as $shortLimit
+              | (if ($limits | length) == 1 and ($limits[0].window_num < 1440)
+               then empty_limit
+               else $limits[-1]
+               end) as $weeklyLimit
+              | ["usage", "", $age, $stale, ($r.planType // "-"),
+                 $shortLimit.used, $shortLimit.window, $shortLimit.reset,
+                 $weeklyLimit.used, $weeklyLimit.window, $weeklyLimit.reset,
+                 ($r.credits | credit_label), ($r.rateLimitReachedType // "")]
+            end
+        end
+    end
+  | map(tostring)
+  | join("\u001f")
+'
+
 usage() {
   local width
   width="$(terminal_width)"
@@ -1369,6 +1411,18 @@ compact_error_message() {
   printf '%s' "$message"
 }
 
+print_error_prefix() {
+  if usage_unicode_enabled || (( $1 < 30 )); then
+    printf '! '
+  else
+    printf 'error: '
+  fi
+}
+
+print_error_has_body() {
+  [[ "$1" != "$2" && "$1" != "$3" ]]
+}
+
 print_error() {
   local message="$*"
   local cols prefix indent current word candidate rendered line_prefix line_width
@@ -1377,11 +1431,7 @@ print_error() {
 
   cols="$(terminal_width)"
   message="$(compact_error_message "$message" "$cols")"
-  if usage_unicode_enabled || (( cols < 30 )); then
-    prefix="! "
-  else
-    prefix="error: "
-  fi
+  prefix="$(print_error_prefix "$cols")"
   indent="$(printf '%*s' "${#prefix}" '')"
   current="$prefix"
   read -r -a words <<<"$message"
@@ -1398,7 +1448,7 @@ print_error() {
       continue
     fi
 
-    if [[ "$current" != "$prefix" && "$current" != "$indent" ]]; then
+    if print_error_has_body "$current" "$prefix" "$indent"; then
       rendered="$(fit_text_rtrim "$current" "$cols")"
       printf '%s\n' "$rendered" >&2
       wrote_line=1
@@ -1421,7 +1471,7 @@ print_error() {
     fi
   done
 
-  if [[ "$current" != "$prefix" && "$current" != "$indent" ]]; then
+  if print_error_has_body "$current" "$prefix" "$indent"; then
     rendered="$(fit_text_rtrim "$current" "$cols")"
     printf '%s\n' "$rendered" >&2
   fi
@@ -2729,13 +2779,10 @@ usage_bar() {
   local ascii_single_glyphs=("." "+" "#")
 
   [[ "${CODEX_AUTH_ASCII:-0}" == "1" ]] && empty_glyph="."
-  percent="${percent%\%}"
-  if [[ ! "$percent" =~ ^-?[0-9]+$ ]]; then
+  if ! value="$(usage_clamped_percent "$percent")"; then
     repeat_glyph "$empty_glyph" "$width"
     return 0
   fi
-  value="$percent"
-  value=$(( value < 0 ? 0 : value > 100 ? 100 : value ))
 
   if [[ "${CODEX_AUTH_ASCII:-0}" == "1" ]]; then
     if (( width == 1 )); then
@@ -2807,16 +2854,6 @@ usage_role_profile_gap() {
   fi
 }
 
-usage_metric_status_gap() {
-  local role_w="${1:-0}"
-
-  if (( role_w > 1 )); then
-    printf '2'
-  else
-    printf '1'
-  fi
-}
-
 usage_render_total_width() {
   local role_w="$1"
   local profile_w="$2"
@@ -2825,7 +2862,7 @@ usage_render_total_width() {
   local role_profile_gap status_gap
 
   role_profile_gap="$(usage_role_profile_gap "$role_w")"
-  status_gap="$(usage_metric_status_gap "$role_w")"
+  status_gap="$(usage_role_profile_gap "$role_w")"
   if (( status_w > 0 )); then
     printf '%s' "$((role_w + role_profile_gap + profile_w + 1 + cell_w + 1 + cell_w + status_gap + status_w))"
   else
@@ -3266,7 +3303,7 @@ usage_render_widths() {
   wanted_profile_w="$(usage_profile_width_hint "$cols" "$wanted_profile_w" "$USAGE_VERBOSE")"
   IFS=$'\t' read -r mode role_w profile_min status_min reset_w label_w min_bar_w max_bar_w <<<"$(usage_width_mode_defaults "$cols" "$USAGE_VERBOSE")"
   role_profile_gap="$(usage_role_profile_gap "$role_w")"
-  status_gap="$(usage_metric_status_gap "$role_w")"
+  status_gap="$(usage_role_profile_gap "$role_w")"
   if [[ "$show_status" != "1" ]]; then
     status_min=0
     status_gap=0
@@ -3837,7 +3874,7 @@ print_usage_render_line() {
   local role_profile_gap status_gap
 
   role_profile_gap="$(usage_role_profile_gap "$role_w")"
-  status_gap="$(usage_metric_status_gap "$role_w")"
+  status_gap="$(usage_role_profile_gap "$role_w")"
   printf '%s' "$prefix"
   fit_text "$role" "$role_w"
   printf '%*s' "$role_profile_gap" ''
@@ -3956,7 +3993,7 @@ print_usage_render_data_line() {
 
 	  print_toned_fit "$role" "$role_w" "$(usage_role_tone "$role")"
 	  role_profile_gap="$(usage_role_profile_gap "$role_w")"
-	  status_gap="$(usage_metric_status_gap "$role_w")"
+	  status_gap="$(usage_role_profile_gap "$role_w")"
 	  printf '%*s' "$role_profile_gap" ''
 	  fit_profile_text "$(usage_display_profile_name "$profile" "$role" "$profile_w")" "$profile_w"
 	  printf ' '
@@ -4098,8 +4135,16 @@ usage_summary_normalize_scan() {
   local ready="${10}"
   local -n cache_age_label_ref="${11}"
 
-  [[ -n "$best_profile_ref" ]] && has_best_ref=1 || best_profile_ref="none"
-  [[ -n "$active_profile_ref" ]] && has_active_ref=1 || active_profile_ref="none"
+  if [[ -n "$best_profile_ref" ]]; then
+    has_best_ref=1
+  else
+    best_profile_ref="none"
+  fi
+  if [[ -n "$active_profile_ref" ]]; then
+    has_active_ref=1
+  else
+    active_profile_ref="none"
+  fi
   [[ -n "$active_short_ref" && "$active_short_ref" != "-" ]] || active_short_ref="n/a"
   [[ -n "$active_weekly_ref" && "$active_weekly_ref" != "-" ]] || active_weekly_ref="n/a"
   if (( cache_age_max >= 0 )); then
@@ -4975,83 +5020,7 @@ usage_limit_remaining_fields() {
 usage_record_extract_payload() {
   local payload="$1"
 
-  jq -r '
-    (._codexAuthAgeSec // "") as $age
-    | (._codexAuthStale // false) as $stale
-    | if .error? != null then
-        [
-          "error",
-          ((.error.message // .error.data.message // .error.data.error.message // .error // "error")
-            | tostring
-            | gsub("[\n\t]+"; " ")
-            | gsub("  +"; " ")
-            | gsub("^ "; "")
-            | gsub(" $"; "")),
-          $age,
-          ($stale | tostring),
-          "", "", "", "", "", "", "", "", ""
-        ]
-      else
-        (.rateLimitsByLimitId.codex // .rateLimits // null) as $r
-        | if $r == null then
-            ["no_usage", "", $age, ($stale | tostring), "", "", "", "", "", "", "", "", ""]
-          else
-            def empty_limit:
-              {
-                used: 0,
-                window: "-",
-                window_num: 0,
-                reset: "-"
-              };
-            def limit_row:
-              {
-                used: ((.usedPercent // 0) | tonumber? // 0 | floor),
-                window: (.windowDurationMins // "-"),
-                window_num: ((.windowDurationMins // 0) | tonumber? // 0),
-                reset: (.resetsAt // "-")
-              };
-            [
-              ($r.primary // empty),
-              ($r.secondary // empty)
-            ]
-            | map(select(type == "object") | limit_row)
-            | map(select(.window_num > 0))
-            | sort_by(if .window_num == 0 then 999999999 else .window_num end) as $limits
-            | if ($limits | length) == 0 then
-                ["no_usage", "", $age, ($stale | tostring), "", "", "", "", "", "", "", "", ""]
-              else
-                (if ($limits | length) == 1 and ($limits[0].window_num >= 1440)
-                 then empty_limit
-                 else $limits[0]
-                 end) as $shortLimit
-                | (if ($limits | length) == 1 and ($limits[0].window_num < 1440)
-                   then empty_limit
-                   else $limits[-1]
-                   end) as $weeklyLimit
-                | [
-                    "usage",
-                    "",
-                    $age,
-                    ($stale | tostring),
-                    ($r.planType // "-"),
-                    $shortLimit.used,
-                    $shortLimit.window,
-                    $shortLimit.reset,
-                    $weeklyLimit.used,
-                    $weeklyLimit.window,
-                    $weeklyLimit.reset,
-                    (if $r.credits == null then "-"
-                     elif $r.credits.unlimited then "unlimited"
-                     elif $r.credits.hasCredits then ($r.credits.balance // "yes")
-                     else "0" end),
-                    ($r.rateLimitReachedType // "")
-                  ]
-              end
-          end
-      end
-    | map(tostring)
-    | join("\u001f")
-  ' <<<"$payload" 2>/dev/null || true
+  jq -r "$USAGE_RECORD_EXTRACT_JQ" <<<"$payload" 2>/dev/null || true
 }
 
 usage_record_error_status() {
@@ -5162,29 +5131,6 @@ canonical_usage_active_marks() {
 
 MENU_ACTION=""
 MENU_PROFILE=""
-
-usage_switch_detail_label() {
-  local weekly="${1:-}"
-  local short="${2:-}"
-  local short_label="${3:-5h}"
-  local parts=()
-
-  [[ -n "$short_label" && "$short_label" != "short" ]] || short_label="5h"
-  if [[ -n "$weekly" && "$weekly" != "-" ]]; then
-    parts+=("wk $weekly")
-  fi
-  if [[ -n "$short" && "$short" != "-" ]]; then
-    parts+=("$short_label $short")
-  fi
-
-  if (( ${#parts[@]} == 0 )); then
-    return 0
-  elif (( ${#parts[@]} == 1 )); then
-    printf '%s' "${parts[0]}"
-  else
-    printf '%s, %s' "${parts[0]}" "${parts[1]}"
-  fi
-}
 
 print_selector_row() {
   local action="$1"
@@ -5304,22 +5250,27 @@ selector_palette_primary_width() {
   printf '%s' "$primary_w"
 }
 
+width_floor_value() {
+  local value="$1"
+  local default="$2"
+  shift 2
+  local row floor output
+
+  for row in "$@"; do
+    floor="${row%%:*}"
+    output="${row#*:}"
+    if (( value >= floor )); then
+      printf '%s' "$output"
+      return 0
+    fi
+  done
+  printf '%s' "$default"
+}
+
 selector_palette_status_gap() {
   local total_w="$1"
 
-  if (( total_w >= 108 )); then
-    printf '8'
-  elif (( total_w >= 88 )); then
-    printf '6'
-  elif (( total_w >= 68 )); then
-    printf '4'
-  elif (( total_w >= 58 )); then
-    printf '3'
-  elif (( total_w >= 48 )); then
-    printf '2'
-  else
-    printf '1'
-  fi
+  width_floor_value "$total_w" 1 108:8 88:6 68:4 58:3 48:2
 }
 
 selector_palette_metric_gap() {
@@ -5330,6 +5281,12 @@ selector_palette_metric_gap() {
   else
     printf '1'
   fi
+}
+
+selector_palette_metric_width() {
+  local total_w="$1"
+
+  width_floor_value "$total_w" 5 108:23 88:19 68:13
 }
 
 selector_palette_table_widths() {
@@ -5344,43 +5301,22 @@ selector_palette_table_widths() {
   fi
   if (( total_w < 24 )); then
     primary_w=$((total_w - 5))
-    (( primary_w < 11 )) && primary_w=11
+    primary_w=$(( primary_w < 11 ? 11 : primary_w ))
     week_w=0
     short_w=4
     status_w=0
   else
-    if (( total_w >= 108 )); then
-      metric_w=23
-    elif (( total_w >= 88 )); then
-      metric_w=19
-    elif (( total_w >= 68 )); then
-      metric_w=13
-    else
-      metric_w=5
-    fi
+    metric_w="$(selector_palette_metric_width "$total_w")"
     week_w="$metric_w"
-    if (( total_w < 50 )); then
-      short_w=3
-    else
-      short_w="$metric_w"
-    fi
+    short_w=$(( total_w < 50 ? 3 : metric_w ))
     status_w=$((total_w - primary_w - 1 - week_w - metric_gap - short_w - status_gap))
     while (( status_w < 2 && metric_w > 5 )); do
       metric_w=$((metric_w - 1))
       week_w="$metric_w"
-      if (( total_w < 50 )); then
-        short_w=3
-      else
-        short_w="$metric_w"
-      fi
+      short_w=$(( total_w < 50 ? 3 : metric_w ))
       status_w=$((total_w - primary_w - 1 - week_w - metric_gap - short_w - status_gap))
     done
-    if (( status_w < 2 )); then
-      status_w=2
-    fi
-    if (( status_w > status_max )); then
-      status_w="$status_max"
-    fi
+    status_w=$(( status_w < 2 ? 2 : status_w > status_max ? status_max : status_w ))
   fi
 
   printf '%s\t%s\t%s\t%s\n' "$primary_w" "$week_w" "$short_w" "$status_w"
@@ -5622,7 +5558,7 @@ print_selector_palette_table_row() {
   print_toned_fit "$compact_status" "$status_w" "$(usage_status_tone "$raw_status" "$valid")"
 }
 
-selector_palette_clamped_percent() {
+usage_clamped_percent() {
   local percent="$1"
   local value
 
@@ -5750,7 +5686,7 @@ selector_palette_bar() {
 
   tone="$(usage_limit_tone "$percent")"
   bg_style="${CODEX_AUTH_SELECTOR_BAR_STYLE:-bg}"
-  if value="$(selector_palette_clamped_percent "$percent")"; then
+  if value="$(usage_clamped_percent "$percent")"; then
     if usage_unicode_enabled; then
       selector_palette_bar_unicode "$value" "$width" "$tone" "$bg_style" "$bar_border_glyph"
     else
@@ -6311,25 +6247,9 @@ selector_palette_header_text() {
 
 selector_palette_take_short_limit() {
   local text="$1"
-  local name="" label="" value="" token
-  local parts=()
-  local i
+  local name label value
 
-  read -r -a parts <<<"$text"
-  if (( ${#parts[@]} == 0 )); then
-    return 0
-  fi
-  name="${parts[0]}"
-  for ((i = 1; i < ${#parts[@]} - 1; i++)); do
-    token="${parts[$i]}"
-    case "$token" in
-      5h|short|wk)
-        label="$token"
-        value="${parts[$((i + 1))]}"
-        break
-        ;;
-    esac
-  done
+  IFS=$'\t' read -r name _ label value <<<"$(selector_palette_limit_parts "$text")"
   if [[ -n "$label" && -n "$value" ]]; then
     printf '%s %s %s' "$name" "$label" "$value"
   else
@@ -6339,15 +6259,27 @@ selector_palette_take_short_limit() {
 
 selector_palette_compact_active_limit() {
   local text="$1"
-  local name="" label="" value="" token
+  local compact_name value
+
+  IFS=$'\t' read -r _ compact_name _ value <<<"$(selector_palette_limit_parts "$text")"
+  if [[ -n "$value" ]]; then
+    printf 'act %s %s' "$compact_name" "$value"
+  elif [[ -n "$compact_name" ]]; then
+    printf 'act %s' "$compact_name"
+  fi
+}
+
+selector_palette_limit_parts() {
+  local text="$1"
+  local name="" compact_name="" label="" value="" token
   local parts=()
   local i
 
   read -r -a parts <<<"$text"
-  if (( ${#parts[@]} == 0 )); then
-    return 0
+  if (( ${#parts[@]} > 0 )); then
+    name="${parts[0]}"
+    compact_name="$(usage_display_profile_name "$name" "" 6)"
   fi
-  name="$(usage_display_profile_name "${parts[0]}" "" 6)"
   for ((i = 1; i < ${#parts[@]} - 1; i++)); do
     token="${parts[$i]}"
     case "$token" in
@@ -6358,11 +6290,7 @@ selector_palette_compact_active_limit() {
         ;;
     esac
   done
-  if [[ -n "$value" ]]; then
-    printf 'act %s %s' "$name" "$value"
-  else
-    printf 'act %s' "$name"
-  fi
+  printf '%s\t%s\t%s\t%s\n' "$name" "$compact_name" "$label" "$value"
 }
 
 selector_palette_keyword_tone() {
@@ -6445,46 +6373,6 @@ print_selector_palette_context_line() {
   printf '\n'
 }
 
-selector_palette_context_summary_parts() {
-  local summary="$1"
-  local sep="$2"
-  local -n first_ref="$3"
-  local -n rest_ref="$4"
-  local next_part
-
-  IFS=$'\t' read -r first_ref rest_ref <<<"$(usage_summary_split_once "$summary" "$sep")"
-  case "$first_ref" in
-    best|"best active"|"best is active")
-      if [[ -n "$rest_ref" ]]; then
-        IFS=$'\t' read -r next_part rest_ref <<<"$(usage_summary_split_once "$rest_ref" "$sep")"
-        first_ref="$first_ref $next_part"
-      fi
-      ;;
-  esac
-  case "$first_ref" in
-    "best active "*)
-      first_ref="best ${first_ref#best active }"
-      ;;
-    "best is active "*)
-      first_ref="best ${first_ref#best is active }"
-      ;;
-  esac
-}
-
-selector_palette_context_active_parts() {
-  local sep="$1"
-  local -n active_part_ref="$2"
-  local -n stats_part_ref="$3"
-  local stats_head next_part
-
-  [[ -n "$stats_part_ref" ]] || return 0
-  IFS=$'\t' read -r stats_head next_part <<<"$(usage_summary_split_once "$stats_part_ref" "$sep")"
-  if [[ "$stats_head" == active\ * || "$stats_head" == "no active" ]]; then
-    active_part_ref="$stats_head"
-    stats_part_ref="$next_part"
-  fi
-}
-
 selector_palette_context_compact_best() {
   local best_value="$1"
   local best_parts=()
@@ -6556,9 +6444,11 @@ selector_palette_context_line() {
   local sep first rest active_part="" stats_part line best_value compact_best_value
 
   sep="$(usage_separator)"
-  selector_palette_context_summary_parts "$summary" "$sep" first rest
+  IFS=$'\t' read -r first rest <<<"$(usage_summary_split_once "$summary" "$sep")"
+  usage_summary_extend_best_head first rest "$sep"
+  usage_summary_normalize_best_active first
   stats_part="$rest"
-  selector_palette_context_active_parts "$sep" active_part stats_part
+  usage_summary_take_active_part active_part stats_part "$sep"
   best_value="$first"
   [[ "$best_value" == best\ * ]] && best_value="best $(selector_palette_take_short_limit "${best_value#best }")"
   compact_best_value="$(selector_palette_context_compact_best "$best_value")"
@@ -6883,16 +6773,16 @@ selector_fzf_prepare_header() {
     while IFS= read -r fzf_header_line; do
       fzf_header_line_count_ref=$((fzf_header_line_count_ref + 1))
     done <<<"$fzf_header_ref"
-    (( fzf_header_line_count_ref < 1 )) && fzf_header_line_count_ref=1
+    fzf_header_line_count_ref=$(( fzf_header_line_count_ref < 1 ? 1 : fzf_header_line_count_ref ))
     fzf_height_ref=$(( ${#header_rows_ref[@]} + fzf_header_line_count_ref + 1 ))
     if [[ "$term_lines" =~ ^[0-9]+$ ]]; then
       max_height=$((term_lines - 2))
-      (( max_height < 6 )) && max_height=6
+      max_height=$(( max_height < 6 ? 6 : max_height ))
       if (( fzf_height_ref + 2 <= max_height )); then
         fzf_height_ref=$((fzf_height_ref + 2))
         fzf_vertical_padding=1
       fi
-      (( fzf_height_ref > max_height )) && fzf_height_ref="$max_height"
+      fzf_height_ref=$(( fzf_height_ref > max_height ? max_height : fzf_height_ref ))
     elif (( fzf_height_ref < 22 )); then
       fzf_height_ref=$((fzf_height_ref + 2))
       fzf_vertical_padding=1
@@ -7588,6 +7478,19 @@ usage_blocked_cache_payload() {
   printf '%s' "$payload"
 }
 
+usage_refresh_state_fallback_payload() {
+  local profile_name="$1"
+  local fingerprint="$2"
+  local payload=""
+
+  [[ -n "$fingerprint" ]] && payload="$(state_payload_for_profile "$profile_name" "$fingerprint" || true)"
+  if [[ -n "$payload" && "${CODEX_AUTH_REFRESH_FALLBACK_CACHE:-1}" == "1" ]]; then
+    mark_stale_payload "$payload"
+  else
+    printf '%s' '{"error":{"message":"no response"}}'
+  fi
+}
+
 usage_refresh_payload_or_cache() {
   local profile_name="$1"
   local profile_file="$2"
@@ -7602,13 +7505,7 @@ usage_refresh_payload_or_cache() {
     payload=""
   fi
   if [[ -z "$payload" || "$payload" == "null" ]]; then
-    payload=""
-    [[ -n "$fingerprint" ]] && payload="$(state_payload_for_profile "$profile_name" "$fingerprint" || true)"
-    if [[ -n "$payload" && "${CODEX_AUTH_REFRESH_FALLBACK_CACHE:-1}" == "1" ]]; then
-      payload="$(mark_stale_payload "$payload")"
-    else
-      payload='{"error":{"message":"no response"}}'
-    fi
+    payload="$(usage_refresh_state_fallback_payload "$profile_name" "$fingerprint")"
   elif [[ -n "$fingerprint" ]]; then
     state_update_profile "$profile_name" "$fingerprint" "$payload"
   fi
@@ -8682,6 +8579,14 @@ parse_run_args() {
   done
 }
 
+codex_run_can_use_tty_log() {
+  [[ "$1" != "0" && -n "$2" && -t 0 && -t 1 && -r /dev/tty ]] && command -v script >/dev/null 2>&1
+}
+
+codex_run_can_use_pipe_log() {
+  [[ "$1" != "0" && -n "$2" && ! -t 1 ]]
+}
+
 codex_run_execute_attempt() {
   local codex_cli="$1"
   local log_enabled="$2"
@@ -8701,7 +8606,7 @@ codex_run_execute_attempt() {
   fi
 
   status_ref=0
-  if [[ "$log_enabled" != "0" && -n "$log_file_ref" && -t 0 && -t 1 && -r /dev/tty ]] && command -v script >/dev/null 2>&1; then
+  if codex_run_can_use_tty_log "$log_enabled" "$log_file_ref"; then
     run_file_ref="$(mktemp "$CODEX_HOME/.tmp/codex-run.XXXXXX.sh")"
     codex_run_write_launcher "$run_file_ref" "$codex_cli" "${run_args_ref[@]}"
     set +e
@@ -8716,7 +8621,7 @@ codex_run_execute_attempt() {
     watch_pid_ref=""
     rm -f "$run_file_ref" 2>/dev/null || true
     run_file_ref=""
-  elif [[ "$log_enabled" != "0" && -n "$log_file_ref" && ! -t 1 ]]; then
+  elif codex_run_can_use_pipe_log "$log_enabled" "$log_file_ref"; then
     set +e
     CODEX_AUTH_RUNNER=1 "$codex_cli" "${run_args_ref[@]}" > >(tee "$log_file_ref") 2> >(tee -a "$log_file_ref" >&2) &
     target_pid_ref=$!

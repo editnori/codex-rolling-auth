@@ -76,16 +76,13 @@ promote_real_backups() {
   return 1
 }
 
-promote_known_real_candidates() {
+promote_listed_real_candidates() {
   local current="$1"
   local real="$2"
   local candidate
+  shift 2
 
-  for candidate in \
-    "$HOME/.bun/bin/codex-real" \
-    "$HOME/.bun/bin/codex" \
-    "$HOME/.npm-global/bin/codex"
-  do
+  for candidate in "$@"; do
     promote_real_candidate "$current" "$real" "$candidate" && return 0
   done
   return 1
@@ -106,17 +103,6 @@ promote_path_real_candidates() {
   return 1
 }
 
-promote_system_real_candidates() {
-  local current="$1"
-  local real="$2"
-  local candidate
-
-  for candidate in /usr/local/bin/codex /usr/bin/codex /bin/codex; do
-    promote_real_candidate "$current" "$real" "$candidate" && return 0
-  done
-  return 1
-}
-
 promote_real_codex() {
   local current="$bindir/codex"
   local real="$bindir/codex-real"
@@ -125,9 +111,15 @@ promote_real_codex() {
 
   promote_current_codex "$current" "$real" && return 0
   promote_real_backups "$real" && return 0
-  promote_known_real_candidates "$current" "$real" && return 0
+  promote_listed_real_candidates "$current" "$real" \
+    "$HOME/.bun/bin/codex-real" \
+    "$HOME/.bun/bin/codex" \
+    "$HOME/.npm-global/bin/codex" && return 0
   promote_path_real_candidates "$current" "$real" && return 0
-  promote_system_real_candidates "$current" "$real" && return 0
+  promote_listed_real_candidates "$current" "$real" \
+    /usr/local/bin/codex \
+    /usr/bin/codex \
+    /bin/codex && return 0
 }
 
 if [[ "${1:-}" == "--wrap-codex" ]]; then
