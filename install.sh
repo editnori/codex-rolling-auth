@@ -56,22 +56,30 @@ promote_real_backup() {
   chmod 0755 "$real" 2>/dev/null || true
 }
 
-promote_real_codex() {
-  local current="$bindir/codex"
-  local real="$bindir/codex-real"
-  local backup candidate path_dir
+promote_current_codex() {
+  local current="$1"
+  local real="$2"
 
-  [[ -x "$real" ]] && return 0
+  [[ -e "$current" ]] || return 1
+  is_codex_auth_shim "$current" && return 1
+  cp -P "$current" "$real"
+  chmod 0755 "$real" 2>/dev/null || true
+}
 
-  if [[ -e "$current" ]] && ! is_codex_auth_shim "$current"; then
-    cp -P "$current" "$real"
-    chmod 0755 "$real" 2>/dev/null || true
-    return 0
-  fi
+promote_real_backups() {
+  local real="$1"
+  local backup
 
   for backup in "$bindir"/codex.backup.*; do
     promote_real_backup "$real" "$backup" && return 0
   done
+  return 1
+}
+
+promote_known_real_candidates() {
+  local current="$1"
+  local real="$2"
+  local candidate
 
   for candidate in \
     "$HOME/.bun/bin/codex-real" \
@@ -80,6 +88,14 @@ promote_real_codex() {
   do
     promote_real_candidate "$current" "$real" "$candidate" && return 0
   done
+  return 1
+}
+
+promote_path_real_candidates() {
+  local current="$1"
+  local real="$2"
+  local candidate path_dir
+  local path_dirs=()
 
   IFS=':' read -r -a path_dirs <<<"${PATH:-}"
   for path_dir in "${path_dirs[@]}"; do
@@ -87,10 +103,31 @@ promote_real_codex() {
     candidate="$path_dir/codex"
     promote_real_candidate "$current" "$real" "$candidate" && return 0
   done
+  return 1
+}
+
+promote_system_real_candidates() {
+  local current="$1"
+  local real="$2"
+  local candidate
 
   for candidate in /usr/local/bin/codex /usr/bin/codex /bin/codex; do
     promote_real_candidate "$current" "$real" "$candidate" && return 0
   done
+  return 1
+}
+
+promote_real_codex() {
+  local current="$bindir/codex"
+  local real="$bindir/codex-real"
+
+  [[ -x "$real" ]] && return 0
+
+  promote_current_codex "$current" "$real" && return 0
+  promote_real_backups "$real" && return 0
+  promote_known_real_candidates "$current" "$real" && return 0
+  promote_path_real_candidates "$current" "$real" && return 0
+  promote_system_real_candidates "$current" "$real" && return 0
 }
 
 if [[ "${1:-}" == "--wrap-codex" ]]; then
