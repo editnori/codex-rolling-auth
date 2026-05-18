@@ -1355,6 +1355,18 @@ EOF
   return 1
 }
 
+compact_profile_not_found_message() {
+  local cols="$1"
+  local tail="$2"
+
+  if (( cols < 40 )); then
+    tail="$(fit_profile_text_rtrim "$tail" "$((cols - 15))")"
+    printf 'missing %s' "$tail"
+  else
+    printf 'not found: %s' "$tail"
+  fi
+}
+
 compact_error_message() {
   local message="$1"
   local cols="$2"
@@ -1408,24 +1420,15 @@ compact_error_message() {
         ;;
       profile\ not\ found:\ *)
         tail="${message#profile not found: }"
-        if (( cols < 40 )); then
-          tail="$(fit_profile_text_rtrim "$tail" "$((cols - 15))")"
-          printf 'missing %s' "$tail"
-        else
-          printf 'not found: %s' "$tail"
-        fi
+        compact_profile_not_found_message "$cols" "$tail"
         return 0
         ;;
     esac
   fi
 
-  if (( cols < 32 )); then
-    case "$message" in
-      usage:\ codex-auth\ *)
-        printf 'usage:%s' "${message#usage: codex-auth}"
-        return 0
-        ;;
-    esac
+  if (( cols < 32 )) && [[ "$message" == usage:\ codex-auth\ * ]]; then
+    printf 'usage:%s' "${message#usage: codex-auth}"
+    return 0
   fi
 
   printf '%s' "$message"
@@ -2810,15 +2813,17 @@ usage_bar() {
   local empty_glyph="░"
   local partial_glyphs=("" "▏" "▎" "▍" "▌" "▋" "▊" "▉")
 
+  [[ "${CODEX_AUTH_ASCII:-0}" == "1" ]] && empty_glyph="."
+  percent="${percent%\%}"
+  if [[ ! "$percent" =~ ^-?[0-9]+$ ]]; then
+    repeat_glyph "$empty_glyph" "$width"
+    return 0
+  fi
+  value="$percent"
+  (( value < 0 )) && value=0
+  (( value > 100 )) && value=100
+
   if [[ "${CODEX_AUTH_ASCII:-0}" == "1" ]]; then
-    percent="${percent%\%}"
-    if [[ ! "$percent" =~ ^-?[0-9]+$ ]]; then
-      repeat_glyph "." "$width"
-      return 0
-    fi
-    value="$percent"
-    (( value < 0 )) && value=0
-    (( value > 100 )) && value=100
     if (( width == 1 )); then
       if (( value <= 0 )); then
         printf '.'
@@ -2832,19 +2837,10 @@ usage_bar() {
     full=$(((value * width + 50) / 100))
     (( full > width )) && full="$width"
     repeat_glyph "#" "$full"
-    repeat_glyph "." "$((width - full))"
+    repeat_glyph "$empty_glyph" "$((width - full))"
     return 0
   fi
 
-  percent="${percent%\%}"
-  if [[ ! "$percent" =~ ^-?[0-9]+$ ]]; then
-    repeat_glyph "$empty_glyph" "$width"
-    return 0
-  fi
-
-  value="$percent"
-  (( value < 0 )) && value=0
-  (( value > 100 )) && value=100
   units=$(((value * width * 8 + 50) / 100))
   full=$((units / 8))
   partial=$((units % 8))
@@ -3060,6 +3056,28 @@ usage_width_mode_defaults() {
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$mode" "$role_w" "$profile_min" "$status_min" "$reset_w" "$label_w" "$min_bar_w" "$max_bar_w"
 }
 
+usage_mode_is_pico_or_nano() {
+  case "$1" in
+    pico|nano)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+usage_mode_shows_used_percent_label() {
+  case "$1" in
+    pico|nano|micro|tiny|tight)
+      return 1
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
 usage_limit_cell_reset_label() {
   local mode="$1"
   local reset_label="$2"
@@ -3086,7 +3104,7 @@ usage_limit_cell_set_labels() {
   if [[ "$percent" == "-" ]]; then
     percent_label_ref="$(usage_meta_glyph)"
     [[ "$mode" == "micro" || "$mode" == "nano" ]] || reset_label_ref="$(usage_meta_glyph)"
-  elif (( USAGE_VERBOSE )) && [[ "$mode" != "pico" && "$mode" != "nano" && "$mode" != "micro" && "$mode" != "tiny" && "$mode" != "tight" && "$used_percent" =~ ^[0-9]+$ ]]; then
+  elif (( USAGE_VERBOSE )) && usage_mode_shows_used_percent_label "$mode" && [[ "$used_percent" =~ ^[0-9]+$ ]]; then
     percent_label_ref="${percent%\%}/${used_percent}%"
     label_w_ref=6
   elif (( ! USAGE_VERBOSE )); then
@@ -3173,7 +3191,7 @@ print_usage_limit_cell() {
   reset_label="$(usage_limit_cell_reset_label "$mode" "$reset_label")"
   usage_limit_cell_set_labels "$percent" "$mode" "$used_percent" percent_label reset_label reset_prefix label_w
   tone="$(usage_limit_tone "$percent")"
-  if [[ "$mode" == "pico" || "$mode" == "nano" ]]; then
+  if usage_mode_is_pico_or_nano "$mode"; then
     [[ "$percent" == "-" ]] && percent_label="$(usage_meta_glyph)"
     usage_tone_color "$tone"
     fit_text_center "$percent_label" "$cell_w"
@@ -3453,7 +3471,7 @@ usage_display_stale_status() {
   local mode="$2"
   local stale_age="$3"
 
-  if [[ "$mode" == "pico" || "$mode" == "nano" ]]; then
+  if usage_mode_is_pico_or_nano "$mode"; then
     if [[ "$status" == *cap ]]; then
       printf 'cap'
     else
@@ -3555,7 +3573,7 @@ usage_display_status() {
     return 0
   fi
 
-  if [[ "$mode" == "pico" || "$mode" == "nano" ]]; then
+  if usage_mode_is_pico_or_nano "$mode"; then
     usage_display_pico_status "$status"
     return 0
   fi
@@ -3654,7 +3672,7 @@ usage_header_role() {
 
 usage_header_profile() {
   local mode="${1:-normal}"
-  if [[ "$mode" == "pico" || "$mode" == "nano" ]]; then
+  if usage_mode_is_pico_or_nano "$mode"; then
     printf 'name'
   else
     printf 'profile'
@@ -3664,7 +3682,7 @@ usage_header_profile() {
 usage_header_week_percent() {
   local mode="$1"
 
-  if [[ "$mode" == "pico" || "$mode" == "nano" ]]; then
+  if usage_mode_is_pico_or_nano "$mode"; then
     printf 'wk%%'
   else
     printf 'week%%'
@@ -3743,7 +3761,7 @@ usage_header_short_label() {
   local mode="$1"
   local label="${USAGE_SHORT_LABEL:-5h}"
 
-  if [[ "$label" == "short" && ( "$mode" == "pico" || "$mode" == "nano" ) ]]; then
+  if [[ "$label" == "short" ]] && usage_mode_is_pico_or_nano "$mode"; then
     label="5h"
   fi
   printf '%s' "$label"
@@ -3753,7 +3771,7 @@ usage_header_short_percent() {
   local mode="$1"
   local label="$2"
 
-  if [[ "$mode" == "pico" || "$mode" == "nano" ]]; then
+  if usage_mode_is_pico_or_nano "$mode"; then
     printf '%s%%' "${label:0:2}"
   else
     printf '%s%%' "$label"
@@ -3835,7 +3853,7 @@ usage_header_short() {
 
 usage_header_state() {
   local mode="${1:-normal}"
-  if [[ "$mode" == "pico" || "$mode" == "nano" ]]; then
+  if usage_mode_is_pico_or_nano "$mode"; then
     printf 'st'
   elif [[ "$mode" == "micro" || "$mode" == "tiny" ]]; then
     printf 'state'
@@ -3956,50 +3974,29 @@ usage_unavailable_status_cell() {
   local raw_status="$1"
   local display_status="$2"
   local status_w="${3:-0}"
+  local status cutoff text
 
-  case "$raw_status" in
-    login)
-      if (( status_w < 4 )); then
-        printf 'log'
-      elif (( status_w < 6 )); then
-        printf 'auth'
-      elif (( status_w < 12 )); then
-        printf 'login'
-      else
-        printf 'login needed'
-      fi
-      ;;
-    no\ data)
-      if (( status_w < 3 )); then
-        printf 'na'
-      elif (( status_w < 7 )); then
-        printf 'n/a'
-      else
-        printf 'no data'
-      fi
-      ;;
-    no\ usage)
-      if (( status_w < 3 )); then
-        printf 'na'
-      elif (( status_w < 8 )); then
-        printf 'n/a'
-      else
-        printf 'no usage'
-      fi
-      ;;
-    offline)
-      if (( status_w < 3 )); then
-        printf 'of'
-      elif (( status_w < 7 )); then
-        printf 'off'
-      else
-        printf 'offline'
-      fi
-      ;;
-    *)
-      printf '%s' "$display_status"
-      ;;
-  esac
+  while IFS=$'\t' read -r status cutoff text; do
+    [[ "$raw_status" == "$status" ]] || continue
+    (( status_w < cutoff )) || continue
+    printf '%s' "$text"
+    return 0
+  done <<'EOF'
+login	4	log
+login	6	auth
+login	12	login
+login	100000	login needed
+no data	3	na
+no data	7	n/a
+no data	100000	no data
+no usage	3	na
+no usage	8	n/a
+no usage	100000	no usage
+offline	3	of
+offline	7	off
+offline	100000	offline
+EOF
+  printf '%s' "$display_status"
 }
 
 print_usage_placeholder_limit_cell() {
@@ -4011,13 +4008,13 @@ print_usage_placeholder_limit_cell() {
   glyph="-"
   if [[ "$mode" == "pico" ]]; then
     label_w="$cell_w"
-  elif (( USAGE_VERBOSE )) && [[ "$mode" != "pico" && "$mode" != "nano" && "$mode" != "micro" && "$mode" != "tiny" && "$mode" != "tight" ]]; then
+  elif (( USAGE_VERBOSE )) && usage_mode_shows_used_percent_label "$mode"; then
     label_w=6
   fi
   (( label_w > cell_w )) && label_w="$cell_w"
 
   usage_tone_color muted
-  if [[ "$mode" == "pico" || "$mode" == "nano" ]]; then
+  if usage_mode_is_pico_or_nano "$mode"; then
     fit_text_center "$glyph" "$cell_w"
     usage_tone_reset
     return 0
@@ -4372,6 +4369,25 @@ usage_summary_fallback_line() {
   printf '%s\t%s\t%s\t%s\n' "$line" "$show_ready" "$show_caps" "$cap_label"
 }
 
+print_usage_summary_colored_pair() {
+  local show="$1"
+  local prefix="$2"
+  local value="$3"
+  local value_tone="$4"
+
+  (( show )) || return 0
+  usage_tone_color muted; printf '%s' "$prefix"; usage_tone_reset
+  usage_tone_color "$value_tone"; printf '%s' "$value"; usage_tone_reset
+}
+
+print_usage_summary_colored_text() {
+  local show="$1"
+  local text="$2"
+
+  (( show )) || return 0
+  usage_tone_color muted; printf '%s' "$text"; usage_tone_reset
+}
+
 print_usage_summary_colored_line() {
   local sep="$1"
   local old_summary="$2"
@@ -4417,41 +4433,15 @@ print_usage_summary_colored_line() {
     usage_tone_color muted; printf 'no fresh ready'; usage_tone_reset
     usage_tone_color muted; printf '%sno active' "$sep"; usage_tone_reset
   fi
-  if (( has_active && active_has_usage )); then
-    usage_tone_color muted; printf ' %s ' "$active_label"; usage_tone_reset
-    usage_tone_color "$(usage_limit_tone "$active_short")"; printf '%s' "$active_short"; usage_tone_reset
-  fi
-  if (( show_week )); then
-    usage_tone_color muted; printf ' wk '; usage_tone_reset
-    usage_tone_color "$(usage_limit_tone "$active_weekly")"; printf '%s' "$active_weekly"; usage_tone_reset
-  fi
-  if (( show_ready )); then
-    usage_tone_color muted; printf '%sready ' "$sep"; usage_tone_reset
-    usage_tone_color good; printf '%s' "$ready"; usage_tone_reset
-  fi
-  if (( show_caps )); then
-    usage_tone_color muted; printf '%s%s ' "$sep" "$cap_label"; usage_tone_reset
-    usage_tone_color bad; printf '%s' "$caps"; usage_tone_reset
-  fi
-  if (( show_login )); then
-    usage_tone_color muted; printf '%slogin ' "$sep"; usage_tone_reset
-    usage_tone_color muted; printf '%s' "$login"; usage_tone_reset
-  fi
-  if (( show_unavailable )); then
-    usage_tone_color muted; printf '%sno data ' "$sep"; usage_tone_reset
-    usage_tone_color muted; printf '%s' "$unavailable"; usage_tone_reset
-  fi
-  if (( show_offline )); then
-    usage_tone_color muted; printf '%soffline ' "$sep"; usage_tone_reset
-    usage_tone_color warn; printf '%s' "$offline"; usage_tone_reset
-  fi
-  if (( show_stale )); then
-    usage_tone_color muted; printf '%sstale ' "$sep"; usage_tone_reset
-    usage_tone_color warn; printf '%s' "$stale"; usage_tone_reset
-  fi
-  if (( show_cache )); then
-    usage_tone_color muted; printf '%scache %s' "$sep" "$cache_age_label"; usage_tone_reset
-  fi
+  print_usage_summary_colored_pair "$((has_active * active_has_usage))" " $active_label " "$active_short" "$(usage_limit_tone "$active_short")"
+  print_usage_summary_colored_pair "$show_week" ' wk ' "$active_weekly" "$(usage_limit_tone "$active_weekly")"
+  print_usage_summary_colored_pair "$show_ready" "${sep}ready " "$ready" good
+  print_usage_summary_colored_pair "$show_caps" "${sep}${cap_label} " "$caps" bad
+  print_usage_summary_colored_pair "$show_login" "${sep}login " "$login" muted
+  print_usage_summary_colored_pair "$show_unavailable" "${sep}no data " "$unavailable" muted
+  print_usage_summary_colored_pair "$show_offline" "${sep}offline " "$offline" warn
+  print_usage_summary_colored_pair "$show_stale" "${sep}stale " "$stale" warn
+  print_usage_summary_colored_text "$show_cache" "${sep}cache $cache_age_label"
   printf '\n'
 }
 
@@ -6501,11 +6491,8 @@ selector_palette_compact_active_limit() {
   fi
 }
 
-selector_palette_context_word_tone() {
-  local word="$1"
-  local section="${2:-}"
-
-  case "$word" in
+selector_palette_keyword_tone() {
+  case "${1:-}" in
     best)
       printf 'accent'
       ;;
@@ -6521,32 +6508,27 @@ selector_palette_context_word_tone() {
     login)
       printf 'warn'
       ;;
-    *%)
-      usage_limit_tone "$word"
-      ;;
     *)
-      case "$section" in
-        best)
-          printf 'accent'
-          ;;
-        active|act)
-          printf 'active'
-          ;;
-        ready)
-          printf 'good'
-          ;;
-        cap)
-          printf 'bad'
-          ;;
-        login)
-          printf 'warn'
-          ;;
-        *)
-          printf 'muted'
-          ;;
-      esac
+      return 1
       ;;
   esac
+}
+
+selector_palette_context_word_tone() {
+  local word="$1"
+  local section="${2:-}"
+
+  if [[ "$word" == *% ]]; then
+    usage_limit_tone "$word"
+    return 0
+  fi
+  if selector_palette_keyword_tone "$word"; then
+    return 0
+  fi
+  if selector_palette_keyword_tone "$section"; then
+    return 0
+  fi
+  printf 'muted'
 }
 
 print_selector_palette_context_line() {
@@ -8730,11 +8712,11 @@ codex_run_kill_script_for_log() {
       [[ "$grandchild" =~ ^[0-9]+$ ]] || continue
       usage_kill_process_tree "$grandchild" "$signal"
       killed_child=1
-    done < <(pgrep -P "$child" 2>/dev/null || true)
+    done < <(pgrep -P "$child" 2>/dev/null)
     if (( killed_child == 0 )); then
       usage_kill_process_tree "$child" "$signal"
     fi
-  done < <(pgrep -P "$parent_pid" 2>/dev/null || true)
+  done < <(pgrep -P "$parent_pid" 2>/dev/null)
 }
 
 codex_run_limit_monitor_loop() {
