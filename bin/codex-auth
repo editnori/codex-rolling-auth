@@ -6008,6 +6008,414 @@ print_palette_summary_header() {
   fi
 }
 
+selector_fzf_menu() {
+  local -n rows_ref="$1"
+  local summary_text="$2"
+  local total_w="$3"
+  local role_w="$4"
+  local profile_w="$5"
+  local cell_w="$6"
+  local status_w="$7"
+  local mode="$8"
+  local selector_palette_mode="$9"
+  local fzf_height fzf_height_arg choice kind action profile_choice fzf_prompt fzf_pointer fzf_header term_lines max_height
+  local fzf_vertical_padding=0
+  local fzf_outer_top_padding=0
+  local fzf_pad_i
+  local fzf_header_line fzf_header_line_count=1
+  local fzf_color_args=()
+  local fzf_border_args=()
+  local fzf_margin_args=()
+  local fzf_padding_args=()
+  local fzf_ellipsis_args=()
+  local fzf_header_args=()
+  local fzf_layout_args=(--layout=reverse)
+  local fzf_opencode_theme=0
+  local selector_controls
+
+  fzf_height=$(( ${#rows_ref[@]} + 8 ))
+  (( fzf_height < 12 )) && fzf_height=12
+  term_lines="${LINES:-}"
+  [[ "$term_lines" =~ ^[0-9]+$ ]] || term_lines="$(tput lines 2>/dev/null || true)"
+  if [[ "$term_lines" =~ ^[0-9]+$ ]]; then
+    max_height=$((term_lines - 2))
+    (( max_height < 12 )) && max_height=12
+    (( fzf_height > max_height )) && fzf_height="$max_height"
+  elif (( fzf_height > 24 )); then
+    fzf_height=24
+  fi
+  if [[ -n "${CODEX_AUTH_FZF_THEME:-}" ]]; then
+    if [[ "$CODEX_AUTH_FZF_THEME" == "codex" || "$CODEX_AUTH_FZF_THEME" == "1" ]]; then
+      fzf_color_args+=(--color="$(selector_palette_fzf_colors)")
+      fzf_opencode_theme=1
+    else
+      fzf_color_args+=(--color="$CODEX_AUTH_FZF_THEME")
+    fi
+  elif (( selector_palette_mode )); then
+    if usage_color_active; then
+      fzf_color_args+=(--color="$(selector_palette_fzf_colors)")
+    else
+      fzf_color_args+=(--color=bw)
+    fi
+    fzf_opencode_theme=1
+  fi
+  fzf_height_arg="~$fzf_height"
+  fzf_ellipsis_args+=(--ellipsis='')
+  if usage_unicode_enabled; then
+    fzf_prompt='filter ▸ '
+    fzf_pointer='▸'
+    if (( total_w < 32 )); then
+      selector_controls='enter · esc stay · filter'
+    else
+      selector_controls='enter select · esc stay · type filter'
+    fi
+  else
+    fzf_prompt='filter > '
+    fzf_pointer='>'
+    if (( total_w < 32 )); then
+      selector_controls='enter | esc stay | filter'
+    else
+      selector_controls='enter select | esc stay | type filter'
+    fi
+  fi
+  if (( fzf_opencode_theme )); then
+    local palette_effective_w right_margin terminal_w
+    fzf_pointer=' '
+    fzf_prompt='filter '
+    terminal_w="$(terminal_width)"
+    palette_effective_w="$(selector_palette_effective_width "$total_w")"
+    right_margin=$((terminal_w - palette_effective_w - 4))
+    if (( right_margin > 0 )); then
+      fzf_margin_args+=(--margin="0,$right_margin,0,0")
+    fi
+    fzf_border_args+=(--border=none)
+    fzf_height_arg="~$fzf_height"
+  else
+    fzf_border_args+=(--border=rounded --border-label=' auth profiles ' --border-label-pos=3)
+  fi
+  if (( fzf_opencode_theme )); then
+    fzf_header="$(selector_palette_header_text "$summary_text" "$selector_controls" "$total_w")"
+    fzf_header_line_count=0
+    while IFS= read -r fzf_header_line; do
+      fzf_header_line_count=$((fzf_header_line_count + 1))
+    done <<<"$fzf_header"
+    (( fzf_header_line_count < 1 )) && fzf_header_line_count=1
+    fzf_vertical_padding=0
+    fzf_height=$(( ${#rows_ref[@]} + fzf_header_line_count + 1 ))
+    if [[ "$term_lines" =~ ^[0-9]+$ ]]; then
+      max_height=$((term_lines - 2))
+      (( max_height < 6 )) && max_height=6
+      if (( fzf_height + 2 <= max_height )); then
+        fzf_height=$((fzf_height + 2))
+        fzf_vertical_padding=1
+      fi
+      (( fzf_height > max_height )) && fzf_height="$max_height"
+    elif (( fzf_height < 22 )); then
+      fzf_height=$((fzf_height + 2))
+      fzf_vertical_padding=1
+    fi
+    if (( fzf_vertical_padding )); then
+      fzf_padding_args+=(--padding=1,0,1,0)
+    fi
+    if [[ "${CODEX_AUTH_SELECTOR_CENTER:-0}" == "1" && "$term_lines" =~ ^[0-9]+$ ]] && (( term_lines > fzf_height + 1 )); then
+      fzf_outer_top_padding=$(((term_lines - fzf_height) / 2))
+    fi
+    fzf_height_arg="~$fzf_height"
+    fzf_header_args+=(--header-lines="$fzf_header_line_count" --header-first)
+  else
+    fzf_header="$(selector_header_text "$summary_text" "$selector_controls" "$role_w" "$profile_w" "$cell_w" "$status_w" "$total_w" "$mode")"
+    fzf_header_args+=(--header="$fzf_header")
+  fi
+
+  if (( fzf_outer_top_padding > 0 )); then
+    for ((fzf_pad_i = 0; fzf_pad_i < fzf_outer_top_padding; fzf_pad_i++)); do
+      printf '\n'
+    done
+  fi
+
+  choice="$(
+    {
+      if (( fzf_opencode_theme )); then
+        while IFS= read -r fzf_header_line; do
+          printf 'header\tnoop\t-\t%s\n' "$fzf_header_line"
+        done <<<"$fzf_header"
+      fi
+      printf '%s\n' "${rows_ref[@]}"
+    } | fzf \
+      --ansi \
+      --no-sort \
+      "${fzf_layout_args[@]}" \
+      --height="$fzf_height_arg" \
+      "${fzf_border_args[@]}" \
+      "${fzf_margin_args[@]}" \
+      "${fzf_padding_args[@]}" \
+      --prompt="$fzf_prompt" \
+      --pointer="$fzf_pointer" \
+      --marker=' ' \
+      --info=hidden \
+      --no-scrollbar \
+      --no-separator \
+      "${fzf_ellipsis_args[@]}" \
+      "${fzf_header_args[@]}" \
+      --delimiter=$'\t' \
+      --with-nth=4.. \
+      --bind='esc:abort,ctrl-q:abort' \
+      --no-multi \
+      --cycle \
+      --tiebreak=index \
+      "${fzf_color_args[@]}"
+  )" || {
+    MENU_ACTION="skip"
+    MENU_PROFILE=""
+    return 0
+  }
+
+  IFS=$'\t' read -r kind action profile_choice display <<<"$choice"
+  [[ "$profile_choice" == "-" ]] && profile_choice=""
+  if [[ "$action" == "switch" || "$action" == "login" || "$action" == "skip" ]]; then
+    MENU_ACTION="$action"
+    MENU_PROFILE="$profile_choice"
+  else
+    MENU_ACTION="blocked"
+    MENU_PROFILE=""
+  fi
+}
+
+selector_numbered_menu() {
+  local -n rows_ref="$1"
+  local summary_text="$2"
+  local total_w="$3"
+  local role_w="$4"
+  local profile_w="$5"
+  local cell_w="$6"
+  local status_w="$7"
+  local mode="$8"
+  local selector_palette_mode="$9"
+  local choice i kind action profile_choice action_count=0 cols line_w prefix
+  local term_lines fallback_height fallback_top_padding=0 fallback_pad_i
+  local selector_controls
+  local selected=0
+  local fallback_actions=()
+  local fallback_profiles=()
+
+  cols="$(terminal_width)"
+  term_lines="${LINES:-}"
+  [[ "$term_lines" =~ ^[0-9]+$ ]] || term_lines="$(tput lines 2>/dev/null || true)"
+  if usage_unicode_enabled; then
+    if (( cols < 36 )); then
+      selector_controls="1-${#rows_ref[@]} · q stay"
+    else
+      selector_controls="1-${#rows_ref[@]} select · q stay"
+    fi
+  else
+    if (( cols < 36 )); then
+      selector_controls="1-${#rows_ref[@]} | q stay"
+    else
+      selector_controls="1-${#rows_ref[@]} select | q stay"
+    fi
+  fi
+  if [[ "${CODEX_AUTH_SELECTOR_CENTER:-0}" == "1" && "$term_lines" =~ ^[0-9]+$ ]]; then
+    fallback_height=$((3 + ${#rows_ref[@]} + 1))
+    if (( term_lines > fallback_height + 1 )); then
+      fallback_top_padding=$(((term_lines - fallback_height) / 2))
+    fi
+  fi
+  for ((fallback_pad_i = 0; fallback_pad_i < fallback_top_padding; fallback_pad_i++)); do
+    printf '\n'
+  done
+
+  if (( selector_palette_mode )); then
+    printf '%*s' 4 ''
+    selector_palette_controls_line "$selector_controls" "$total_w"
+    printf '\n'
+    if [[ "${CODEX_AUTH_SELECTOR_CONTEXT:-0}" == "1" ]]; then
+      printf '%*s' 4 ''
+      selector_palette_context_line "$summary_text" "$total_w"
+    fi
+    printf '%*s' 4 ''
+    selector_palette_table_header "$total_w"
+  else
+    selector_header_text "$summary_text" "$selector_controls" "$role_w" "$profile_w" "$cell_w" "$status_w" "$total_w" "$mode" "auth profiles"
+    printf '\n'
+  fi
+  for i in "${!rows_ref[@]}"; do
+    IFS=$'\t' read -r kind action profile_choice display <<<"${rows_ref[$i]}"
+    [[ "$profile_choice" == "-" ]] && profile_choice=""
+    if [[ "$kind" == "action" ]]; then
+      fallback_actions+=("$action")
+      fallback_profiles+=("$profile_choice")
+      action_count=$((action_count + 1))
+      prefix="$(printf '%2d. ' "$action_count")"
+      line_w=$((cols - ${#prefix}))
+      (( line_w < 1 )) && line_w=1
+    else
+      prefix=''
+      line_w="$cols"
+    fi
+    (( line_w < 1 )) && line_w=1
+    printf '%s' "$prefix"
+    if [[ "$display" == *$'\033'* ]]; then
+      if (( $(ansi_visible_length "$display") <= line_w )); then
+        printf '%s' "$display"
+      else
+        fit_text_rtrim "$(strip_ansi "$display")" "$line_w"
+      fi
+    else
+      fit_text_rtrim "$display" "$line_w"
+    fi
+    printf '\n'
+  done
+  if usage_unicode_enabled; then
+    printf '› '
+  else
+    printf '> '
+  fi
+  IFS= read -r choice < /dev/tty || return 0
+  if [[ -z "$choice" ]]; then
+    selected=0
+  elif [[ "$choice" == "q" || "$choice" == "Q" ]]; then
+    MENU_ACTION="skip"
+    MENU_PROFILE=""
+    return 0
+  elif [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#fallback_actions[@]} )); then
+    selected=$((choice - 1))
+  else
+    MENU_ACTION="skip"
+    MENU_PROFILE=""
+    return 0
+  fi
+
+  MENU_ACTION="${fallback_actions[$selected]}"
+  MENU_PROFILE="${fallback_profiles[$selected]}"
+}
+
+selector_menu_row_for_record() {
+  local default_profile="$1"
+  local selector_palette_mode="$2"
+  local mode="$3"
+  local role_w="$4"
+  local profile_w="$5"
+  local cell_w="$6"
+  local status_w="$7"
+  local bar_width="$8"
+  local total_w="$9"
+  local selector_profile_w="${10}"
+  local action_w="${11}"
+  local record="${12}"
+  local valid weekly_used short_used mark profile plan weekly short status short_label weekly_reset short_reset cache_age
+  local display display_status palette_profile detail action_role row_action row_profile_field active_row=0
+
+  IFS=$'\t' read -r valid weekly_used short_used mark profile plan weekly short status short_label weekly_reset short_reset cache_age <<<"$record"
+  [[ -n "$profile" ]] || return 1
+
+  if [[ "$valid" != "0" && "$status" == "login" ]]; then
+    if (( selector_palette_mode )); then
+      palette_profile="$(selector_palette_profile_label "$profile" "$total_w" "$selector_profile_w")"
+      display="$(print_selector_palette_table_row "login $palette_profile" "-" "-" "login needed" "$status" "$valid" "$total_w")"
+    else
+      detail="needed"
+      display="$(print_selector_row "login" "$(usage_display_profile_name "$profile" "" "$selector_profile_w")" "$detail" "$action_w" "$selector_profile_w" "$total_w")"
+    fi
+    row_action="login"
+    row_profile_field="$profile"
+  elif [[ "$valid" == "0" ]]; then
+    if (( selector_palette_mode )); then
+      display_status="$(usage_display_status "$status" "normal")"
+      palette_profile="$(selector_palette_profile_label "$profile" "$total_w" "$selector_profile_w")"
+      if [[ "$mark" == "*" ]]; then
+        display="$(print_selector_palette_table_row "stay $palette_profile" "$weekly" "$short" "$display_status" "$status" "$valid" "$total_w")"
+      elif [[ "$mark" == "=" ]]; then
+        display="$(print_selector_palette_table_row "same $palette_profile" "$weekly" "$short" "$display_status" "$status" "$valid" "$total_w")"
+      else
+        case "$display_status" in
+          ready|ok)
+            if [[ -n "$default_profile" && "$profile" == "$default_profile" ]]; then
+              action_role="best"
+            else
+              action_role="use"
+            fi
+            ;;
+          cap|old\ cap|both\ cap)
+            action_role="cap"
+            ;;
+          *)
+            action_role="warn"
+            ;;
+        esac
+        display="$(print_selector_palette_table_row "$action_role $palette_profile" "$weekly" "$short" "$display_status" "$status" "$valid" "$total_w")"
+      fi
+    else
+      display_status="$(usage_display_status "$status" "$mode")"
+      if [[ "$mark" == "*" ]]; then
+        action_role="$(selector_action_role "stay" "$role_w")"
+      elif [[ "$mark" == "=" ]]; then
+        action_role="$(selector_action_role "same" "$role_w")"
+      elif [[ "$display_status" == "cap" || "$display_status" == "old cap" || "$display_status" == "both cap" ]]; then
+        action_role="$(selector_action_role "cap" "$role_w")"
+      elif [[ -n "$default_profile" && "$profile" == "$default_profile" ]]; then
+        action_role="$(selector_action_role "best" "$role_w")"
+      else
+        action_role="$(selector_action_role "switch" "$role_w")"
+      fi
+      display="$(print_usage_render_data_line "$action_role" "$profile" "$weekly" "$weekly_reset" "$short" "$short_reset" \
+        "$display_status" "$status" "$valid" "$weekly_used" "$short_used" "$role_w" "$profile_w" "$cell_w" "$status_w" "$bar_width" "$mode")"
+    fi
+    if [[ "$mark" == "*" || "$mark" == "=" ]]; then
+      active_row=1
+      row_action="skip"
+      row_profile_field="-"
+    else
+      row_action="switch"
+      row_profile_field="$profile"
+    fi
+  else
+    if (( selector_palette_mode )); then
+      display_status="$(usage_display_status "$status" "normal")"
+      palette_profile="$(selector_palette_profile_label "$profile" "$total_w" "$selector_profile_w")"
+      if [[ "$mark" == "*" ]]; then
+        display="$(print_selector_palette_table_row "stay $palette_profile" "-" "-" "$display_status" "$status" "$valid" "$total_w")"
+      elif [[ "$mark" == "=" ]]; then
+        display="$(print_selector_palette_table_row "same $palette_profile" "-" "-" "$display_status" "$status" "$valid" "$total_w")"
+      else
+        display="$(print_selector_palette_table_row "use $palette_profile" "-" "-" "$display_status" "$status" "$valid" "$total_w")"
+      fi
+    else
+      display_status="$(usage_display_status "$status" "$mode")"
+      if [[ "$mark" == "=" ]]; then
+        display="$(print_selector_row "same" "$(usage_display_profile_name "$profile" "" "$selector_profile_w")" "$display_status" "$action_w" "$selector_profile_w" "$total_w")"
+      else
+        display="$(print_selector_row "use" "$(usage_display_profile_name "$profile" "" "$selector_profile_w")" "$display_status" "$action_w" "$selector_profile_w" "$total_w")"
+      fi
+    fi
+    if [[ "$mark" == "*" || "$mark" == "=" ]]; then
+      active_row=1
+      row_action="skip"
+      row_profile_field="-"
+    else
+      row_action="switch"
+      row_profile_field="$profile"
+    fi
+  fi
+
+  printf '%s\037action\037%s\037%s\037%s\n' "$active_row" "$row_action" "$row_profile_field" "$display"
+}
+
+selector_current_menu_row() {
+  local selector_palette_mode="$1"
+  local total_w="$2"
+  local selector_profile_w="$3"
+  local action_w="$4"
+  local display palette_profile
+
+  if (( selector_palette_mode )); then
+    palette_profile="$(selector_palette_profile_label "current" "$total_w" "$selector_profile_w")"
+    display="$(print_selector_palette_table_row "stay $palette_profile" "-" "-" "same" "ok" "1" "$total_w")"
+  else
+    display="$(print_selector_row "stay" "current" "same" "$action_w" "$selector_profile_w" "$total_w")"
+  fi
+  printf 'action\tskip\t-\t%s\n' "$display"
+}
+
 arrow_action_menu() {
   local default_profile="${1:-}"
   shift
@@ -6020,12 +6428,10 @@ arrow_action_menu() {
     return 0
   fi
 
-  local valid weekly_used short_used mark profile plan weekly short status short_label weekly_reset short_reset cache_age
-
-  local selected=0
   local mode role_w profile_w cell_w status_w bar_width total_w
   local rows=()
-  local display row_profile_field summary_text selector_controls action_w selector_profile_w detail action_role display_status palette_profile
+  local row active_row row_kind row_action row_profile_field row_display
+  local summary_text action_w selector_profile_w
   local has_active_row=0
   local use_fzf=0
   local selector_palette_mode=0
@@ -6074,365 +6480,22 @@ arrow_action_menu() {
   fi
 
   for record in "${records[@]}"; do
-    IFS=$'\t' read -r valid weekly_used short_used mark profile plan weekly short status short_label weekly_reset short_reset cache_age <<<"$record"
-    [[ -n "$profile" ]] || continue
-
-    if [[ "$valid" != "0" && "$status" == "login" ]]; then
-      if (( selector_palette_mode )); then
-        palette_profile="$(selector_palette_profile_label "$profile" "$total_w" "$selector_profile_w")"
-        display="$(print_selector_palette_table_row "login $palette_profile" "-" "-" "login needed" "$status" "$valid" "$total_w")"
-      else
-        detail="needed"
-        display="$(print_selector_row "login" "$(usage_display_profile_name "$profile" "" "$selector_profile_w")" "$detail" "$action_w" "$selector_profile_w" "$total_w")"
-      fi
-      row_profile_field="$profile"
-      rows+=("action"$'\t'"login"$'\t'"$row_profile_field"$'\t'"$display")
-    elif [[ "$valid" == "0" ]]; then
-      if (( selector_palette_mode )); then
-        display_status="$(usage_display_status "$status" "normal")"
-        if [[ "$mark" == "*" ]]; then
-          palette_profile="$(selector_palette_profile_label "$profile" "$total_w" "$selector_profile_w")"
-          display="$(print_selector_palette_table_row "stay $palette_profile" "$weekly" "$short" "$display_status" "$status" "$valid" "$total_w")"
-        elif [[ "$mark" == "=" ]]; then
-          palette_profile="$(selector_palette_profile_label "$profile" "$total_w" "$selector_profile_w")"
-          display="$(print_selector_palette_table_row "same $palette_profile" "$weekly" "$short" "$display_status" "$status" "$valid" "$total_w")"
-        else
-          palette_profile="$(selector_palette_profile_label "$profile" "$total_w" "$selector_profile_w")"
-          case "$display_status" in
-            ready|ok)
-              if [[ -n "$default_profile" && "$profile" == "$default_profile" ]]; then
-                action_role="best"
-              else
-                action_role="use"
-              fi
-              ;;
-            cap|old\ cap|both\ cap)
-              action_role="cap"
-              ;;
-            *)
-              action_role="warn"
-              ;;
-          esac
-          display="$(print_selector_palette_table_row "$action_role $palette_profile" "$weekly" "$short" "$display_status" "$status" "$valid" "$total_w")"
-        fi
-      else
-        display_status="$(usage_display_status "$status" "$mode")"
-	        if [[ "$mark" == "*" ]]; then
-	          action_role="$(selector_action_role "stay" "$role_w")"
-	        elif [[ "$mark" == "=" ]]; then
-	          action_role="$(selector_action_role "same" "$role_w")"
-	        elif [[ "$display_status" == "cap" || "$display_status" == "old cap" || "$display_status" == "both cap" ]]; then
-          action_role="$(selector_action_role "cap" "$role_w")"
-        elif [[ -n "$default_profile" && "$profile" == "$default_profile" ]]; then
-          action_role="$(selector_action_role "best" "$role_w")"
-        else
-          action_role="$(selector_action_role "switch" "$role_w")"
-        fi
-        display="$(print_usage_render_data_line "$action_role" "$profile" "$weekly" "$weekly_reset" "$short" "$short_reset" \
-          "$display_status" "$status" "$valid" "$weekly_used" "$short_used" "$role_w" "$profile_w" "$cell_w" "$status_w" "$bar_width" "$mode")"
-      fi
-	      if [[ "$mark" == "*" || "$mark" == "=" ]]; then
-	        has_active_row=1
-	        rows+=("action"$'\t'"skip"$'\t'"-"$'\t'"$display")
-      else
-        row_profile_field="$profile"
-        rows+=("action"$'\t'"switch"$'\t'"$row_profile_field"$'\t'"$display")
-      fi
-    else
-      if (( selector_palette_mode )); then
-        display_status="$(usage_display_status "$status" "normal")"
-        palette_profile="$(selector_palette_profile_label "$profile" "$total_w" "$selector_profile_w")"
-        if [[ "$mark" == "*" ]]; then
-          display="$(print_selector_palette_table_row "stay $palette_profile" "-" "-" "$display_status" "$status" "$valid" "$total_w")"
-        elif [[ "$mark" == "=" ]]; then
-          display="$(print_selector_palette_table_row "same $palette_profile" "-" "-" "$display_status" "$status" "$valid" "$total_w")"
-        else
-          display="$(print_selector_palette_table_row "use $palette_profile" "-" "-" "$display_status" "$status" "$valid" "$total_w")"
-        fi
-	      else
-        display_status="$(usage_display_status "$status" "$mode")"
-	        if [[ "$mark" == "=" ]]; then
-	          display="$(print_selector_row "same" "$(usage_display_profile_name "$profile" "" "$selector_profile_w")" "$display_status" "$action_w" "$selector_profile_w" "$total_w")"
-	        else
-	          display="$(print_selector_row "use" "$(usage_display_profile_name "$profile" "" "$selector_profile_w")" "$display_status" "$action_w" "$selector_profile_w" "$total_w")"
-	        fi
-	      fi
-	      if [[ "$mark" == "*" || "$mark" == "=" ]]; then
-	        has_active_row=1
-	        rows+=("action"$'\t'"skip"$'\t'"-"$'\t'"$display")
-      else
-        rows+=("action"$'\t'"switch"$'\t'"$profile"$'\t'"$display")
-      fi
-    fi
+    row="$(selector_menu_row_for_record "$default_profile" "$selector_palette_mode" "$mode" "$role_w" "$profile_w" "$cell_w" "$status_w" "$bar_width" "$total_w" "$selector_profile_w" "$action_w" "$record")" || continue
+    IFS=$'\037' read -r active_row row_kind row_action row_profile_field row_display <<<"$row"
+    (( active_row )) && has_active_row=1
+    rows+=("$row_kind"$'\t'"$row_action"$'\t'"$row_profile_field"$'\t'"$row_display")
   done
 
   if (( ! has_active_row )) && [[ -f "$AUTH_FILE" ]]; then
-    if (( selector_palette_mode )); then
-      palette_profile="$(selector_palette_profile_label "current" "$total_w" "$selector_profile_w")"
-      display="$(print_selector_palette_table_row "stay $palette_profile" "-" "-" "same" "ok" "1" "$total_w")"
-    else
-      display="$(print_selector_row "stay" "current" "same" "$action_w" "$selector_profile_w" "$total_w")"
-    fi
-    rows+=("action"$'\t'"skip"$'\t'"-"$'\t'"$display")
+    rows+=("$(selector_current_menu_row "$selector_palette_mode" "$total_w" "$selector_profile_w" "$action_w")")
   fi
 
   if (( use_fzf )); then
-    local fzf_height fzf_height_arg choice kind action profile_choice fzf_prompt fzf_pointer fzf_header term_lines max_height
-    local fzf_vertical_padding=0
-    local fzf_outer_top_padding=0
-    local fzf_pad_i
-    local fzf_header_line fzf_header_line_count=1
-    local fzf_color_args=()
-    local fzf_border_args=()
-    local fzf_margin_args=()
-    local fzf_padding_args=()
-    local fzf_ellipsis_args=()
-    local fzf_header_args=()
-    local fzf_layout_args=(--layout=reverse)
-    local fzf_opencode_theme=0
-    fzf_height=$(( ${#rows[@]} + 8 ))
-    (( fzf_height < 12 )) && fzf_height=12
-    term_lines="${LINES:-}"
-    [[ "$term_lines" =~ ^[0-9]+$ ]] || term_lines="$(tput lines 2>/dev/null || true)"
-    if [[ "$term_lines" =~ ^[0-9]+$ ]]; then
-      max_height=$((term_lines - 2))
-      (( max_height < 12 )) && max_height=12
-      (( fzf_height > max_height )) && fzf_height="$max_height"
-    elif (( fzf_height > 24 )); then
-      fzf_height=24
-    fi
-    if [[ -n "${CODEX_AUTH_FZF_THEME:-}" ]]; then
-      if [[ "$CODEX_AUTH_FZF_THEME" == "codex" || "$CODEX_AUTH_FZF_THEME" == "1" ]]; then
-        fzf_color_args+=(--color="$(selector_palette_fzf_colors)")
-        fzf_opencode_theme=1
-      else
-        fzf_color_args+=(--color="$CODEX_AUTH_FZF_THEME")
-      fi
-    elif (( selector_palette_mode )); then
-      if usage_color_active; then
-        fzf_color_args+=(--color="$(selector_palette_fzf_colors)")
-      else
-        fzf_color_args+=(--color=bw)
-      fi
-      fzf_opencode_theme=1
-    fi
-    fzf_height_arg="~$fzf_height"
-    fzf_ellipsis_args+=(--ellipsis='')
-    if usage_unicode_enabled; then
-      fzf_prompt='filter ▸ '
-      fzf_pointer='▸'
-      if (( total_w < 32 )); then
-        selector_controls='enter · esc stay · filter'
-      else
-        selector_controls='enter select · esc stay · type filter'
-      fi
-    else
-      fzf_prompt='filter > '
-      fzf_pointer='>'
-      if (( total_w < 32 )); then
-        selector_controls='enter | esc stay | filter'
-      else
-        selector_controls='enter select | esc stay | type filter'
-      fi
-    fi
-    if (( fzf_opencode_theme )); then
-      local palette_effective_w right_margin terminal_w
-      fzf_pointer=' '
-      fzf_prompt='filter '
-      terminal_w="$(terminal_width)"
-      palette_effective_w="$(selector_palette_effective_width "$total_w")"
-      right_margin=$((terminal_w - palette_effective_w - 4))
-      if (( right_margin > 0 )); then
-        fzf_margin_args+=(--margin="0,$right_margin,0,0")
-      fi
-      fzf_border_args+=(--border=none)
-      fzf_height_arg="~$fzf_height"
-    else
-      fzf_border_args+=(--border=rounded --border-label=' auth profiles ' --border-label-pos=3)
-    fi
-    if (( fzf_opencode_theme )); then
-      fzf_header="$(selector_palette_header_text "$summary_text" "$selector_controls" "$total_w")"
-      fzf_header_line_count=0
-      while IFS= read -r fzf_header_line; do
-        fzf_header_line_count=$((fzf_header_line_count + 1))
-      done <<<"$fzf_header"
-      (( fzf_header_line_count < 1 )) && fzf_header_line_count=1
-      fzf_vertical_padding=0
-      fzf_height=$(( ${#rows[@]} + fzf_header_line_count + 1 ))
-      if [[ "$term_lines" =~ ^[0-9]+$ ]]; then
-        max_height=$((term_lines - 2))
-        (( max_height < 6 )) && max_height=6
-        if (( fzf_height + 2 <= max_height )); then
-          fzf_height=$((fzf_height + 2))
-          fzf_vertical_padding=1
-        fi
-        (( fzf_height > max_height )) && fzf_height="$max_height"
-      elif (( fzf_height < 22 )); then
-        fzf_height=$((fzf_height + 2))
-        fzf_vertical_padding=1
-      fi
-      if (( fzf_vertical_padding )); then
-        fzf_padding_args+=(--padding=1,0,1,0)
-      fi
-      if [[ "${CODEX_AUTH_SELECTOR_CENTER:-0}" == "1" && "$term_lines" =~ ^[0-9]+$ ]] && (( term_lines > fzf_height + 1 )); then
-        fzf_outer_top_padding=$(((term_lines - fzf_height) / 2))
-      fi
-      fzf_height_arg="~$fzf_height"
-      fzf_header_args+=(--header-lines="$fzf_header_line_count" --header-first)
-    else
-      fzf_header="$(selector_header_text "$summary_text" "$selector_controls" "$role_w" "$profile_w" "$cell_w" "$status_w" "$total_w" "$mode")"
-      fzf_header_args+=(--header="$fzf_header")
-    fi
-
-    if (( fzf_outer_top_padding > 0 )); then
-      for ((fzf_pad_i = 0; fzf_pad_i < fzf_outer_top_padding; fzf_pad_i++)); do
-        printf '\n'
-      done
-    fi
-
-    choice="$(
-      {
-        if (( fzf_opencode_theme )); then
-          while IFS= read -r fzf_header_line; do
-            printf 'header\tnoop\t-\t%s\n' "$fzf_header_line"
-          done <<<"$fzf_header"
-        fi
-        printf '%s\n' "${rows[@]}"
-      } | fzf \
-        --ansi \
-        --no-sort \
-        "${fzf_layout_args[@]}" \
-        --height="$fzf_height_arg" \
-        "${fzf_border_args[@]}" \
-        "${fzf_margin_args[@]}" \
-        "${fzf_padding_args[@]}" \
-        --prompt="$fzf_prompt" \
-        --pointer="$fzf_pointer" \
-        --marker=' ' \
-        --info=hidden \
-        --no-scrollbar \
-        --no-separator \
-        "${fzf_ellipsis_args[@]}" \
-        "${fzf_header_args[@]}" \
-        --delimiter=$'\t' \
-        --with-nth=4.. \
-        --bind='esc:abort,ctrl-q:abort' \
-        --no-multi \
-        --cycle \
-        --tiebreak=index \
-        "${fzf_color_args[@]}"
-    )" || {
-      MENU_ACTION="skip"
-      MENU_PROFILE=""
-      return 0
-    }
-
-    IFS=$'\t' read -r kind action profile_choice display <<<"$choice"
-    [[ "$profile_choice" == "-" ]] && profile_choice=""
-    if [[ "$action" == "switch" || "$action" == "login" || "$action" == "skip" ]]; then
-      MENU_ACTION="$action"
-      MENU_PROFILE="$profile_choice"
-    else
-      MENU_ACTION="blocked"
-      MENU_PROFILE=""
-    fi
+    selector_fzf_menu rows "$summary_text" "$total_w" "$role_w" "$profile_w" "$cell_w" "$status_w" "$mode" "$selector_palette_mode"
     return 0
   fi
 
-  local choice i kind action profile_choice action_count=0 cols line_w prefix
-  local term_lines fallback_height fallback_top_padding=0 fallback_pad_i
-  local fallback_actions=()
-  local fallback_profiles=()
-
-  cols="$(terminal_width)"
-  term_lines="${LINES:-}"
-  [[ "$term_lines" =~ ^[0-9]+$ ]] || term_lines="$(tput lines 2>/dev/null || true)"
-  if usage_unicode_enabled; then
-    if (( cols < 36 )); then
-      selector_controls="1-${#rows[@]} · q stay"
-    else
-      selector_controls="1-${#rows[@]} select · q stay"
-    fi
-  else
-    if (( cols < 36 )); then
-      selector_controls="1-${#rows[@]} | q stay"
-    else
-      selector_controls="1-${#rows[@]} select | q stay"
-    fi
-  fi
-  if [[ "${CODEX_AUTH_SELECTOR_CENTER:-0}" == "1" && "$term_lines" =~ ^[0-9]+$ ]]; then
-    fallback_height=$((3 + ${#rows[@]} + 1))
-    if (( term_lines > fallback_height + 1 )); then
-      fallback_top_padding=$(((term_lines - fallback_height) / 2))
-    fi
-  fi
-  for ((fallback_pad_i = 0; fallback_pad_i < fallback_top_padding; fallback_pad_i++)); do
-    printf '\n'
-  done
-
-  if (( selector_palette_mode )); then
-    printf '%*s' 4 ''
-    selector_palette_controls_line "$selector_controls" "$total_w"
-    printf '\n'
-    if [[ "${CODEX_AUTH_SELECTOR_CONTEXT:-0}" == "1" ]]; then
-      printf '%*s' 4 ''
-      selector_palette_context_line "$summary_text" "$total_w"
-    fi
-    printf '%*s' 4 ''
-    selector_palette_table_header "$total_w"
-  else
-    selector_header_text "$summary_text" "$selector_controls" "$role_w" "$profile_w" "$cell_w" "$status_w" "$total_w" "$mode" "auth profiles"
-    printf '\n'
-  fi
-  for i in "${!rows[@]}"; do
-    IFS=$'\t' read -r kind action profile_choice display <<<"${rows[$i]}"
-    [[ "$profile_choice" == "-" ]] && profile_choice=""
-    if [[ "$kind" == "action" ]]; then
-      fallback_actions+=("$action")
-      fallback_profiles+=("$profile_choice")
-      action_count=$((action_count + 1))
-      prefix="$(printf '%2d. ' "$action_count")"
-      line_w=$((cols - ${#prefix}))
-      (( line_w < 1 )) && line_w=1
-    else
-      prefix=''
-      line_w="$cols"
-    fi
-    (( line_w < 1 )) && line_w=1
-    printf '%s' "$prefix"
-    if [[ "$display" == *$'\033'* ]]; then
-      if (( $(ansi_visible_length "$display") <= line_w )); then
-        printf '%s' "$display"
-      else
-        fit_text_rtrim "$(strip_ansi "$display")" "$line_w"
-      fi
-    else
-      fit_text_rtrim "$display" "$line_w"
-    fi
-    printf '\n'
-  done
-  if usage_unicode_enabled; then
-    printf '› '
-  else
-    printf '> '
-  fi
-  IFS= read -r choice < /dev/tty || return 0
-  if [[ -z "$choice" ]]; then
-    selected=0
-  elif [[ "$choice" == "q" || "$choice" == "Q" ]]; then
-    MENU_ACTION="skip"
-    MENU_PROFILE=""
-    return 0
-  elif [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#fallback_actions[@]} )); then
-    selected=$((choice - 1))
-  else
-    MENU_ACTION="skip"
-    MENU_PROFILE=""
-    return 0
-  fi
-
-  MENU_ACTION="${fallback_actions[$selected]}"
-  MENU_PROFILE="${fallback_profiles[$selected]}"
+  selector_numbered_menu rows "$summary_text" "$total_w" "$role_w" "$profile_w" "$cell_w" "$status_w" "$mode" "$selector_palette_mode"
 }
 
 collect_usage_records() {
