@@ -6493,23 +6493,6 @@ selector_invalid_role() {
   esac
 }
 
-selector_row_action_fields() {
-  local mark="$1"
-  local profile="$2"
-  local -n active_row_ref="$3"
-  local -n row_action_ref="$4"
-  local -n row_profile_field_ref="$5"
-
-  if [[ "$mark" == "*" || "$mark" == "=" ]]; then
-    active_row_ref=1
-    row_action_ref="skip"
-    row_profile_field_ref="-"
-  else
-    row_action_ref="switch"
-    row_profile_field_ref="$profile"
-  fi
-}
-
 selector_menu_row_for_record() {
   local default_profile="$1"
   local selector_palette_mode="$2"
@@ -6528,6 +6511,8 @@ selector_menu_row_for_record() {
 
   IFS=$'\t' read -r valid weekly_used short_used mark profile plan weekly short status short_label weekly_reset short_reset cache_age <<<"$record"
   [[ -n "$profile" ]] || return 1
+  row_action="switch"
+  row_profile_field="$profile"
 
   if [[ "$valid" != "0" && "$status" == "login" ]]; then
     if (( selector_palette_mode )); then
@@ -6538,7 +6523,6 @@ selector_menu_row_for_record() {
       display="$(print_selector_row "login" "$(usage_display_profile_name "$profile" "" "$selector_profile_w")" "$detail" "$action_w" "$selector_profile_w" "$total_w")"
     fi
     row_action="login"
-    row_profile_field="$profile"
   elif [[ "$valid" == "0" ]]; then
     if (( selector_palette_mode )); then
       display_status="$(usage_display_status "$status" "normal")"
@@ -6551,7 +6535,6 @@ selector_menu_row_for_record() {
       display="$(print_usage_render_data_line "$action_role" "$profile" "$weekly" "$weekly_reset" "$short" "$short_reset" \
         "$display_status" "$status" "$valid" "$weekly_used" "$short_used" "$role_w" "$profile_w" "$cell_w" "$status_w" "$bar_width" "$mode")"
     fi
-    selector_row_action_fields "$mark" "$profile" active_row row_action row_profile_field
   else
     if (( selector_palette_mode )); then
       display_status="$(usage_display_status "$status" "normal")"
@@ -6563,7 +6546,11 @@ selector_menu_row_for_record() {
       action_role="$(selector_invalid_role "$mark" 0)"
       display="$(print_selector_row "$action_role" "$(usage_display_profile_name "$profile" "" "$selector_profile_w")" "$display_status" "$action_w" "$selector_profile_w" "$total_w")"
     fi
-    selector_row_action_fields "$mark" "$profile" active_row row_action row_profile_field
+  fi
+  if [[ "$row_action" == "switch" && ( "$mark" == "*" || "$mark" == "=" ) ]]; then
+    active_row=1
+    row_action="skip"
+    row_profile_field="-"
   fi
 
   printf '%s\037action\037%s\037%s\037%s\n' "$active_row" "$row_action" "$row_profile_field" "$display"
