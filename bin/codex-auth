@@ -1602,6 +1602,36 @@ print_status_note() {
   printf '\n'
 }
 
+profile_list_summary() {
+  local count="$1"
+  local active_name="$2"
+  local alias_count="$3"
+  local total_w="$4"
+  local summary="profiles $count"
+  local active_summary active_label active_short active_tiny alias_summary sep
+
+  if [[ -n "$active_name" ]]; then
+    sep="$(usage_separator)"
+    active_short="$(usage_display_profile_name "$active_name" "" 6)"
+    active_tiny="$(usage_display_profile_name "$active_name" "" 3)"
+    for active_label in "active $active_name" "act $active_name" "act $active_short" "act $active_tiny"; do
+      active_summary="$summary$sep$active_label"
+      if (( ${#active_summary} <= total_w )); then
+        summary="$active_summary"
+        break
+      fi
+    done
+  fi
+  if (( alias_count > 0 )); then
+    alias_summary="$summary$(usage_separator)aliases $alias_count"
+    if (( ${#alias_summary} <= total_w )); then
+      summary="$alias_summary"
+    fi
+  fi
+
+  printf '%s' "$summary"
+}
+
 cmd_list() {
   ensure_dirs
   local list_verbose=0
@@ -1686,27 +1716,7 @@ cmd_list() {
   IFS=$'\t' read -r role_w profile_w mode_w account_w <<<"$(profile_list_widths "$cols")"
   total_w=$((role_w + 1 + profile_w + 1 + mode_w + 1 + account_w))
 
-  summary="profiles $count"
-  if [[ -n "$active_name" ]]; then
-    local active_summary active_label active_short active_tiny sep
-    sep="$(usage_separator)"
-    active_short="$(usage_display_profile_name "$active_name" "" 6)"
-    active_tiny="$(usage_display_profile_name "$active_name" "" 3)"
-    for active_label in "active $active_name" "act $active_name" "act $active_short" "act $active_tiny"; do
-      active_summary="$summary$sep$active_label"
-      if (( ${#active_summary} <= total_w )); then
-        summary="$active_summary"
-        break
-      fi
-    done
-  fi
-  if (( alias_count > 0 )); then
-    local alias_summary
-    alias_summary="$summary$(usage_separator)aliases $alias_count"
-    if (( ${#alias_summary} <= total_w )); then
-      summary="$alias_summary"
-    fi
-  fi
+  summary="$(profile_list_summary "$count" "$active_name" "$alias_count" "$total_w")"
   print_palette_summary_header "Auth" "Saved profiles" "$summary" "$total_w"
   local role_header profile_header
   role_header="$(compact_width_choice "$role_w" 2 "" "act")"
@@ -5908,7 +5918,7 @@ selector_fzf_menu() {
   local fzf_height fzf_height_arg choice kind action profile_choice fzf_prompt fzf_pointer fzf_header term_lines max_height
   local fzf_vertical_padding=0
   local fzf_outer_top_padding=0
-  local fzf_pad_i
+  local fzf_pad_i=0
   local fzf_header_line fzf_header_line_count=1
   local fzf_color_args=()
   local fzf_border_args=()
@@ -5974,7 +5984,6 @@ selector_fzf_menu() {
       fzf_margin_args+=(--margin="0,$right_margin,0,0")
     fi
     fzf_border_args+=(--border=none)
-    fzf_height_arg="~$fzf_height"
   else
     fzf_border_args+=(--border=rounded --border-label=' auth profiles ' --border-label-pos=3)
   fi
@@ -5985,7 +5994,6 @@ selector_fzf_menu() {
       fzf_header_line_count=$((fzf_header_line_count + 1))
     done <<<"$fzf_header"
     (( fzf_header_line_count < 1 )) && fzf_header_line_count=1
-    fzf_vertical_padding=0
     fzf_height=$(( ${#rows_ref[@]} + fzf_header_line_count + 1 ))
     if [[ "$term_lines" =~ ^[0-9]+$ ]]; then
       max_height=$((term_lines - 2))
@@ -6012,11 +6020,9 @@ selector_fzf_menu() {
     fzf_header_args+=(--header="$fzf_header")
   fi
 
-  if (( fzf_outer_top_padding > 0 )); then
-    for ((fzf_pad_i = 0; fzf_pad_i < fzf_outer_top_padding; fzf_pad_i++)); do
-      printf '\n'
-    done
-  fi
+  for ((fzf_pad_i = 0; fzf_pad_i < fzf_outer_top_padding; fzf_pad_i++)); do
+    printf '\n'
+  done
 
   choice="$(
     {
