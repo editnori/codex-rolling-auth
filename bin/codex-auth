@@ -1247,12 +1247,60 @@ compact_missing_dir_message() {
   fi
 }
 
+compact_error_static_message() {
+  local cols="$1"
+  local message="$2"
+  local source cutoff short wide
+
+  while IFS=$'\t' read -r source cutoff short wide; do
+    [[ -n "$source" ]] || continue
+    if [[ "$message" == "$source" ]]; then
+      if [[ "$cutoff" == "-" ]]; then
+        printf '%s' "$short"
+      else
+        compact_width_choice "$cols" "$cutoff" "$short" "$wide"
+      fi
+      return 0
+    fi
+  done <<'EOF'
+refusing to remove without --yes	-	remove needs --yes
+usage: --ttl seconds	-	ttl needs seconds
+usage: codex-auth add <name> --file <file>	28	add needs file	add needs --file <file>
+usage: codex-auth add <name> [--current | --file <file> | codex login args...]	28	add needs name	usage: add <name>
+add accepts one source: --current or --file	40	choose one source	choose --current or --file
+add cannot mix --file/--current with login args	40	file + login args	cannot mix file and login args
+no active auth to save	-	no active auth
+jq is required for usage output	24	jq needed	jq needed for usage
+jq is required for usage refresh	24	jq needed	jq needed for refresh
+jq is required for recovery	24	jq needed	jq needed for recover
+node needed for codex	24	node needed	node needed for codex
+codex command not found	32	codex missing	codex command not found
+auth change already running	32	auth busy	auth change busy
+could not hide active auth for login	32	hide auth failed	could not hide active auth
+login failed; restored previous auth	32	login failed; restored	login failed; auth restored
+login did not produce valid auth; restored previous auth	32	bad login auth; restored	login auth invalid; restored
+login did not produce valid auth	32	bad login auth	login auth invalid
+profile names may only use letters, numbers, dot, underscore, and dash	28	bad profile name	bad name: A-Z 0-9 . _ -
+usage: codex-auth list [-v]	-	usage: list [-v]
+usage: codex-auth remove <name> --yes	28	remove name --yes	usage: remove <name> --yes
+usage: codex-auth import <name> <file>	34	import name file	usage: import <name> <file>
+usage: codex-auth export <name> <file>	34	export name file	usage: export <name> <file>
+usage: codex-auth save <name> [file]	34	save name file	usage: save <name> [file]
+usage: codex-auth use <name>	34	use name	usage: use <name>
+usage: codex-auth login <name> [codex login args...]	28	login needs name	usage: login <name>
+EOF
+  return 1
+}
+
 compact_error_message() {
   local message="$1"
   local cols="$2"
   local tail command option base
 
   if (( cols < 68 )); then
+    if compact_error_static_message "$cols" "$message"; then
+      return 0
+    fi
     case "$message" in
       auth\ file\ not\ found:\ *)
         tail="${message#auth file not found: }"
@@ -1284,74 +1332,6 @@ compact_error_message() {
         compact_value_choice "$cols" 60 'export path is dir' 'export path is dir: %s' "$base"
         return 0
         ;;
-      refusing\ to\ remove\ without\ --yes)
-        printf 'remove needs --yes'
-        return 0
-        ;;
-      usage:\ --ttl\ seconds)
-        printf 'ttl needs seconds'
-        return 0
-        ;;
-      usage:\ codex-auth\ add\ \<name\>\ --file\ \<file\>)
-        compact_width_choice "$cols" 28 'add needs file' 'add needs --file <file>'
-        return 0
-        ;;
-      usage:\ codex-auth\ add\ \<name\>\ \[--current\ \|\ --file\ \<file\>\ \|\ codex\ login\ args...\])
-        compact_width_choice "$cols" 28 'add needs name' 'usage: add <name>'
-        return 0
-        ;;
-      add\ accepts\ one\ source:\ --current\ or\ --file)
-        compact_width_choice "$cols" 40 'choose one source' 'choose --current or --file'
-        return 0
-        ;;
-      add\ cannot\ mix\ --file/--current\ with\ login\ args)
-        compact_width_choice "$cols" 40 'file + login args' 'cannot mix file and login args'
-        return 0
-        ;;
-      no\ active\ auth\ to\ save)
-        printf 'no active auth'
-        return 0
-        ;;
-      jq\ is\ required\ for\ usage\ output)
-        compact_width_choice "$cols" 24 'jq needed' 'jq needed for usage'
-        return 0
-        ;;
-      jq\ is\ required\ for\ usage\ refresh)
-        compact_width_choice "$cols" 24 'jq needed' 'jq needed for refresh'
-        return 0
-        ;;
-      jq\ is\ required\ for\ recovery)
-        compact_width_choice "$cols" 24 'jq needed' 'jq needed for recover'
-        return 0
-        ;;
-      node\ needed\ for\ codex)
-        compact_width_choice "$cols" 24 'node needed' 'node needed for codex'
-        return 0
-        ;;
-      codex\ command\ not\ found)
-        compact_width_choice "$cols" 32 'codex missing' 'codex command not found'
-        return 0
-        ;;
-      auth\ change\ already\ running)
-        compact_width_choice "$cols" 32 'auth busy' 'auth change busy'
-        return 0
-        ;;
-      could\ not\ hide\ active\ auth\ for\ login)
-        compact_width_choice "$cols" 32 'hide auth failed' 'could not hide active auth'
-        return 0
-        ;;
-      login\ failed\;\ restored\ previous\ auth)
-        compact_width_choice "$cols" 32 'login failed; restored' 'login failed; auth restored'
-        return 0
-        ;;
-      login\ did\ not\ produce\ valid\ auth\;\ restored\ previous\ auth)
-        compact_width_choice "$cols" 32 'bad login auth; restored' 'login auth invalid; restored'
-        return 0
-        ;;
-      login\ did\ not\ produce\ valid\ auth)
-        compact_width_choice "$cols" 32 'bad login auth' 'login auth invalid'
-        return 0
-        ;;
       unknown\ command:\ *.\ Use:\ codex-auth\ help)
         command="${message#unknown command: }"
         command="${command%. Use: codex-auth help}"
@@ -1371,38 +1351,6 @@ compact_error_message() {
         else
           printf 'not found: %s' "$tail"
         fi
-        return 0
-        ;;
-      profile\ names\ may\ only\ use\ letters,\ numbers,\ dot,\ underscore,\ and\ dash)
-        compact_width_choice "$cols" 28 'bad profile name' 'bad name: A-Z 0-9 . _ -'
-        return 0
-        ;;
-      usage:\ codex-auth\ list\ \[-v\])
-        printf 'usage: list [-v]'
-        return 0
-        ;;
-      usage:\ codex-auth\ remove\ \<name\>\ --yes)
-        compact_width_choice "$cols" 28 'remove name --yes' 'usage: remove <name> --yes'
-        return 0
-        ;;
-      usage:\ codex-auth\ import\ \<name\>\ \<file\>)
-        compact_width_choice "$cols" 34 'import name file' 'usage: import <name> <file>'
-        return 0
-        ;;
-      usage:\ codex-auth\ export\ \<name\>\ \<file\>)
-        compact_width_choice "$cols" 34 'export name file' 'usage: export <name> <file>'
-        return 0
-        ;;
-      usage:\ codex-auth\ save\ \<name\>\ \[file\])
-        compact_width_choice "$cols" 34 'save name file' 'usage: save <name> [file]'
-        return 0
-        ;;
-      usage:\ codex-auth\ use\ \<name\>)
-        compact_width_choice "$cols" 34 'use name' 'usage: use <name>'
-        return 0
-        ;;
-      usage:\ codex-auth\ login\ \<name\>\ \[codex\ login\ args...\])
-        compact_width_choice "$cols" 28 'login needs name' 'usage: login <name>'
         return 0
         ;;
     esac
@@ -4785,73 +4733,53 @@ selector_palette_fzf_colors() {
   printf '%s' 'dark,fg:#eeeeee,fg+:#f4f0e8,bg:#141414,bg+:#262626,hl:#fab283,hl+:#ffd0a0,border:#323232,label:#fab283,prompt:#fab283,pointer:#fab283,header:#9a9a9a,info:#808080,gutter:#141414'
 }
 
+selector_compact_by_width() {
+  local width="$1"
+  local default="$2"
+  shift 2
+  local cutoff label
+
+  if (( width <= 0 )); then
+    printf '%s' "$default"
+    return 0
+  fi
+  while (( $# >= 2 )); do
+    cutoff="$1"
+    label="$2"
+    if (( width < cutoff )); then
+      printf '%s' "$label"
+      return 0
+    fi
+    shift 2
+  done
+  printf '%s' "$default"
+}
+
 selector_palette_status_compact() {
   local status="$1"
   local width="${2:-0}"
 
   case "$status" in
     "no data"|"no usage"|"n/a")
-      if (( width > 0 && width < 3 )); then
-        printf 'na'
-      elif [[ "$status" == "no usage" && width -gt 0 && width < 8 ]]; then
-        printf 'n/a'
-      elif [[ "$status" == "no data" && width -gt 0 && width < 7 ]]; then
-        printf 'n/a'
-      else
-        printf '%s' "$status"
-      fi
+      selector_compact_by_width "$width" "$status" 3 na
       ;;
     "login needed")
-      if (( width > 0 && width < 4 )); then
-        printf 'log'
-      elif (( width > 0 && width < 6 )); then
-        printf 'auth'
-      elif (( width > 0 && width <= 12 )); then
-        printf 'login'
-      else
-        printf '%s' "$status"
-      fi
+      selector_compact_by_width "$width" "$status" 4 log 6 auth 13 login
       ;;
     cap)
-      if (( width > 0 && width < 3 )); then
-        printf 'cp'
-      else
-        printf 'cap'
-      fi
+      selector_compact_by_width "$width" "$status" 3 cp
       ;;
     "old cap"|"both cap")
-      if (( width > 0 && width < 3 )); then
-        printf 'cp'
-      elif (( width > 0 && width < 7 )); then
-        printf 'cap'
-      else
-        printf '%s' "$status"
-      fi
+      selector_compact_by_width "$width" "$status" 3 cp 7 cap
       ;;
     ready)
-      if (( width > 0 && width < 3 )); then
-        printf 'ok'
-      elif (( width > 0 && width < 5 )); then
-        printf 'ok'
-      else
-        printf 'ready'
-      fi
+      selector_compact_by_width "$width" "$status" 5 ok
       ;;
     offline)
-      if (( width > 0 && width < 3 )); then
-        printf 'of'
-      elif (( width > 0 && width < 7 )); then
-        printf 'off'
-      else
-        printf 'offline'
-      fi
+      selector_compact_by_width "$width" "$status" 3 of 7 off
       ;;
     same)
-      if (( width > 0 && width < 4 )); then
-        printf '='
-      else
-        printf 'same'
-      fi
+      selector_compact_by_width "$width" "$status" 4 =
       ;;
     *)
       printf '%s' "$status"
