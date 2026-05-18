@@ -1830,13 +1830,14 @@ current_codex_status() {
   fi
 }
 
-cmd_list() {
-  ensure_dirs
-  local list_verbose=0
+parse_list_args() {
+  local -n list_verbose_ref="$1"
+  shift
+
   while (( $# > 0 )); do
     case "$1" in
       --verbose|-v)
-        list_verbose=1
+        list_verbose_ref=1
         shift
         ;;
       *)
@@ -1844,6 +1845,121 @@ cmd_list() {
         ;;
     esac
   done
+}
+
+profile_list_metadata_files_into() {
+  local -n files_ref="$1"
+  shift
+
+  [[ -f "$AUTH_FILE" ]] && files_ref+=("$AUTH_FILE")
+  files_ref+=("$@")
+}
+
+profile_list_load_metadata() {
+  local -n files_ref="$1"
+  local -n active_fp_ref="$2"
+  local -n profile_mode_ref="$3"
+  local -n profile_hint_ref="$4"
+  local -n profile_fp_ref="$5"
+  local fp meta_path mode hint secret name
+
+  while IFS=$'\037' read -r meta_path mode hint secret; do
+    [[ -n "$meta_path" ]] || continue
+    fp="$(auth_record_fingerprint "$secret")"
+    if [[ "$meta_path" == "$AUTH_FILE" ]]; then
+      active_fp_ref="$fp"
+    else
+      name="$(basename "$meta_path" .json)"
+      profile_mode_ref["$name"]="$mode"
+      profile_hint_ref["$name"]="$hint"
+      profile_fp_ref["$name"]="$fp"
+    fi
+  done < <(auth_metadata_records "${files_ref[@]}")
+}
+
+profile_list_scan_profiles() {
+  local active_fp="$1"
+  local account_count_var="$6"
+  local account_primary_var="$7"
+  local alias_count_var="${10}"
+  local -n profiles_ref="$2"
+  local -n profile_mode_ref="$3"
+  local -n profile_hint_ref="$4"
+  local -n profile_fp_ref="$5"
+  local -n account_count_ref="$account_count_var"
+  local -n account_primary_ref="$account_primary_var"
+  local -n active_name_ref="$8"
+  local -n count_ref="$9"
+  local -n alias_count_ref="$alias_count_var"
+  local path name mode hint fp
+
+  PROFILE_LIST_WIDTH_HINT=12
+  for path in "${profiles_ref[@]}"; do
+    name="$(basename "$path" .json)"
+    (( ${#name} > PROFILE_LIST_WIDTH_HINT )) && PROFILE_LIST_WIDTH_HINT="${#name}"
+    mode="${profile_mode_ref["$name"]:-unknown}"
+    hint="${profile_hint_ref["$name"]:-}"
+    fp="${profile_fp_ref["$name"]:-}"
+    if [[ -z "$active_name_ref" && -n "$active_fp" && "$fp" == "$active_fp" ]]; then
+      active_name_ref="$name"
+    fi
+    profile_list_note_account "$name" "$hint" "$account_count_var" "$account_primary_var" "$alias_count_var"
+    count_ref=$((count_ref + 1))
+  done
+}
+
+print_profile_list_header() {
+  local count="$1"
+  local active_name="$2"
+  local alias_count="$3"
+  local role_w="$4"
+  local profile_w="$5"
+  local mode_w="$6"
+  local account_w="$7"
+  local total_w summary role_header profile_header
+
+  total_w=$((role_w + 1 + profile_w + 1 + mode_w + 1 + account_w))
+  summary="$(profile_list_summary "$count" "$active_name" "$alias_count" "$total_w")"
+  print_palette_summary_header "Auth" "Saved profiles" "$summary" "$total_w"
+  role_header="$(compact_width_choice "$role_w" 2 "" "act")"
+  profile_header="$(compact_width_choice "$profile_w" 7 "prof" "profile")"
+  print_profile_list_line "$role_header" "$profile_header" "auth" "account" "$role_w" "$profile_w" "$mode_w" "$account_w"
+}
+
+print_profile_list_rows() {
+  local active_name="$1"
+  local active_fp="$2"
+  local list_verbose="$3"
+  local role_w="$4"
+  local profile_w="$5"
+  local mode_w="$6"
+  local account_w="$7"
+  local account_count_var="${12}"
+  local account_primary_var="${13}"
+  local -n profiles_ref="$8"
+  local -n profile_mode_ref="$9"
+  local -n profile_hint_ref="${10}"
+  local -n profile_fp_ref="${11}"
+  local -n account_count_ref="$account_count_var"
+  local -n account_primary_ref="$account_primary_var"
+  local path name mode hint fp action alias_of account_display
+
+  for path in "${profiles_ref[@]}"; do
+    name="$(basename "$path" .json)"
+    mode="${profile_mode_ref["$name"]:-unknown}"
+    hint="${profile_hint_ref["$name"]:-}"
+    fp="${profile_fp_ref["$name"]:-}"
+    alias_of="$(profile_list_alias_of "$hint" "$name" "$account_count_var" "$account_primary_var")"
+    action="$(profile_list_row_action "$active_name" "$name" "$alias_of" "$active_fp" "$fp")"
+    account_display="$(profile_account_display "$hint" "$account_w" "$list_verbose" "$alias_of")"
+    print_profile_list_line "$(profile_list_action_label "$action" "$role_w")" "$name" "$mode" "$account_display" "$role_w" "$profile_w" "$mode_w" "$account_w"
+  done
+}
+
+cmd_list() {
+  ensure_dirs
+  local list_verbose=0
+  parse_list_args list_verbose "$@"
 
   shopt -s nullglob
   local profiles=("$PROFILE_DIR"/*.json)
@@ -1853,9 +1969,8 @@ cmd_list() {
   fi
 
   local active_fp=""
-  local path name mode hint fp action active_name="" count=0
+  local active_name="" count=0
   local alias_count=0
-  local meta_path secret
   local meta_files=()
   local -A account_primary=()
   local -A account_count=()
@@ -1863,60 +1978,19 @@ cmd_list() {
   local -A profile_hint=()
   local -A profile_fp=()
 
-  [[ -f "$AUTH_FILE" ]] && meta_files+=("$AUTH_FILE")
-  meta_files+=("${profiles[@]}")
-  while IFS=$'\037' read -r meta_path mode hint secret; do
-    [[ -n "$meta_path" ]] || continue
-    fp="$(auth_record_fingerprint "$secret")"
-    if [[ "$meta_path" == "$AUTH_FILE" ]]; then
-      active_fp="$fp"
-    else
-      name="$(basename "$meta_path" .json)"
-      profile_mode["$name"]="$mode"
-      profile_hint["$name"]="$hint"
-      profile_fp["$name"]="$fp"
-    fi
-  done < <(auth_metadata_records "${meta_files[@]}")
+  profile_list_metadata_files_into meta_files "${profiles[@]}"
+  profile_list_load_metadata meta_files active_fp profile_mode profile_hint profile_fp
+  profile_list_scan_profiles "$active_fp" profiles profile_mode profile_hint profile_fp account_count account_primary active_name count alias_count
 
-  PROFILE_LIST_WIDTH_HINT=12
-  for path in "${profiles[@]}"; do
-    name="$(basename "$path" .json)"
-    (( ${#name} > PROFILE_LIST_WIDTH_HINT )) && PROFILE_LIST_WIDTH_HINT="${#name}"
-    mode="${profile_mode["$name"]:-unknown}"
-    hint="${profile_hint["$name"]:-}"
-    fp="${profile_fp["$name"]:-}"
-    if [[ -z "$active_name" && -n "$active_fp" && "$fp" == "$active_fp" ]]; then
-      active_name="$name"
-    fi
-    profile_list_note_account "$name" "$hint" account_count account_primary alias_count
-    count=$((count + 1))
-  done
-
-  local cols role_w profile_w mode_w account_w total_w summary account_display alias_of
+  local cols role_w profile_w mode_w account_w
   cols="$(terminal_width)"
   USAGE_COLOR_ENABLED=0
   color_enabled && USAGE_COLOR_ENABLED=1
   USAGE_VERBOSE="$list_verbose"
   IFS=$'\t' read -r role_w profile_w mode_w account_w <<<"$(profile_list_widths "$cols")"
-  total_w=$((role_w + 1 + profile_w + 1 + mode_w + 1 + account_w))
 
-  summary="$(profile_list_summary "$count" "$active_name" "$alias_count" "$total_w")"
-  print_palette_summary_header "Auth" "Saved profiles" "$summary" "$total_w"
-  local role_header profile_header
-  role_header="$(compact_width_choice "$role_w" 2 "" "act")"
-  profile_header="$(compact_width_choice "$profile_w" 7 "prof" "profile")"
-  print_profile_list_line "$role_header" "$profile_header" "auth" "account" "$role_w" "$profile_w" "$mode_w" "$account_w"
-
-  for path in "${profiles[@]}"; do
-    name="$(basename "$path" .json)"
-    mode="${profile_mode["$name"]:-unknown}"
-    hint="${profile_hint["$name"]:-}"
-    fp="${profile_fp["$name"]:-}"
-    alias_of="$(profile_list_alias_of "$hint" "$name" account_count account_primary)"
-    action="$(profile_list_row_action "$active_name" "$name" "$alias_of" "$active_fp" "$fp")"
-    account_display="$(profile_account_display "$hint" "$account_w" "$list_verbose" "$alias_of")"
-    print_profile_list_line "$(profile_list_action_label "$action" "$role_w")" "$name" "$mode" "$account_display" "$role_w" "$profile_w" "$mode_w" "$account_w"
-  done
+  print_profile_list_header "$count" "$active_name" "$alias_count" "$role_w" "$profile_w" "$mode_w" "$account_w"
+  print_profile_list_rows "$active_name" "$active_fp" "$list_verbose" "$role_w" "$profile_w" "$mode_w" "$account_w" profiles profile_mode profile_hint profile_fp account_count account_primary
 }
 
 current_detail_widths() {
@@ -7548,47 +7622,73 @@ arrow_action_menu() {
   selector_numbered_menu rows "$summary_text" "$total_w" "$role_w" "$profile_w" "$cell_w" "$status_w" "$mode" "$selector_palette_mode"
 }
 
+usage_refresh_job_count() {
+  local profile_count="$1"
+  local max_jobs="${CODEX_AUTH_REFRESH_JOBS:-2}"
+  local max_jobs_cap="${CODEX_AUTH_REFRESH_JOBS_MAX:-4}"
+
+  [[ "$max_jobs" =~ ^[0-9]+$ && "$max_jobs" -gt 0 ]] || max_jobs=2
+  [[ "$max_jobs_cap" =~ ^[0-9]+$ && "$max_jobs_cap" -gt 0 ]] || max_jobs_cap=4
+  (( max_jobs > max_jobs_cap )) && max_jobs="$max_jobs_cap"
+  (( max_jobs > profile_count )) && max_jobs="$profile_count"
+  (( max_jobs < 1 )) && max_jobs=1
+  printf '%s' "$max_jobs"
+}
+
+collect_usage_record_file() {
+  local active_fp="$1"
+  local output_file="$2"
+  local profile_file="$3"
+  local profile_name payload fingerprint
+
+  require_auth_file "$profile_file"
+  profile_name="$(basename "$profile_file" .json)"
+  fingerprint="$(credential_fingerprint "$profile_file" || true)"
+  payload="$(usage_payload_for_profile "$profile_file" "$fingerprint")"
+  usage_record_for_profile "$profile_name" "$profile_file" "$payload" "$active_fp" "$fingerprint" > "$output_file"
+}
+
+usage_wait_for_refresh_slot() {
+  local -n active_jobs_ref="$1"
+
+  wait -n || true
+  active_jobs_ref=$((active_jobs_ref - 1))
+}
+
+usage_emit_record_files() {
+  local records_dir="$1"
+  shift
+  local i
+
+  for i in "$@"; do
+    [[ -f "$records_dir/$i.record" ]] && cat "$records_dir/$i.record"
+  done
+}
+
 collect_usage_records() {
   local active_fp="$1"
   shift
   local profile_files=("$@")
-  local records_dir profile_file profile_name payload fingerprint i failed=0
-  local max_jobs max_jobs_cap active_jobs=0
+  local records_dir profile_file i
+  local max_jobs active_jobs=0
 
-  max_jobs="${CODEX_AUTH_REFRESH_JOBS:-2}"
-  max_jobs_cap="${CODEX_AUTH_REFRESH_JOBS_MAX:-4}"
-  [[ "$max_jobs" =~ ^[0-9]+$ && "$max_jobs" -gt 0 ]] || max_jobs=2
-  [[ "$max_jobs_cap" =~ ^[0-9]+$ && "$max_jobs_cap" -gt 0 ]] || max_jobs_cap=4
-  (( max_jobs > max_jobs_cap )) && max_jobs="$max_jobs_cap"
-  (( max_jobs > ${#profile_files[@]} )) && max_jobs="${#profile_files[@]}"
-  (( max_jobs < 1 )) && max_jobs=1
-
+  max_jobs="$(usage_refresh_job_count "${#profile_files[@]}")"
   records_dir="$(mktemp -d "$CODEX_HOME/.tmp/auth-records.XXXXXX")"
 
   for i in "${!profile_files[@]}"; do
     profile_file="${profile_files[$i]}"
-    (
-      require_auth_file "$profile_file"
-      profile_name="$(basename "$profile_file" .json)"
-      fingerprint="$(credential_fingerprint "$profile_file" || true)"
-      payload="$(usage_payload_for_profile "$profile_file" "$fingerprint")"
-      usage_record_for_profile "$profile_name" "$profile_file" "$payload" "$active_fp" "$fingerprint" > "$records_dir/$i.record"
-    ) &
+    collect_usage_record_file "$active_fp" "$records_dir/$i.record" "$profile_file" &
     active_jobs=$((active_jobs + 1))
     if (( active_jobs >= max_jobs )); then
-      wait -n || failed=1
-      active_jobs=$((active_jobs - 1))
+      usage_wait_for_refresh_slot active_jobs
     fi
   done
 
   while (( active_jobs > 0 )); do
-    wait -n || failed=1
-    active_jobs=$((active_jobs - 1))
+    usage_wait_for_refresh_slot active_jobs
   done
 
-  for i in "${!profile_files[@]}"; do
-    [[ -f "$records_dir/$i.record" ]] && cat "$records_dir/$i.record"
-  done | canonical_usage_active_marks
+  usage_emit_record_files "$records_dir" "${!profile_files[@]}" | canonical_usage_active_marks
   rm -rf "$records_dir" 2>/dev/null || true
   return 0
 }

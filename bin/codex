@@ -12,15 +12,23 @@ is_self() {
   [[ "$(realpath "$candidate" 2>/dev/null || printf '%s' "$candidate")" == "$(shim_path)" ]]
 }
 
-find_real_codex() {
-  local candidate wrapper_dir path_dir
+emit_real_codex_candidate() {
+  local candidate="$1"
 
-  if [[ -n "${CODEX_AUTH_CODEX_BIN:-}" && -x "${CODEX_AUTH_CODEX_BIN:-}" ]] && ! is_self "$CODEX_AUTH_CODEX_BIN"; then
-    printf '%s\n' "$CODEX_AUTH_CODEX_BIN"
-    return 0
-  fi
+  [[ -x "$candidate" ]] || return 1
+  is_self "$candidate" && return 1
+  printf '%s\n' "$candidate"
+}
 
-  wrapper_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+find_env_codex() {
+  [[ -n "${CODEX_AUTH_CODEX_BIN:-}" ]] || return 1
+  emit_real_codex_candidate "$CODEX_AUTH_CODEX_BIN"
+}
+
+find_known_codex() {
+  local wrapper_dir="$1"
+  local candidate
+
   for candidate in \
     "$wrapper_dir/codex-real" \
     "$HOME/.bun/bin/codex-real" \
@@ -30,28 +38,42 @@ find_real_codex() {
     /usr/bin/codex \
     /bin/codex
   do
-    [[ -x "$candidate" ]] || continue
-    [[ "$(realpath "$candidate" 2>/dev/null || printf '%s' "$candidate")" != "$(realpath "$0" 2>/dev/null || printf '%s' "$0")" ]] || continue
-    printf '%s\n' "$candidate"
-    return 0
+    emit_real_codex_candidate "$candidate" && return 0
   done
+  return 1
+}
+
+find_backup_codex() {
+  local wrapper_dir="$1"
+  local candidate
 
   for candidate in "$wrapper_dir"/codex.backup.*; do
-    [[ -x "$candidate" ]] || continue
-    is_self "$candidate" && continue
-    printf '%s\n' "$candidate"
-    return 0
+    emit_real_codex_candidate "$candidate" && return 0
   done
+  return 1
+}
+
+find_path_codex() {
+  local candidate path_dir
+  local path_dirs=()
 
   IFS=':' read -r -a path_dirs <<<"${PATH:-}"
   for path_dir in "${path_dirs[@]}"; do
     [[ -n "$path_dir" ]] || path_dir='.'
     candidate="$path_dir/codex"
-    [[ -x "$candidate" ]] || continue
-    is_self "$candidate" && continue
-    printf '%s\n' "$candidate"
-    return 0
+    emit_real_codex_candidate "$candidate" && return 0
   done
+  return 1
+}
+
+find_real_codex() {
+  local wrapper_dir
+
+  find_env_codex && return 0
+  wrapper_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+  find_known_codex "$wrapper_dir" && return 0
+  find_backup_codex "$wrapper_dir" && return 0
+  find_path_codex && return 0
 
   return 1
 }
