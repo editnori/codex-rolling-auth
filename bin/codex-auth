@@ -775,27 +775,6 @@ profile_account_alias_display() {
   fi
 }
 
-profile_account_display() {
-  local hint="$1"
-  local width="$2"
-  local verbose="${3:-0}"
-  local alias_of="${4:-}"
-  local base
-
-  if [[ -n "$alias_of" ]]; then
-    profile_account_alias_display "$hint" "$width" "$verbose" "$alias_of"
-    return 0
-  fi
-
-  [[ -n "$hint" ]] || return 0
-  if (( verbose )); then
-    base="$(verbose_account_hint "$hint" "$width")"
-  else
-    base="$(short_account_hint "$hint" "$width")"
-  fi
-  fit_text "$base" "$width"
-}
-
 print_profile_list_line() {
   local role="$1"
   local profile="$2"
@@ -1852,7 +1831,7 @@ print_profile_list_rows() {
   local -n profile_fp_ref="${11}"
   local -n account_count_ref="$account_count_var"
   local -n account_primary_ref="$account_primary_var"
-  local path name mode hint fp action alias_of account_display
+  local path name mode hint fp action alias_of account_display account_base
 
   for path in "${profiles_ref[@]}"; do
     name="$(basename "$path" .json)"
@@ -1861,7 +1840,18 @@ print_profile_list_rows() {
     fp="${profile_fp_ref["$name"]:-}"
     alias_of="$(profile_list_alias_of "$hint" "$name" "$account_count_var" "$account_primary_var")"
     action="$(profile_list_row_action "$active_name" "$name" "$alias_of" "$active_fp" "$fp")"
-    account_display="$(profile_account_display "$hint" "$account_w" "$list_verbose" "$alias_of")"
+    if [[ -n "$alias_of" ]]; then
+      account_display="$(profile_account_alias_display "$hint" "$account_w" "$list_verbose" "$alias_of")"
+    elif [[ -n "$hint" ]]; then
+      if (( list_verbose )); then
+        account_base="$(verbose_account_hint "$hint" "$account_w")"
+      else
+        account_base="$(short_account_hint "$hint" "$account_w")"
+      fi
+      account_display="$(fit_text "$account_base" "$account_w")"
+    else
+      account_display=""
+    fi
     print_profile_list_line "$(profile_list_action_label "$action" "$role_w")" "$name" "$mode" "$account_display" "$role_w" "$profile_w" "$mode_w" "$account_w"
   done
 }
