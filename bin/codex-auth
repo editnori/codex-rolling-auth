@@ -3626,25 +3626,16 @@ usage_summary_try_append() {
   fi
 }
 
-print_usage_summary_line() {
-  local width="$1"
-  local default_profile="${2:-}"
-  shift 2
+usage_summary_scan_records() {
+  local default_profile="${1:-}"
+  shift || true
   local record valid weekly_used short_used mark profile plan weekly short status short_label weekly_reset short_reset cache_age
   local active_profile="" active_short="" active_weekly="" active_label="5h"
   local best_profile="$default_profile"
-  local caps=0
-  local login=0
-  local unavailable=0
-  local offline=0
-  local stale=0
-  local ready=0
-  local cache_age_max=-1 cache_age_label="" show_cache=0
-  local line has_best=0 has_active=0 active_has_usage=0 old_summary=0 show_week=0 show_login=0 show_unavailable=0 show_offline=0 show_ready=0 show_caps=0 show_stale=0
-  local active_summary
-  local cap_label="capped"
-  local sep
-  sep="$(usage_separator)"
+  local caps=0 login=0 unavailable=0 offline=0 stale=0 ready=0
+  local cache_age_max=-1 cache_age_label=""
+  local cache_age_out
+  local has_best=0 has_active=0 active_has_usage=0 old_summary=0
 
   for record in "$@"; do
     IFS=$'\t' read -r valid weekly_used short_used mark profile plan weekly short status short_label weekly_reset short_reset cache_age <<<"$record"
@@ -3684,13 +3675,266 @@ print_usage_summary_line() {
   [[ -n "$active_profile" ]] && has_active=1 || active_profile="none"
   [[ -n "$active_short" && "$active_short" != "-" ]] || active_short="n/a"
   [[ -n "$active_weekly" && "$active_weekly" != "-" ]] || active_weekly="n/a"
+  if (( cache_age_max >= 0 )); then
+    cache_age_label="$(format_cache_age "$cache_age_max")"
+  fi
+  (( stale > 0 && ready == 0 && has_active )) && old_summary=1
+
+  cache_age_out="$cache_age_label"
+  [[ -n "$cache_age_out" ]] || cache_age_out="__none__"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$active_profile" "$active_short" "$active_weekly" "$active_label" "$best_profile" \
+    "$has_best" "$has_active" "$active_has_usage" "$caps" "$login" "$unavailable" \
+    "$offline" "$stale" "$ready" "$cache_age_out" "$old_summary"
+}
+
+print_usage_summary_compact_line() {
+  local width="$1"
+  local has_active="$2"
+  local active_has_usage="$3"
+  local active_profile="$4"
+  local active_label="$5"
+  local active_short="$6"
+  local caps="$7"
+  local ready="$8"
+  local has_best="$9"
+  local old_summary="${10}"
+  local sep="${11}"
+  local compact_lines=()
+  local compact_active_profile line
+
+  compact_active_profile="$(usage_display_profile_name "$active_profile" "" 6)"
+  if (( old_summary )); then
+    compact_lines+=(
+      "old $compact_active_profile ${active_label} $active_short"
+      "old $active_profile ${active_label} $active_short"
+      "old $compact_active_profile"
+      "old $active_profile"
+    )
+  fi
+  if (( has_active )); then
+    if (( active_has_usage )); then
+      if (( caps > 0 )); then
+        compact_lines+=(
+          "active $compact_active_profile ${active_label} $active_short${sep}cap $caps"
+          "act $compact_active_profile ${active_label} $active_short${sep}cap $caps"
+        )
+      fi
+      compact_lines+=(
+        "active $compact_active_profile ${active_label} $active_short"
+        "act $compact_active_profile ${active_label} $active_short"
+        "active $active_profile ${active_label} $active_short"
+        "active $compact_active_profile"
+        "active $active_profile"
+        "${active_label} $active_short"
+      )
+    else
+      compact_lines+=(
+        "no fresh ready${sep}active $compact_active_profile"
+        "no fresh ready${sep}active $active_profile"
+        "active $compact_active_profile"
+        "active $active_profile"
+        "no fresh ready"
+      )
+    fi
+  elif (( has_best )); then
+    compact_lines+=(
+      "ready $ready${sep}no active"
+      "ready $ready"
+      "no active"
+    )
+  else
+    compact_lines+=(
+      "no fresh ready${sep}no active"
+      "no active"
+    )
+  fi
+
+  for line in "${compact_lines[@]}"; do
+    if (( ${#line} <= width )); then
+      printf '%s\n' "$line"
+      return 0
+    fi
+  done
+  fit_text_rtrim "${compact_lines[-1]}" "$width"
+  printf '\n'
+}
+
+usage_summary_initial_line() {
+  local active_summary="$1"
+  local old_summary="$2"
+  local has_active="$3"
+  local has_best="$4"
+  local ready="$5"
+  local sep="$6"
+  local active_profile="$7"
+  local active_label="$8"
+  local active_short="$9"
+
+  if (( old_summary )); then
+    printf 'old active %s %s %s' "$active_profile" "$active_label" "$active_short"
+  elif (( has_active )); then
+    printf '%s' "$active_summary"
+  elif (( has_best )); then
+    if (( ready > 0 )); then
+      printf 'ready %s%sno active' "$ready" "$sep"
+    else
+      printf 'no active'
+    fi
+  else
+    printf 'no fresh ready%sno active' "$sep"
+  fi
+}
+
+usage_summary_fallback_line() {
+  local width="$1"
+  local old_summary="$2"
+  local has_active="$3"
+  local active_has_usage="$4"
+  local has_best="$5"
+  local ready="$6"
+  local caps="$7"
+  local sep="$8"
+  local active_profile="$9"
+  local active_label="${10}"
+  local active_short="${11}"
+  local line cap_label="capped"
+  local show_ready=0 show_caps=0
+
+  if (( old_summary )); then
+    line="old active $active_profile ${active_label} $active_short"
+  elif (( has_active )); then
+    if (( active_has_usage )); then
+      line="active $active_profile ${active_label} $active_short"
+    else
+      line="active $active_profile"
+    fi
+  elif (( has_best )); then
+    if (( ready > 0 )); then
+      line="ready $ready${sep}no active"
+    else
+      line="no active"
+    fi
+  else
+    line="no active"
+  fi
+
+  if (( caps > 0 && ${#line} + 8 <= width )); then
+    cap_label="cap"
+    line+="${sep}$cap_label $caps"
+    show_caps=1
+  elif (( ready > 0 && ${#line} + 10 <= width )); then
+    line+="${sep}ready $ready"
+    show_ready=1
+  fi
+
+  printf '%s\t%s\t%s\t%s\n' "$line" "$show_ready" "$show_caps" "$cap_label"
+}
+
+print_usage_summary_colored_line() {
+  local sep="$1"
+  local old_summary="$2"
+  local has_active="$3"
+  local has_best="$4"
+  local ready="$5"
+  local active_profile="$6"
+  local active_label="$7"
+  local active_short="$8"
+  local show_week="$9"
+  local active_weekly="${10}"
+  local show_ready="${11}"
+  local show_caps="${12}"
+  local cap_label="${13}"
+  local caps="${14}"
+  local show_login="${15}"
+  local login="${16}"
+  local show_unavailable="${17}"
+  local unavailable="${18}"
+  local show_offline="${19}"
+  local offline="${20}"
+  local show_stale="${21}"
+  local stale="${22}"
+  local show_cache="${23}"
+  local cache_age_label="${24}"
+  local active_has_usage="${25}"
+
+  if (( old_summary )); then
+    usage_tone_color muted; printf 'old active '; usage_tone_reset
+    usage_tone_color active; printf '%s' "$active_profile"; usage_tone_reset
+  elif (( has_active )); then
+    usage_tone_color muted; printf 'active '; usage_tone_reset
+    usage_tone_color active; printf '%s' "$active_profile"; usage_tone_reset
+  elif (( has_best )); then
+    if (( ready > 0 )); then
+      usage_tone_color good; printf 'ready '; usage_tone_reset
+      usage_tone_color good; printf '%s' "$ready"; usage_tone_reset
+      usage_tone_color muted; printf '%sno active' "$sep"; usage_tone_reset
+    else
+      usage_tone_color muted; printf 'no active'; usage_tone_reset
+    fi
+  else
+    usage_tone_color muted; printf 'no fresh ready'; usage_tone_reset
+    usage_tone_color muted; printf '%sno active' "$sep"; usage_tone_reset
+  fi
+  if (( has_active && active_has_usage )); then
+    usage_tone_color muted; printf ' %s ' "$active_label"; usage_tone_reset
+    usage_tone_color "$(usage_limit_tone "$active_short")"; printf '%s' "$active_short"; usage_tone_reset
+  fi
+  if (( show_week )); then
+    usage_tone_color muted; printf ' wk '; usage_tone_reset
+    usage_tone_color "$(usage_limit_tone "$active_weekly")"; printf '%s' "$active_weekly"; usage_tone_reset
+  fi
+  if (( show_ready )); then
+    usage_tone_color muted; printf '%sready ' "$sep"; usage_tone_reset
+    usage_tone_color good; printf '%s' "$ready"; usage_tone_reset
+  fi
+  if (( show_caps )); then
+    usage_tone_color muted; printf '%s%s ' "$sep" "$cap_label"; usage_tone_reset
+    usage_tone_color bad; printf '%s' "$caps"; usage_tone_reset
+  fi
+  if (( show_login )); then
+    usage_tone_color muted; printf '%slogin ' "$sep"; usage_tone_reset
+    usage_tone_color muted; printf '%s' "$login"; usage_tone_reset
+  fi
+  if (( show_unavailable )); then
+    usage_tone_color muted; printf '%sno data ' "$sep"; usage_tone_reset
+    usage_tone_color muted; printf '%s' "$unavailable"; usage_tone_reset
+  fi
+  if (( show_offline )); then
+    usage_tone_color muted; printf '%soffline ' "$sep"; usage_tone_reset
+    usage_tone_color warn; printf '%s' "$offline"; usage_tone_reset
+  fi
+  if (( show_stale )); then
+    usage_tone_color muted; printf '%sstale ' "$sep"; usage_tone_reset
+    usage_tone_color warn; printf '%s' "$stale"; usage_tone_reset
+  fi
+  if (( show_cache )); then
+    usage_tone_color muted; printf '%scache %s' "$sep" "$cache_age_label"; usage_tone_reset
+  fi
+  printf '\n'
+}
+
+print_usage_summary_line() {
+  local width="$1"
+  local default_profile="${2:-}"
+  shift 2
+  local active_profile active_short active_weekly active_label best_profile
+  local has_best has_active active_has_usage caps login unavailable offline stale ready cache_age_label old_summary
+  local show_cache=0
+  local line show_week=0 show_login=0 show_unavailable=0 show_offline=0 show_ready=0 show_caps=0 show_stale=0
+  local active_summary
+  local cap_label="capped"
+  local sep
+  sep="$(usage_separator)"
+
+  IFS=$'\t' read -r active_profile active_short active_weekly active_label best_profile \
+    has_best has_active active_has_usage caps login unavailable offline stale ready cache_age_label old_summary \
+    <<<"$(usage_summary_scan_records "$default_profile" "$@")"
+  [[ "$cache_age_label" != "__none__" ]] || cache_age_label=""
 
   active_summary="active $active_profile"
   if (( active_has_usage )); then
     active_summary+=" ${active_label} $active_short"
-  fi
-  if (( cache_age_max >= 0 )); then
-    cache_age_label="$(format_cache_age "$cache_age_max")"
   fi
   (( width >= 70 && login > 0 )) && show_login=1
   (( width >= 70 && unavailable > 0 )) && show_unavailable=1
@@ -3699,82 +3943,13 @@ print_usage_summary_line() {
     show_ready=1
   fi
   (( caps > 0 )) && show_caps=1
-  (( stale > 0 && ready == 0 && has_active )) && old_summary=1
 
   if (( width < 40 )); then
-    local compact_lines=()
-    local compact_active_profile
-    compact_active_profile="$(usage_display_profile_name "$active_profile" "" 6)"
-    if (( stale > 0 && ready == 0 && has_active )); then
-      compact_lines+=(
-        "old $compact_active_profile ${active_label} $active_short"
-        "old $active_profile ${active_label} $active_short"
-        "old $compact_active_profile"
-        "old $active_profile"
-      )
-    fi
-    if (( has_active )); then
-      if (( active_has_usage )); then
-        if (( caps > 0 )); then
-          compact_lines+=(
-            "active $compact_active_profile ${active_label} $active_short${sep}cap $caps"
-            "act $compact_active_profile ${active_label} $active_short${sep}cap $caps"
-          )
-        fi
-        compact_lines+=(
-          "active $compact_active_profile ${active_label} $active_short"
-          "act $compact_active_profile ${active_label} $active_short"
-          "active $active_profile ${active_label} $active_short"
-          "active $compact_active_profile"
-          "active $active_profile"
-          "${active_label} $active_short"
-        )
-      else
-        compact_lines+=(
-          "no fresh ready${sep}active $compact_active_profile"
-          "no fresh ready${sep}active $active_profile"
-          "active $compact_active_profile"
-          "active $active_profile"
-          "no fresh ready"
-        )
-      fi
-    elif (( has_best )); then
-      compact_lines+=(
-        "ready $ready${sep}no active"
-        "ready $ready"
-        "no active"
-      )
-    else
-      compact_lines+=(
-        "no fresh ready${sep}no active"
-        "no active"
-      )
-    fi
-
-    for line in "${compact_lines[@]}"; do
-      if (( ${#line} <= width )); then
-        printf '%s\n' "$line"
-        return 0
-      fi
-    done
-    fit_text_rtrim "${compact_lines[-1]}" "$width"
-    printf '\n'
+    print_usage_summary_compact_line "$width" "$has_active" "$active_has_usage" "$active_profile" "$active_label" "$active_short" "$caps" "$ready" "$has_best" "$old_summary" "$sep"
     return 0
   fi
 
-  if (( old_summary )); then
-    line="old active $active_profile ${active_label} $active_short"
-  elif (( has_active )); then
-    line="$active_summary"
-  elif (( has_best )); then
-    if (( ready > 0 )); then
-      line="ready $ready${sep}no active"
-    else
-      line="no active"
-    fi
-  else
-    line="no fresh ready${sep}no active"
-  fi
+  line="$(usage_summary_initial_line "$active_summary" "$old_summary" "$has_active" "$has_best" "$ready" "$sep" "$active_profile" "$active_label" "$active_short")"
   if (( ! has_active && has_best )); then
     show_ready=0
   fi
@@ -3794,39 +3969,14 @@ print_usage_summary_line() {
   fi
 
   if (( ${#line} > width )); then
-    if (( old_summary )); then
-      line="old active $active_profile ${active_label} $active_short"
-    elif (( has_active )); then
-      if (( active_has_usage )); then
-        line="active $active_profile ${active_label} $active_short"
-      else
-        line="active $active_profile"
-      fi
-    elif (( has_best )); then
-      if (( ready > 0 )); then
-        line="ready $ready${sep}no active"
-      else
-        line="no active"
-      fi
-    else
-      line="no active"
-    fi
+    IFS=$'\t' read -r line show_ready show_caps cap_label \
+      <<<"$(usage_summary_fallback_line "$width" "$old_summary" "$has_active" "$active_has_usage" "$has_best" "$ready" "$caps" "$sep" "$active_profile" "$active_label" "$active_short")"
     show_week=0
-    show_ready=0
-    show_caps=0
     show_login=0
     show_unavailable=0
     show_offline=0
     show_stale=0
     show_cache=0
-    if (( caps > 0 && ${#line} + 8 <= width )); then
-      cap_label="cap"
-      line+="${sep}$cap_label $caps"
-      show_caps=1
-    elif (( ready > 0 && ${#line} + 10 <= width )); then
-      line+="${sep}ready $ready"
-      show_ready=1
-    fi
   fi
 
   if (( ${#line} > width )); then
@@ -3836,60 +3986,9 @@ print_usage_summary_line() {
   fi
 
   if usage_color_active; then
-    if (( old_summary )); then
-      usage_tone_color muted; printf 'old active '; usage_tone_reset
-      usage_tone_color active; printf '%s' "$active_profile"; usage_tone_reset
-    elif (( has_active )); then
-      usage_tone_color muted; printf 'active '; usage_tone_reset
-      usage_tone_color active; printf '%s' "$active_profile"; usage_tone_reset
-    elif (( has_best )); then
-      if (( ready > 0 )); then
-        usage_tone_color good; printf 'ready '; usage_tone_reset
-        usage_tone_color good; printf '%s' "$ready"; usage_tone_reset
-        usage_tone_color muted; printf '%sno active' "$sep"; usage_tone_reset
-      else
-        usage_tone_color muted; printf 'no active'; usage_tone_reset
-      fi
-    else
-      usage_tone_color muted; printf 'no fresh ready'; usage_tone_reset
-      usage_tone_color muted; printf '%sno active' "$sep"; usage_tone_reset
-    fi
-    if (( has_active && active_has_usage )); then
-      usage_tone_color muted; printf ' %s ' "$active_label"; usage_tone_reset
-      usage_tone_color "$(usage_limit_tone "$active_short")"; printf '%s' "$active_short"; usage_tone_reset
-    fi
-    if (( show_week )); then
-      usage_tone_color muted; printf ' wk '; usage_tone_reset
-      usage_tone_color "$(usage_limit_tone "$active_weekly")"; printf '%s' "$active_weekly"; usage_tone_reset
-    fi
-    if (( show_ready )); then
-      usage_tone_color muted; printf '%sready ' "$sep"; usage_tone_reset
-      usage_tone_color good; printf '%s' "$ready"; usage_tone_reset
-    fi
-    if (( show_caps )); then
-      usage_tone_color muted; printf '%s%s ' "$sep" "$cap_label"; usage_tone_reset
-      usage_tone_color bad; printf '%s' "$caps"; usage_tone_reset
-    fi
-    if (( show_login )); then
-      usage_tone_color muted; printf '%slogin ' "$sep"; usage_tone_reset
-      usage_tone_color muted; printf '%s' "$login"; usage_tone_reset
-    fi
-    if (( show_unavailable )); then
-      usage_tone_color muted; printf '%sno data ' "$sep"; usage_tone_reset
-      usage_tone_color muted; printf '%s' "$unavailable"; usage_tone_reset
-    fi
-    if (( show_offline )); then
-      usage_tone_color muted; printf '%soffline ' "$sep"; usage_tone_reset
-      usage_tone_color warn; printf '%s' "$offline"; usage_tone_reset
-    fi
-    if (( show_stale )); then
-      usage_tone_color muted; printf '%sstale ' "$sep"; usage_tone_reset
-      usage_tone_color warn; printf '%s' "$stale"; usage_tone_reset
-    fi
-    if (( show_cache )); then
-      usage_tone_color muted; printf '%scache %s' "$sep" "$cache_age_label"; usage_tone_reset
-    fi
-    printf '\n'
+    print_usage_summary_colored_line "$sep" "$old_summary" "$has_active" "$has_best" "$ready" "$active_profile" "$active_label" "$active_short" \
+      "$show_week" "$active_weekly" "$show_ready" "$show_caps" "$cap_label" "$caps" "$show_login" "$login" \
+      "$show_unavailable" "$unavailable" "$show_offline" "$offline" "$show_stale" "$stale" "$show_cache" "$cache_age_label" "$active_has_usage"
   else
     printf '%s\n' "$line"
   fi
@@ -6648,22 +6747,15 @@ render_usage_records() {
   done
 }
 
-cmd_usage() {
-  ensure_dirs
-  command -v jq >/dev/null 2>&1 || die "jq is required for usage output"
+parse_usage_args() {
+  local -n auto_switch_ref="$1"
+  local -n args_ref="$2"
+  shift 2
 
-  local auto_switch=0
-  local args=()
-  local refresh_lock_held=0
-  USAGE_QUIET=0
-  USAGE_CACHED=0
-  USAGE_REFRESH=0
-  USAGE_SELECT=0
-  USAGE_FAST_REFRESH=1
   while (( $# > 0 )); do
     case "$1" in
       --auto)
-        auto_switch=1
+        auto_switch_ref=1
         shift
         ;;
       --cached)
@@ -6701,18 +6793,33 @@ cmd_usage() {
         ;;
       --)
         shift
-        args+=("$@")
+        args_ref+=("$@")
         break
         ;;
       -*)
         die "unknown usage option: $1"
         ;;
       *)
-        args+=("$1")
+        args_ref+=("$1")
         shift
         ;;
     esac
   done
+}
+
+cmd_usage() {
+  ensure_dirs
+  command -v jq >/dev/null 2>&1 || die "jq is required for usage output"
+
+  local auto_switch=0
+  local args=()
+  local refresh_lock_held=0
+  USAGE_QUIET=0
+  USAGE_CACHED=0
+  USAGE_REFRESH=0
+  USAGE_SELECT=0
+  USAGE_FAST_REFRESH=1
+  parse_usage_args auto_switch args "$@"
   set -- "${args[@]}"
 
   local profile_files=()
