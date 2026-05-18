@@ -2286,15 +2286,6 @@ cmd_export() {
     "source"$'\t'"$(display_path "$source")"$'\t'"muted"
 }
 
-format_reset_time() {
-  local epoch="${1:-}"
-  if [[ -z "$epoch" || "$epoch" == "-" || "$epoch" == "null" || "$epoch" == "0" ]]; then
-    printf '-'
-    return 0
-  fi
-  TZ="${TZ:-America/Chicago}" date -d "@$epoch" '+%m-%d %H:%M' 2>/dev/null || printf '-'
-}
-
 now_epoch() {
   date +%s
 }
@@ -2862,18 +2853,6 @@ usage_render_total_width() {
   else
     printf '%s' "$((role_w + role_profile_gap + profile_w + 1 + cell_w + 1 + cell_w))"
   fi
-}
-
-usage_static_render_columns() {
-  local cols
-  local max_cols=120
-
-  cols="$(terminal_width)"
-  (( USAGE_VERBOSE )) && max_cols=132
-  if (( cols > max_cols )); then
-    cols="$max_cols"
-  fi
-  printf '%s' "$cols"
 }
 
 clamp_int_between() {
@@ -3525,16 +3504,6 @@ usage_display_status() {
   usage_display_normal_status "$status"
 }
 
-usage_display_current_profile_name() {
-  local width="$1"
-
-  if [[ "$width" =~ ^[0-9]+$ && "$width" -gt 0 && "$width" -lt 7 ]]; then
-    printf 'cur'
-  else
-    printf 'current'
-  fi
-}
-
 usage_display_layth_number_profile() {
   local profile="$1"
   local width="$2"
@@ -3589,23 +3558,17 @@ usage_display_profile_name() {
   local width="${3:-0}"
 
   if [[ "$profile" == "current" && "$role" != "active" && "$role" != "●" && "$role" != "*" ]]; then
-    usage_display_current_profile_name "$width"
+    if [[ "$width" =~ ^[0-9]+$ && "$width" -gt 0 && "$width" -lt 7 ]]; then
+      printf 'cur'
+    else
+      printf 'current'
+    fi
   elif [[ "$profile" == "Layth" && "$width" =~ ^[0-9]+$ && "$width" -gt 0 && "$width" -lt 5 ]]; then
     printf 'Lay'
   elif [[ "$width" =~ ^[0-9]+$ && "$width" -gt 0 && ${#profile} -gt width ]]; then
     usage_display_compact_profile_name "$profile" "$width"
   else
     printf '%s' "$profile"
-  fi
-}
-
-usage_header_role() {
-  local mode="${1:-normal}"
-  local role_w="${2:-0}"
-  if (( role_w <= 1 )); then
-    printf ''
-  else
-    printf 'act'
   fi
 }
 
@@ -4900,7 +4863,7 @@ usage_limit_remaining_fields() {
   local used="$1"
   local window="$2"
   local reset="$3"
-  local left
+  local left reset_text
 
   if [[ -z "$window" || "$window" == "-" || "$window" == "0" ]]; then
     printf '0\t-\t-\n'
@@ -4909,7 +4872,11 @@ usage_limit_remaining_fields() {
 
   left=$((100 - used))
   (( left < 0 )) && left=0
-  printf '%s\t%s%%\t%s\n' "$used" "$left" "$(format_reset_time "$reset")"
+  reset_text="-"
+  if [[ -n "$reset" && "$reset" != "-" && "$reset" != "null" && "$reset" != "0" ]]; then
+    reset_text="$(TZ="${TZ:-America/Chicago}" date -d "@$reset" '+%m-%d %H:%M' 2>/dev/null || printf '-')"
+  fi
+  printf '%s\t%s%%\t%s\n' "$used" "$left" "$reset_text"
 }
 
 usage_record_extract_payload() {
@@ -6580,16 +6547,6 @@ selector_fzf_apply_frame() {
   fi
 }
 
-line_count_nonzero() {
-  local text="$1" line count=0
-
-  while IFS= read -r line; do
-    count=$((count + 1))
-  done <<<"$text"
-  (( count < 1 )) && count=1
-  printf '%s' "$count"
-}
-
 selector_fzf_palette_height() {
   local row_count="$1"
   local header_count="$2"
@@ -6631,11 +6588,15 @@ selector_fzf_prepare_header() {
   local -n fzf_header_line_count_ref="${16}"
   local -n fzf_padding_args_ref="${17}"
   local -n fzf_header_args_ref="${18}"
-  local fzf_vertical_padding=0
+  local fzf_vertical_padding=0 fzf_header_line
 
   if (( fzf_opencode_theme )); then
     fzf_header_ref="$(selector_palette_header_text "$summary_text" "$selector_controls" "$total_w")"
-    fzf_header_line_count_ref="$(line_count_nonzero "$fzf_header_ref")"
+    fzf_header_line_count_ref=0
+    while IFS= read -r fzf_header_line; do
+      fzf_header_line_count_ref=$((fzf_header_line_count_ref + 1))
+    done <<<"$fzf_header_ref"
+    (( fzf_header_line_count_ref < 1 )) && fzf_header_line_count_ref=1
     IFS=$'\t' read -r fzf_height_ref fzf_vertical_padding <<<"$(selector_fzf_palette_height "${#header_rows_ref[@]}" "$fzf_header_line_count_ref" "$term_lines")"
     if (( fzf_vertical_padding )); then
       fzf_padding_args_ref+=(--padding=1,0,1,0)
@@ -7072,16 +7033,6 @@ selector_render_columns() {
   printf '%s' "$render_cols"
 }
 
-selector_layout_fields() {
-  local render_cols="$1"
-  local mode role_w profile_w cell_w status_w bar_width total_w
-
-  IFS=$'\t' read -r mode role_w profile_w cell_w status_w bar_width <<<"$(usage_render_widths "$render_cols")"
-  total_w="$(usage_render_total_width "$role_w" "$profile_w" "$cell_w" "$status_w")"
-  (( total_w > render_cols )) && total_w="$render_cols"
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$mode" "$role_w" "$profile_w" "$cell_w" "$status_w" "$bar_width" "$total_w"
-}
-
 selector_enable_palette_color() {
   local use_fzf="$1"
   local selector_palette_mode="$2"
@@ -7148,7 +7099,9 @@ arrow_action_menu() {
   selector_palette_mode="$(selector_palette_mode_for_fzf "$use_fzf")"
   selector_enable_palette_color "$use_fzf" "$selector_palette_mode"
   render_cols="$(selector_render_columns "$use_fzf" "$selector_palette_mode" "$render_cols")"
-  IFS=$'\t' read -r mode role_w profile_w cell_w status_w bar_width total_w <<<"$(selector_layout_fields "$render_cols")"
+  IFS=$'\t' read -r mode role_w profile_w cell_w status_w bar_width <<<"$(usage_render_widths "$render_cols")"
+  total_w="$(usage_render_total_width "$role_w" "$profile_w" "$cell_w" "$status_w")"
+  total_w="$(clamp_int_between "$total_w" 0 "$render_cols")"
   summary_text="$(usage_metadata_summary_line "$total_w" "$default_profile" "${records[@]}")"
   action_w=5
   selector_profile_w="$profile_w"
@@ -7563,14 +7516,19 @@ render_usage_records() {
 
   local mode role_w profile_w cell_w status_w bar_width
   local display_role display_status total_w group previous_group=""
+  local render_cols max_cols header_role
   USAGE_COLOR_ENABLED=0
   color_enabled && USAGE_COLOR_ENABLED=1
-  IFS=$'\t' read -r mode role_w profile_w cell_w status_w bar_width <<<"$(usage_render_widths "$(usage_static_render_columns)")"
+  max_cols=$((120 + USAGE_VERBOSE * 12))
+  render_cols="$(clamp_int_between "$(terminal_width)" 0 "$max_cols")"
+  IFS=$'\t' read -r mode role_w profile_w cell_w status_w bar_width <<<"$(usage_render_widths "$render_cols")"
   total_w="$(usage_render_total_width "$role_w" "$profile_w" "$cell_w" "$status_w")"
 
   print_palette_summary_header "Auth" "Codex profiles" "$(usage_metadata_summary_line "$total_w" "$default_profile" "${SORTED_USAGE_RECORDS[@]}")" "$total_w" usage 0
   if [[ "${CODEX_AUTH_USAGE_HEADER:-0}" == "1" ]]; then
-    print_usage_render_header "$(usage_header_role "$mode" "$role_w")" "$(usage_header_profile "$mode")" "$(usage_header_week "$mode")" "$(usage_header_short "$mode")" "$(usage_header_state "$mode")" \
+    header_role="act"
+    (( role_w <= 1 )) && header_role=""
+    print_usage_render_header "$header_role" "$(usage_header_profile "$mode")" "$(usage_header_week "$mode")" "$(usage_header_short "$mode")" "$(usage_header_state "$mode")" \
       "$role_w" "$profile_w" "$cell_w" "$status_w" "$mode"
   fi
 
