@@ -1847,14 +1847,6 @@ parse_list_args() {
   done
 }
 
-profile_list_metadata_files_into() {
-  local -n files_ref="$1"
-  shift
-
-  [[ -f "$AUTH_FILE" ]] && files_ref+=("$AUTH_FILE")
-  files_ref+=("$@")
-}
-
 profile_list_load_metadata() {
   local -n files_ref="$1"
   local -n active_fp_ref="$2"
@@ -1978,7 +1970,8 @@ cmd_list() {
   local -A profile_hint=()
   local -A profile_fp=()
 
-  profile_list_metadata_files_into meta_files "${profiles[@]}"
+  [[ -f "$AUTH_FILE" ]] && meta_files+=("$AUTH_FILE")
+  meta_files+=("${profiles[@]}")
   profile_list_load_metadata meta_files active_fp profile_mode profile_hint profile_fp
   profile_list_scan_profiles "$active_fp" profiles profile_mode profile_hint profile_fp account_count account_primary active_name count alias_count
 
@@ -7655,16 +7648,6 @@ usage_wait_for_refresh_slot() {
   active_jobs_ref=$((active_jobs_ref - 1))
 }
 
-usage_emit_record_files() {
-  local records_dir="$1"
-  shift
-  local i
-
-  for i in "$@"; do
-    [[ -f "$records_dir/$i.record" ]] && cat "$records_dir/$i.record"
-  done
-}
-
 collect_usage_records() {
   local active_fp="$1"
   shift
@@ -7688,7 +7671,9 @@ collect_usage_records() {
     usage_wait_for_refresh_slot active_jobs
   done
 
-  usage_emit_record_files "$records_dir" "${!profile_files[@]}" | canonical_usage_active_marks
+  for i in "${!profile_files[@]}"; do
+    [[ -f "$records_dir/$i.record" ]] && cat "$records_dir/$i.record"
+  done | canonical_usage_active_marks
   rm -rf "$records_dir" 2>/dev/null || true
   return 0
 }

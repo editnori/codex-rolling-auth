@@ -20,60 +20,38 @@ emit_real_codex_candidate() {
   printf '%s\n' "$candidate"
 }
 
-find_env_codex() {
-  [[ -n "${CODEX_AUTH_CODEX_BIN:-}" ]] || return 1
-  emit_real_codex_candidate "$CODEX_AUTH_CODEX_BIN"
-}
-
-find_known_codex() {
-  local wrapper_dir="$1"
+find_first_codex_candidate() {
   local candidate
 
-  for candidate in \
-    "$wrapper_dir/codex-real" \
-    "$HOME/.bun/bin/codex-real" \
-    "$HOME/.bun/bin/codex" \
-    "$HOME/.npm-global/bin/codex" \
-    /usr/local/bin/codex \
-    /usr/bin/codex \
-    /bin/codex
-  do
-    emit_real_codex_candidate "$candidate" && return 0
-  done
-  return 1
-}
-
-find_backup_codex() {
-  local wrapper_dir="$1"
-  local candidate
-
-  for candidate in "$wrapper_dir"/codex.backup.*; do
-    emit_real_codex_candidate "$candidate" && return 0
-  done
-  return 1
-}
-
-find_path_codex() {
-  local candidate path_dir
-  local path_dirs=()
-
-  IFS=':' read -r -a path_dirs <<<"${PATH:-}"
-  for path_dir in "${path_dirs[@]}"; do
-    [[ -n "$path_dir" ]] || path_dir='.'
-    candidate="$path_dir/codex"
+  for candidate in "$@"; do
     emit_real_codex_candidate "$candidate" && return 0
   done
   return 1
 }
 
 find_real_codex() {
-  local wrapper_dir
+  local wrapper_dir path_dir
+  local path_candidates=()
+  local path_dirs=()
 
-  find_env_codex && return 0
+  [[ -n "${CODEX_AUTH_CODEX_BIN:-}" ]] && emit_real_codex_candidate "$CODEX_AUTH_CODEX_BIN" && return 0
   wrapper_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-  find_known_codex "$wrapper_dir" && return 0
-  find_backup_codex "$wrapper_dir" && return 0
-  find_path_codex && return 0
+  find_first_codex_candidate \
+    "$wrapper_dir/codex-real" \
+    "$HOME/.bun/bin/codex-real" \
+    "$HOME/.bun/bin/codex" \
+    "$HOME/.npm-global/bin/codex" \
+    /usr/local/bin/codex \
+    /usr/bin/codex \
+    /bin/codex \
+    "$wrapper_dir"/codex.backup.* && return 0
+
+  IFS=':' read -r -a path_dirs <<<"${PATH:-}"
+  for path_dir in "${path_dirs[@]}"; do
+    [[ -n "$path_dir" ]] || path_dir='.'
+    path_candidates+=("$path_dir/codex")
+  done
+  find_first_codex_candidate "${path_candidates[@]}" && return 0
 
   return 1
 }
