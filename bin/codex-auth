@@ -8027,19 +8027,14 @@ cmd_usage() {
     local rendered_output=0
     usage_render_or_prepare "$records" "$default_profile" "$active_is_best" rendered_output
 
-    if (( auto_switch )); then
-      usage_auto_switch_result "$rendered_output" "$default_profile" "$active_is_best"
-      return 0
-    fi
-
-    if [[ "$USAGE_SELECT" != "1" ]]; then
-      return 0
-    fi
-
-    arrow_action_menu "$default_profile" "${SORTED_USAGE_RECORDS[@]}"
-    if usage_handle_menu_action; then
-      return 0
-    fi
+    case "$auto_switch:$USAGE_SELECT" in
+      1:*) usage_auto_switch_result "$rendered_output" "$default_profile" "$active_is_best"; return 0 ;;
+      0:1)
+        arrow_action_menu "$default_profile" "${SORTED_USAGE_RECORDS[@]}"
+        usage_handle_menu_action && return 0
+        ;;
+      *) return 0 ;;
+    esac
   done
 }
 
@@ -8601,13 +8596,6 @@ codex_run_execute_attempt() {
     monitor_pid_ref="$CODEX_RUN_LIMIT_MONITOR_PID"
     script -qefc "$run_file_ref" "$log_file_ref"
     status_ref=$?
-    codex_run_stop_limit_monitor "$monitor_pid_ref"
-    monitor_pid_ref=""
-    set -e
-    codex_run_stop_watch "$watch_pid_ref"
-    watch_pid_ref=""
-    rm -f "$run_file_ref" 2>/dev/null || true
-    run_file_ref=""
   elif codex_run_can_use_pipe_log "$log_enabled" "$log_file_ref"; then
     set +e
     CODEX_AUTH_RUNNER=1 "$codex_cli" "${run_args_ref[@]}" > >(tee "$log_file_ref") 2> >(tee -a "$log_file_ref" >&2) &
@@ -8616,20 +8604,17 @@ codex_run_execute_attempt() {
     monitor_pid_ref="$CODEX_RUN_LIMIT_MONITOR_PID"
     wait "$target_pid_ref"
     status_ref=$?
-    codex_run_stop_limit_monitor "$monitor_pid_ref"
-    monitor_pid_ref=""
-    set -e
-    codex_run_stop_watch "$watch_pid_ref"
-    watch_pid_ref=""
   else
     set +e
     CODEX_AUTH_RUNNER=1 "$codex_cli" "${run_args_ref[@]}"
     status_ref=$?
-    set -e
-    codex_run_stop_watch "$watch_pid_ref"
-    watch_pid_ref=""
     [[ -n "$log_file_ref" ]] && : > "$log_file_ref"
   fi
+  set -e
+  codex_run_cleanup "$watch_pid_ref" "$monitor_pid_ref" "$run_file_ref" "" 1
+  watch_pid_ref=""
+  monitor_pid_ref=""
+  run_file_ref=""
 }
 
 cmd_run() {
