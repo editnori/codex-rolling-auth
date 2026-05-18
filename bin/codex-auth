@@ -639,32 +639,7 @@ profile_list_widths() {
   local max_profile_w account_w
 
   wanted_profile_w="${PROFILE_LIST_WIDTH_HINT:-12}"
-  [[ "$wanted_profile_w" =~ ^[0-9]+$ ]] || wanted_profile_w=12
-  (( wanted_profile_w < 12 )) && wanted_profile_w=12
-  if (( USAGE_VERBOSE )); then
-    if (( cols >= 112 )); then
-      (( wanted_profile_w < 18 )) && wanted_profile_w=18
-      (( wanted_profile_w > 28 )) && wanted_profile_w=28
-    elif (( cols >= 94 )); then
-      (( wanted_profile_w < 14 )) && wanted_profile_w=14
-      (( wanted_profile_w > 24 )) && wanted_profile_w=24
-    else
-      (( wanted_profile_w > 24 )) && wanted_profile_w=24
-    fi
-  else
-    if (( cols >= 112 )); then
-      (( wanted_profile_w < 20 )) && wanted_profile_w=20
-      (( wanted_profile_w > 30 )) && wanted_profile_w=30
-    elif (( cols >= 94 )); then
-      (( wanted_profile_w < 18 )) && wanted_profile_w=18
-      (( wanted_profile_w > 28 )) && wanted_profile_w=28
-    elif (( cols >= 72 )); then
-      (( wanted_profile_w < 14 )) && wanted_profile_w=14
-      (( wanted_profile_w > 24 )) && wanted_profile_w=24
-    else
-      (( wanted_profile_w > 24 )) && wanted_profile_w=24
-    fi
-  fi
+  wanted_profile_w="$(usage_profile_width_hint "$cols" "$wanted_profile_w" "$USAGE_VERBOSE")"
 
   if (( cols < 34 )); then
     role_w=1
@@ -1651,6 +1626,7 @@ cmd_list() {
 
   local active_fp=""
   local path name mode hint fp action active_name="" count=0
+  local alias_count=0
   local meta_path secret
   local meta_files=()
   local -A account_primary=()
@@ -1680,8 +1656,10 @@ cmd_list() {
     fi
   done < <(auth_metadata_records "${meta_files[@]}")
 
+  PROFILE_LIST_WIDTH_HINT=12
   for path in "${profiles[@]}"; do
     name="$(basename "$path" .json)"
+    (( ${#name} > PROFILE_LIST_WIDTH_HINT )) && PROFILE_LIST_WIDTH_HINT="${#name}"
     mode="${profile_mode["$name"]:-unknown}"
     hint="${profile_hint["$name"]:-}"
     fp="${profile_fp["$name"]:-}"
@@ -1690,6 +1668,9 @@ cmd_list() {
     fi
     if [[ -n "$hint" ]]; then
       account_count["$hint"]=$(( ${account_count["$hint"]:-0} + 1 ))
+      if (( account_count["$hint"] > 1 )); then
+        alias_count=$((alias_count + 1))
+      fi
       if [[ -z "${account_primary["$hint"]:-}" || ( "${account_primary["$hint"]:-}" == "current" && "$name" != "current" ) ]]; then
         account_primary["$hint"]="$name"
       fi
@@ -1697,25 +1678,13 @@ cmd_list() {
     count=$((count + 1))
   done
 
-  PROFILE_LIST_WIDTH_HINT=12
-  for path in "${profiles[@]}"; do
-    name="$(basename "$path" .json)"
-    (( ${#name} > PROFILE_LIST_WIDTH_HINT )) && PROFILE_LIST_WIDTH_HINT="${#name}"
-  done
-
-  local cols role_w profile_w mode_w account_w total_w summary account_display alias_of alias_count=0
+  local cols role_w profile_w mode_w account_w total_w summary account_display alias_of
   cols="$(terminal_width)"
   USAGE_COLOR_ENABLED=0
   color_enabled && USAGE_COLOR_ENABLED=1
   USAGE_VERBOSE="$list_verbose"
   IFS=$'\t' read -r role_w profile_w mode_w account_w <<<"$(profile_list_widths "$cols")"
   total_w=$((role_w + 1 + profile_w + 1 + mode_w + 1 + account_w))
-
-  for hint in "${!account_count[@]}"; do
-    if (( account_count["$hint"] > 1 )); then
-      alias_count=$((alias_count + account_count["$hint"] - 1))
-    fi
-  done
 
   summary="profiles $count"
   if [[ -n "$active_name" ]]; then
@@ -1740,16 +1709,8 @@ cmd_list() {
   fi
   print_palette_summary_header "Auth" "Saved profiles" "$summary" "$total_w"
   local role_header profile_header
-  if (( role_w == 1 )); then
-    role_header=""
-  else
-    role_header="act"
-  fi
-  if (( profile_w <= 6 )); then
-    profile_header="prof"
-  else
-    profile_header="profile"
-  fi
+  role_header="$(compact_width_choice "$role_w" 2 "" "act")"
+  profile_header="$(compact_width_choice "$profile_w" 7 "prof" "profile")"
   print_profile_list_line "$role_header" "$profile_header" "auth" "account" "$role_w" "$profile_w" "$mode_w" "$account_w"
 
   for path in "${profiles[@]}"; do
@@ -5958,6 +5919,7 @@ selector_fzf_menu() {
   local fzf_layout_args=(--layout=reverse)
   local fzf_opencode_theme=0
   local selector_controls
+  local selector_control_sep
 
   fzf_height=$(( ${#rows_ref[@]} + 8 ))
   (( fzf_height < 12 )) && fzf_height=12
@@ -5990,19 +5952,16 @@ selector_fzf_menu() {
   if usage_unicode_enabled; then
     fzf_prompt='filter ▸ '
     fzf_pointer='▸'
-    if (( total_w < 32 )); then
-      selector_controls='enter · esc stay · filter'
-    else
-      selector_controls='enter select · esc stay · type filter'
-    fi
+    selector_control_sep=' · '
   else
     fzf_prompt='filter > '
     fzf_pointer='>'
-    if (( total_w < 32 )); then
-      selector_controls='enter | esc stay | filter'
-    else
-      selector_controls='enter select | esc stay | type filter'
-    fi
+    selector_control_sep=' | '
+  fi
+  if (( total_w < 32 )); then
+    selector_controls="enter${selector_control_sep}esc stay${selector_control_sep}filter"
+  else
+    selector_controls="enter select${selector_control_sep}esc stay${selector_control_sep}type filter"
   fi
   if (( fzf_opencode_theme )); then
     local palette_effective_w right_margin terminal_w
@@ -6796,6 +6755,34 @@ parse_usage_args() {
   done
 }
 
+usage_profile_files_for_args() {
+  local name profile_file
+  local profile_files=()
+
+  if (( $# > 0 )); then
+    for name in "$@"; do
+      require_name "$name"
+      profile_file="$(profile_path "$name")"
+      [[ -f "$profile_file" ]] || die "profile not found: $name"
+      profile_files+=("$profile_file")
+    done
+  else
+    shopt -s nullglob
+    profile_files=("$PROFILE_DIR"/*.json)
+    shopt -u nullglob
+  fi
+
+  (( ${#profile_files[@]} == 0 )) || printf '%s\n' "${profile_files[@]}"
+}
+
+active_auth_fingerprint() {
+  local active_meta=()
+
+  [[ -f "$AUTH_FILE" ]] || return 0
+  mapfile -t active_meta < <(auth_metadata "$AUTH_FILE" || true)
+  printf '%s' "${active_meta[2]:-}"
+}
+
 cmd_usage() {
   ensure_dirs
   command -v jq >/dev/null 2>&1 || die "jq is required for usage output"
@@ -6812,19 +6799,7 @@ cmd_usage() {
   set -- "${args[@]}"
 
   local profile_files=()
-  if (( $# > 0 )); then
-    local name profile_file
-    for name in "$@"; do
-      require_name "$name"
-      profile_file="$(profile_path "$name")"
-      [[ -f "$profile_file" ]] || die "profile not found: $name"
-      profile_files+=("$profile_file")
-    done
-  else
-    shopt -s nullglob
-    profile_files=("$PROFILE_DIR"/*.json)
-    shopt -u nullglob
-  fi
+  mapfile -t profile_files < <(usage_profile_files_for_args "$@")
 
   if (( ${#profile_files[@]} == 0 )); then
     [[ "$USAGE_QUIET" == "1" ]] || print_empty_profiles
@@ -6848,12 +6823,8 @@ cmd_usage() {
   fi
 
   while true; do
-    local active_fp=""
-    if [[ -f "$AUTH_FILE" ]]; then
-      local active_meta=()
-      mapfile -t active_meta < <(auth_metadata "$AUTH_FILE" || true)
-      active_fp="${active_meta[2]:-}"
-    fi
+    local active_fp
+    active_fp="$(active_auth_fingerprint)"
 
     local records=""
     if [[ "$USAGE_CACHED" == "1" && "$USAGE_REFRESH" != "1" ]]; then
