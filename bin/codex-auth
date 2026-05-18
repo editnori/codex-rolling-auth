@@ -1207,6 +1207,46 @@ print_result_block() {
   done
 }
 
+compact_width_choice() {
+  local cols="$1"
+  local cutoff="$2"
+  local short="$3"
+  local wide="$4"
+
+  if (( cols < cutoff )); then
+    printf '%s' "$short"
+  else
+    printf '%s' "$wide"
+  fi
+}
+
+compact_value_choice() {
+  local cols="$1"
+  local cutoff="$2"
+  local short_format="$3"
+  local wide_format="$4"
+  local value="$5"
+
+  if (( cols < cutoff )); then
+    printf "$short_format" "$value"
+  else
+    printf "$wide_format" "$value"
+  fi
+}
+
+compact_missing_dir_message() {
+  local cols="$1"
+  local base="$2"
+
+  if (( cols < 24 )); then
+    printf 'missing dir'
+  elif (( cols < 28 )); then
+    printf 'missing dir %s' "$base"
+  else
+    printf 'missing dir: %s' "$base"
+  fi
+}
+
 compact_error_message() {
   local message="$1"
   local cols="$2"
@@ -1217,53 +1257,31 @@ compact_error_message() {
       auth\ file\ not\ found:\ *)
         tail="${message#auth file not found: }"
         base="${tail##*/}"
-        if (( cols < 28 )); then
-          printf 'missing %s' "$base"
-        else
-          printf 'missing file: %s' "$base"
-        fi
+        compact_value_choice "$cols" 28 'missing %s' 'missing file: %s' "$base"
         return 0
         ;;
       auth\ file\ is\ empty:\ *)
         tail="${message#auth file is empty: }"
         base="${tail##*/}"
-        if (( cols < 28 )); then
-          printf 'empty %s' "$base"
-        else
-          printf 'empty file: %s' "$base"
-        fi
+        compact_value_choice "$cols" 28 'empty %s' 'empty file: %s' "$base"
         return 0
         ;;
       not\ a\ Codex\ auth.json\ with\ OPENAI_API_KEY\ or\ tokens:\ *)
         tail="${message#not a Codex auth.json with OPENAI_API_KEY or tokens: }"
         base="${tail##*/}"
-        if (( cols < 28 )); then
-          printf 'bad auth %s' "$base"
-        else
-          printf 'bad auth file: %s' "$base"
-        fi
+        compact_value_choice "$cols" 28 'bad auth %s' 'bad auth file: %s' "$base"
         return 0
         ;;
       export\ dir\ missing:\ *)
         tail="${message#export dir missing: }"
         base="${tail##*/}"
-        if (( cols < 24 )); then
-          printf 'missing dir'
-        elif (( cols < 28 )); then
-          printf 'missing dir %s' "$base"
-        else
-          printf 'missing dir: %s' "$base"
-        fi
+        compact_missing_dir_message "$cols" "$base"
         return 0
         ;;
       export\ path\ is\ a\ directory:\ *)
         tail="${message#export path is a directory: }"
         base="${tail##*/}"
-        if (( cols < 60 )); then
-          printf 'export path is dir'
-        else
-          printf 'export path is dir: %s' "$base"
-        fi
+        compact_value_choice "$cols" 60 'export path is dir' 'export path is dir: %s' "$base"
         return 0
         ;;
       refusing\ to\ remove\ without\ --yes)
@@ -1275,35 +1293,19 @@ compact_error_message() {
         return 0
         ;;
       usage:\ codex-auth\ add\ \<name\>\ --file\ \<file\>)
-        if (( cols < 28 )); then
-          printf 'add needs file'
-        else
-          printf 'add needs --file <file>'
-        fi
+        compact_width_choice "$cols" 28 'add needs file' 'add needs --file <file>'
         return 0
         ;;
       usage:\ codex-auth\ add\ \<name\>\ \[--current\ \|\ --file\ \<file\>\ \|\ codex\ login\ args...\])
-        if (( cols < 28 )); then
-          printf 'add needs name'
-        else
-          printf 'usage: add <name>'
-        fi
+        compact_width_choice "$cols" 28 'add needs name' 'usage: add <name>'
         return 0
         ;;
       add\ accepts\ one\ source:\ --current\ or\ --file)
-        if (( cols < 40 )); then
-          printf 'choose one source'
-        else
-          printf 'choose --current or --file'
-        fi
+        compact_width_choice "$cols" 40 'choose one source' 'choose --current or --file'
         return 0
         ;;
       add\ cannot\ mix\ --file/--current\ with\ login\ args)
-        if (( cols < 40 )); then
-          printf 'file + login args'
-        else
-          printf 'cannot mix file and login args'
-        fi
+        compact_width_choice "$cols" 40 'file + login args' 'cannot mix file and login args'
         return 0
         ;;
       no\ active\ auth\ to\ save)
@@ -1311,102 +1313,54 @@ compact_error_message() {
         return 0
         ;;
       jq\ is\ required\ for\ usage\ output)
-        if (( cols < 24 )); then
-          printf 'jq needed'
-        else
-          printf 'jq needed for usage'
-        fi
+        compact_width_choice "$cols" 24 'jq needed' 'jq needed for usage'
         return 0
         ;;
       jq\ is\ required\ for\ usage\ refresh)
-        if (( cols < 24 )); then
-          printf 'jq needed'
-        else
-          printf 'jq needed for refresh'
-        fi
+        compact_width_choice "$cols" 24 'jq needed' 'jq needed for refresh'
         return 0
         ;;
       jq\ is\ required\ for\ recovery)
-        if (( cols < 24 )); then
-          printf 'jq needed'
-        else
-          printf 'jq needed for recover'
-        fi
+        compact_width_choice "$cols" 24 'jq needed' 'jq needed for recover'
         return 0
         ;;
       node\ needed\ for\ codex)
-        if (( cols < 24 )); then
-          printf 'node needed'
-        else
-          printf 'node needed for codex'
-        fi
+        compact_width_choice "$cols" 24 'node needed' 'node needed for codex'
         return 0
         ;;
       codex\ command\ not\ found)
-        if (( cols < 32 )); then
-          printf 'codex missing'
-        else
-          printf 'codex command not found'
-        fi
+        compact_width_choice "$cols" 32 'codex missing' 'codex command not found'
         return 0
         ;;
       auth\ change\ already\ running)
-        if (( cols < 32 )); then
-          printf 'auth busy'
-        else
-          printf 'auth change busy'
-        fi
+        compact_width_choice "$cols" 32 'auth busy' 'auth change busy'
         return 0
         ;;
       could\ not\ hide\ active\ auth\ for\ login)
-        if (( cols < 32 )); then
-          printf 'hide auth failed'
-        else
-          printf 'could not hide active auth'
-        fi
+        compact_width_choice "$cols" 32 'hide auth failed' 'could not hide active auth'
         return 0
         ;;
       login\ failed\;\ restored\ previous\ auth)
-        if (( cols < 32 )); then
-          printf 'login failed; restored'
-        else
-          printf 'login failed; auth restored'
-        fi
+        compact_width_choice "$cols" 32 'login failed; restored' 'login failed; auth restored'
         return 0
         ;;
       login\ did\ not\ produce\ valid\ auth\;\ restored\ previous\ auth)
-        if (( cols < 32 )); then
-          printf 'bad login auth; restored'
-        else
-          printf 'login auth invalid; restored'
-        fi
+        compact_width_choice "$cols" 32 'bad login auth; restored' 'login auth invalid; restored'
         return 0
         ;;
       login\ did\ not\ produce\ valid\ auth)
-        if (( cols < 32 )); then
-          printf 'bad login auth'
-        else
-          printf 'login auth invalid'
-        fi
+        compact_width_choice "$cols" 32 'bad login auth' 'login auth invalid'
         return 0
         ;;
       unknown\ command:\ *.\ Use:\ codex-auth\ help)
         command="${message#unknown command: }"
         command="${command%. Use: codex-auth help}"
-        if (( cols < 28 )); then
-          printf 'unknown %s' "$command"
-        else
-          printf 'unknown %s; help' "$command"
-        fi
+        compact_value_choice "$cols" 28 'unknown %s' 'unknown %s; help' "$command"
         return 0
         ;;
       unknown\ usage\ option:\ *)
         option="${message#unknown usage option: }"
-        if (( cols < 28 )); then
-          printf 'bad opt %s' "$option"
-        else
-          printf 'unknown option %s' "$option"
-        fi
+        compact_value_choice "$cols" 28 'bad opt %s' 'unknown option %s' "$option"
         return 0
         ;;
       profile\ not\ found:\ *)
@@ -1420,134 +1374,35 @@ compact_error_message() {
         return 0
         ;;
       profile\ names\ may\ only\ use\ letters,\ numbers,\ dot,\ underscore,\ and\ dash)
-        if (( cols < 28 )); then
-          printf 'bad profile name'
-        else
-          printf 'bad name: A-Z 0-9 . _ -'
-        fi
+        compact_width_choice "$cols" 28 'bad profile name' 'bad name: A-Z 0-9 . _ -'
         return 0
         ;;
       usage:\ codex-auth\ list\ \[-v\])
-        if (( cols < 32 )); then
-          printf 'usage: list [-v]'
-        else
-          printf 'usage: list [-v]'
-        fi
+        printf 'usage: list [-v]'
         return 0
         ;;
       usage:\ codex-auth\ remove\ \<name\>\ --yes)
-        if (( cols < 28 )); then
-          printf 'remove name --yes'
-        else
-          printf 'usage: remove <name> --yes'
-        fi
+        compact_width_choice "$cols" 28 'remove name --yes' 'usage: remove <name> --yes'
         return 0
         ;;
       usage:\ codex-auth\ import\ \<name\>\ \<file\>)
-        if (( cols < 34 )); then
-          printf 'import name file'
-        else
-          printf 'usage: import <name> <file>'
-        fi
+        compact_width_choice "$cols" 34 'import name file' 'usage: import <name> <file>'
         return 0
         ;;
       usage:\ codex-auth\ export\ \<name\>\ \<file\>)
-        if (( cols < 34 )); then
-          printf 'export name file'
-        else
-          printf 'usage: export <name> <file>'
-        fi
+        compact_width_choice "$cols" 34 'export name file' 'usage: export <name> <file>'
         return 0
         ;;
       usage:\ codex-auth\ save\ \<name\>\ \[file\])
-        if (( cols < 34 )); then
-          printf 'save name file'
-        else
-          printf 'usage: save <name> [file]'
-        fi
+        compact_width_choice "$cols" 34 'save name file' 'usage: save <name> [file]'
         return 0
         ;;
       usage:\ codex-auth\ use\ \<name\>)
-        if (( cols < 34 )); then
-          printf 'use name'
-        else
-          printf 'usage: use <name>'
-        fi
+        compact_width_choice "$cols" 34 'use name' 'usage: use <name>'
         return 0
         ;;
       usage:\ codex-auth\ login\ \<name\>\ \[codex\ login\ args...\])
-        if (( cols < 28 )); then
-          printf 'login needs name'
-        else
-          printf 'usage: login <name>'
-        fi
-        return 0
-        ;;
-    esac
-  fi
-
-  if (( cols < 48 )); then
-    case "$message" in
-      refusing\ to\ remove\ without\ --yes)
-        printf 'remove needs --yes'
-        return 0
-        ;;
-      usage:\ --ttl\ seconds)
-        printf 'ttl needs seconds'
-        return 0
-        ;;
-      usage:\ codex-auth\ add\ \<name\>\ --file\ \<file\>)
-        if (( cols < 28 )); then
-          printf 'add needs file'
-        else
-          printf 'add needs --file <file>'
-        fi
-        return 0
-        ;;
-      usage:\ codex-auth\ add\ \<name\>\ \[--current\ \|\ --file\ \<file\>\ \|\ codex\ login\ args...\])
-        if (( cols < 28 )); then
-          printf 'add needs name'
-        else
-          printf 'usage: add <name>'
-        fi
-        return 0
-        ;;
-      add\ accepts\ one\ source:\ --current\ or\ --file)
-        if (( cols < 40 )); then
-          printf 'choose one source'
-        else
-          printf 'choose --current or --file'
-        fi
-        return 0
-        ;;
-      add\ cannot\ mix\ --file/--current\ with\ login\ args)
-        if (( cols < 40 )); then
-          printf 'file + login args'
-        else
-          printf 'cannot mix file and login args'
-        fi
-        return 0
-        ;;
-      no\ active\ auth\ to\ save)
-        printf 'no active auth'
-        return 0
-        ;;
-      profile\ not\ found:\ *)
-        tail="${message#profile not found: }"
-        if (( cols < 28 )); then
-          tail="$(fit_profile_text_rtrim "$tail" "$((cols - 10))")"
-          printf 'missing %s' "$tail"
-        else
-          printf 'not found: %s' "$tail"
-        fi
-        return 0
-        ;;
-      profile\ names\ may\ only\ use\ letters,\ numbers,\ dot,\ underscore,\ and\ dash)
-        if (( cols < 28 )); then
-          printf 'bad profile name'
-        else
-          printf 'bad name: A-Z 0-9 . _ -'
-        fi
+        compact_width_choice "$cols" 28 'login needs name' 'usage: login <name>'
         return 0
         ;;
     esac
