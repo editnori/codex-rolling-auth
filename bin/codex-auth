@@ -3687,23 +3687,15 @@ usage_header_week() {
   usage_header_verbose_label "$mode" "week" "wk" "$reset_glyph"
 }
 
-usage_header_short_label() {
-  local mode="$1"
+usage_header_short() {
+  local mode="${1:-normal}"
   local label="${USAGE_SHORT_LABEL:-5h}"
+  local nano_label
+  local reset_glyph
 
   if [[ "$label" == "short" ]] && usage_mode_is_pico_or_nano "$mode"; then
     label="5h"
   fi
-  printf '%s' "$label"
-}
-
-usage_header_short() {
-  local mode="${1:-normal}"
-  local label
-  local nano_label
-  local reset_glyph
-
-  label="$(usage_header_short_label "$mode")"
   nano_label="${label:0:2}"
   reset_glyph="$(usage_reset_glyph)"
 
@@ -4252,14 +4244,6 @@ print_usage_summary_colored_pair() {
   usage_tone_color "$value_tone"; printf '%s' "$value"; usage_tone_reset
 }
 
-print_usage_summary_colored_text() {
-  local show="$1"
-  local text="$2"
-
-  (( show )) || return 0
-  usage_tone_color muted; printf '%s' "$text"; usage_tone_reset
-}
-
 print_usage_summary_colored_line() {
   local sep="$1"
   local old_summary="$2"
@@ -4313,21 +4297,10 @@ print_usage_summary_colored_line() {
   print_usage_summary_colored_pair "$show_unavailable" "${sep}no data " "$unavailable" muted
   print_usage_summary_colored_pair "$show_offline" "${sep}offline " "$offline" warn
   print_usage_summary_colored_pair "$show_stale" "${sep}stale " "$stale" warn
-  print_usage_summary_colored_text "$show_cache" "${sep}cache $cache_age_label"
-  printf '\n'
-}
-
-usage_summary_active_text() {
-  local active_profile="$1"
-  local active_label="$2"
-  local active_short="$3"
-  local active_has_usage="$4"
-  local active_summary="active $active_profile"
-
-  if (( active_has_usage )); then
-    active_summary+=" ${active_label} $active_short"
+  if (( show_cache )); then
+    usage_tone_color muted; printf '%s' "${sep}cache $cache_age_label"; usage_tone_reset
   fi
-  printf '%s' "$active_summary"
+  printf '\n'
 }
 
 usage_summary_visibility_flags() {
@@ -4468,7 +4441,8 @@ print_usage_summary_line() {
     <<<"$(usage_summary_scan_records "$default_profile" "$@")"
   [[ "$cache_age_label" != "__none__" ]] || cache_age_label=""
 
-  active_summary="$(usage_summary_active_text "$active_profile" "$active_label" "$active_short" "$active_has_usage")"
+  active_summary="active $active_profile"
+  (( active_has_usage )) && active_summary+=" ${active_label} $active_short"
   usage_summary_visibility_flags "$width" "$ready" "$caps" "$login" "$unavailable" "$offline" \
     show_ready show_caps show_login show_unavailable show_offline
 
@@ -4789,10 +4763,6 @@ usage_json_for_profile() {
   payload="$(usage_json_from_home "$temp_home")"
   rm -rf "$temp_home" 2>/dev/null || true
   printf '%s\n' "$payload"
-}
-
-usage_json_for_active_home() {
-  usage_json_from_home "$CODEX_HOME"
 }
 
 usage_kill_process_tree() {
@@ -5208,12 +5178,6 @@ selector_palette_metric_gap() {
   fi
 }
 
-selector_palette_metric_width() {
-  local total_w="$1"
-
-  width_floor_value "$total_w" 5 108:23 88:19 68:13
-}
-
 selector_palette_table_widths() {
   local total_w="$1"
   local primary_w week_w short_w status_w metric_w status_gap metric_gap status_max=13
@@ -5231,7 +5195,7 @@ selector_palette_table_widths() {
     short_w=4
     status_w=0
   else
-    metric_w="$(selector_palette_metric_width "$total_w")"
+    metric_w="$(width_floor_value "$total_w" 5 108:23 88:19 68:13)"
     week_w="$metric_w"
     short_w=$(( total_w < 50 ? 3 : metric_w ))
     status_w=$((total_w - primary_w - 1 - week_w - metric_gap - short_w - status_gap))
@@ -5714,21 +5678,12 @@ selector_header_action() {
   fi
 }
 
-usage_plain_summary_line() {
-  local old_color="${USAGE_COLOR_ENABLED:-0}"
-  local line
-
-  USAGE_COLOR_ENABLED=0
-  line="$(print_usage_summary_line "$@")"
-  USAGE_COLOR_ENABLED="$old_color"
-  printf '%s' "$line"
-}
-
 usage_metadata_summary_line() {
   local render_w="$1"
   shift
   local summary_w=$((render_w * 2))
   local line sep record valid weekly_used short_used mark profile plan weekly short status short_label weekly_reset short_reset cache_age
+  local old_color="${USAGE_COLOR_ENABLED:-0}"
   local cache_age_max=-1 cache_age_label
 
   if (( render_w < 40 )); then
@@ -5736,7 +5691,9 @@ usage_metadata_summary_line() {
   else
     summary_w="$(clamp_int_between "$summary_w" 64 132)"
   fi
-  line="$(usage_plain_summary_line "$summary_w" "$@")"
+  USAGE_COLOR_ENABLED=0
+  line="$(print_usage_summary_line "$summary_w" "$@")"
+  USAGE_COLOR_ENABLED="$old_color"
   sep="$(usage_separator)"
 
   if [[ "$line" != cache\ * && "$line" != *"${sep}cache "* ]]; then
@@ -6781,19 +6738,6 @@ selector_fzf_menu() {
   fi
 }
 
-selector_numbered_controls() {
-  local row_count="$1"
-  local cols="$2"
-  local sep
-
-  sep="$(usage_separator)"
-  if (( cols < 36 )); then
-    printf '1-%s%sq stay' "$row_count" "$sep"
-  else
-    printf '1-%s select%sq stay' "$row_count" "$sep"
-  fi
-}
-
 selector_numbered_top_padding() {
   local row_count="$1"
   local term_lines="$2"
@@ -6909,7 +6853,7 @@ selector_numbered_menu() {
   local selector_palette_mode="$9"
   local choice i action_count=0 cols
   local term_lines fallback_top_padding=0 fallback_pad_i
-  local selector_controls
+  local selector_controls sep
   local selected=0
   local fallback_actions=()
   local fallback_profiles=()
@@ -6917,7 +6861,12 @@ selector_numbered_menu() {
   cols="$(terminal_width)"
   term_lines="${LINES:-}"
   [[ "$term_lines" =~ ^[0-9]+$ ]] || term_lines="$(tput lines 2>/dev/null || true)"
-  selector_controls="$(selector_numbered_controls "${#rows_ref[@]}" "$cols")"
+  sep="$(usage_separator)"
+  if (( cols < 36 )); then
+    selector_controls="1-${#rows_ref[@]}${sep}q stay"
+  else
+    selector_controls="1-${#rows_ref[@]} select${sep}q stay"
+  fi
   fallback_top_padding="$(selector_numbered_top_padding "${#rows_ref[@]}" "$term_lines")"
   for ((fallback_pad_i = 0; fallback_pad_i < fallback_top_padding; fallback_pad_i++)); do
     printf '\n'
@@ -6988,26 +6937,15 @@ selector_valid_plain_role() {
   fi
 }
 
-selector_invalid_palette_role() {
+selector_invalid_role() {
   local mark="$1"
+  local palette_mode="$2"
 
-  if [[ "$mark" == "*" ]]; then
-    printf 'stay'
-  elif [[ "$mark" == "=" ]]; then
-    printf 'same'
-  else
-    printf 'use'
-  fi
-}
-
-selector_invalid_plain_role() {
-  local mark="$1"
-
-  if [[ "$mark" == "=" ]]; then
-    printf 'same'
-  else
-    printf 'use'
-  fi
+  case "$mark:$palette_mode" in
+    "*:1") printf 'stay' ;;
+    "=:1"|"=:0") printf 'same' ;;
+    *) printf 'use' ;;
+  esac
 }
 
 selector_row_action_fields() {
@@ -7073,11 +7011,11 @@ selector_menu_row_for_record() {
     if (( selector_palette_mode )); then
       display_status="$(usage_display_status "$status" "normal")"
       palette_profile="$(selector_palette_profile_label "$profile" "$total_w" "$selector_profile_w")"
-      action_role="$(selector_invalid_palette_role "$mark")"
+      action_role="$(selector_invalid_role "$mark" 1)"
       display="$(print_selector_palette_table_row "$action_role $palette_profile" "-" "-" "$display_status" "$status" "$valid" "$total_w")"
     else
       display_status="$(usage_display_status "$status" "$mode")"
-      action_role="$(selector_invalid_plain_role "$mark")"
+      action_role="$(selector_invalid_role "$mark" 0)"
       display="$(print_selector_row "$action_role" "$(usage_display_profile_name "$profile" "" "$selector_profile_w")" "$display_status" "$action_w" "$selector_profile_w" "$total_w")"
     fi
     selector_row_action_fields "$mark" "$profile" active_row row_action row_profile_field
@@ -7100,16 +7038,6 @@ selector_current_menu_row() {
     display="$(print_selector_row "stay" "current" "same" "$action_w" "$selector_profile_w" "$total_w")"
   fi
   printf 'action\tskip\t-\t%s\n' "$display"
-}
-
-selector_prompt_available() {
-  [[ "${CODEX_AUTH_NO_PROMPT:-}" != "1" ]] || return 1
-  [[ -t 0 && -t 1 && -r /dev/tty ]]
-}
-
-selector_fzf_available() {
-  command -v fzf >/dev/null 2>&1 || return 1
-  [[ "${CODEX_AUTH_NO_FZF:-}" != "1" ]]
 }
 
 selector_palette_mode_for_fzf() {
@@ -7191,20 +7119,6 @@ selector_menu_rows() {
   return 0
 }
 
-selector_add_current_row_if_needed() {
-  local -n rows_ref="$1"
-  local has_active_row="$2"
-  local selector_palette_mode="$3"
-  local total_w="$4"
-  local selector_profile_w="$5"
-  local action_w="$6"
-
-  if (( ! has_active_row )) && [[ -f "$AUTH_FILE" ]]; then
-    rows_ref+=("$(selector_current_menu_row "$selector_palette_mode" "$total_w" "$selector_profile_w" "$action_w")")
-  fi
-  return 0
-}
-
 arrow_action_menu() {
   local default_profile="${1:-}"
   shift
@@ -7213,7 +7127,7 @@ arrow_action_menu() {
   MENU_ACTION="skip"
   MENU_PROFILE=""
 
-  selector_prompt_available || return 0
+  [[ "${CODEX_AUTH_NO_PROMPT:-}" != "1" && -t 0 && -t 1 && -r /dev/tty ]] || return 0
 
   local mode role_w profile_w cell_w status_w bar_width total_w
   local rows=()
@@ -7223,7 +7137,9 @@ arrow_action_menu() {
   local selector_palette_mode=0
   local render_cols
 
-  selector_fzf_available && use_fzf=1
+  if command -v fzf >/dev/null 2>&1 && [[ "${CODEX_AUTH_NO_FZF:-}" != "1" ]]; then
+    use_fzf=1
+  fi
   render_cols="$(terminal_width)"
   if (( render_cols < 32 )); then
     use_fzf=0
@@ -7239,7 +7155,9 @@ arrow_action_menu() {
   (( selector_profile_w < 10 )) && selector_profile_w=10
 
   selector_menu_rows rows has_active_row "$default_profile" "$selector_palette_mode" "$mode" "$role_w" "$profile_w" "$cell_w" "$status_w" "$bar_width" "$total_w" "$selector_profile_w" "$action_w" "${records[@]}"
-  selector_add_current_row_if_needed rows "$has_active_row" "$selector_palette_mode" "$total_w" "$selector_profile_w" "$action_w"
+  if (( ! has_active_row )) && [[ -f "$AUTH_FILE" ]]; then
+    rows+=("$(selector_current_menu_row "$selector_palette_mode" "$total_w" "$selector_profile_w" "$action_w")")
+  fi
 
   if (( use_fzf )); then
     selector_fzf_menu rows "$summary_text" "$total_w" "$role_w" "$profile_w" "$cell_w" "$status_w" "$mode" "$selector_palette_mode"
@@ -7427,7 +7345,7 @@ refresh_active_profile_state() {
   profile_file="$(profile_path "$profile_name")"
   require_auth_file "$profile_file"
   fingerprint="$(credential_fingerprint "$profile_file" || true)"
-  payload="$(usage_json_for_active_home)"
+  payload="$(usage_json_from_home "$CODEX_HOME")"
 
   if [[ -n "$payload" && "$payload" != "null" && -n "$fingerprint" ]] \
     && ! usage_payload_transient_error "$payload" \
@@ -7473,13 +7391,6 @@ usage_record_is_best_candidate() {
 
   [[ "$valid" == "0" && "$status" == "ok" ]] || return 1
   (( weekly_used < 100 && short_used < 100 ))
-}
-
-usage_skip_active_best_candidate() {
-  local include_active="$1"
-  local mark="$2"
-
-  [[ "$include_active" != "1" && ( "$mark" == "*" || "$mark" == "=" ) ]]
 }
 
 usage_best_candidate_scores() {
@@ -7531,7 +7442,7 @@ find_best_ok_profile() {
   while IFS=$'\t' read -r valid weekly_used short_used mark profile plan weekly short status short_label; do
     [[ -n "$profile" ]] || continue
     usage_record_is_best_candidate "$valid" "$weekly_used" "$short_used" "$status" || continue
-    usage_skip_active_best_candidate "$include_active" "$mark" && continue
+    [[ "$include_active" != "1" && ( "$mark" == "*" || "$mark" == "=" ) ]] && continue
     scores="$(usage_best_candidate_scores "$weekly_used" "$short_used" "$weekly" "$short")" || continue
     IFS=$'\t' read -r coverage_rank short_score week_score <<<"$scores"
     if usage_best_candidate_wins "$include_active" "$mark" "$coverage_rank" "$short_score" "$week_score" "$best_mark" "$best_coverage" "$best_short" "$best_week"; then
@@ -8056,8 +7967,8 @@ cmd_refresh() {
     print_status_note refresh "${#profile_files[@]} profiles" >&2
   fi
 
-  local active_fp=""
-  [[ -f "$AUTH_FILE" ]] && active_fp="$(credential_fingerprint "$AUTH_FILE" || true)"
+  local active_fp
+  active_fp="$(active_auth_fingerprint)"
 
   local records default_profile active_is_best
   records="$(collect_refresh_records "$active_fp" "${profile_files[@]}")"
@@ -8137,10 +8048,8 @@ cmd_auto() {
   local profile_files=()
   usage_profile_files_for_args_into profile_files 1 "$@" || return 0
 
-  local active_fp=""
-  if [[ -f "$AUTH_FILE" ]]; then
-    active_fp="$(credential_fingerprint "$AUTH_FILE" || true)"
-  fi
+  local active_fp
+  active_fp="$(active_auth_fingerprint)"
 
   local records default_profile active_is_best
   records="$(collect_usage_records "$active_fp" "${profile_files[@]}")"
