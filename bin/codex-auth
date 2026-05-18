@@ -263,26 +263,6 @@ compact_codex_status() {
   fi
 }
 
-print_help_footer() {
-  local width="$1"
-  local path path_w
-
-  if (( width < 32 )); then
-    path_w=$((width - 5))
-    (( path_w < 1 )) && path_w=1
-    path="$(compact_display_path "$PROFILE_DIR" "$path_w")"
-    fit_text_rtrim "prof $path" "$width"
-  elif (( width < 42 )); then
-    path_w=$((width - 9))
-    (( path_w < 1 )) && path_w=1
-    path="$(compact_display_path "$PROFILE_DIR" "$path_w")"
-    fit_text_rtrim "profiles $path" "$width"
-  else
-    path="$(display_path "$PROFILE_DIR")"
-    fit_text_rtrim "profiles live under $path" "$width"
-  fi
-}
-
 die() {
   print_error "$*"
   exit 1
@@ -513,22 +493,6 @@ auth_record_fingerprint() {
     printf '%s' "$secret"
   else
     fingerprint_secret ""
-  fi
-}
-
-auth_mode() {
-  local path="$1"
-  if command -v jq >/dev/null 2>&1; then
-    jq -r 'if .OPENAI_API_KEY then "api_key" elif .tokens then "chatgpt" else "unknown" end' "$path" 2>/dev/null || printf 'unknown\n'
-  else
-    printf 'unknown\n'
-  fi
-}
-
-account_hint() {
-  local path="$1"
-  if command -v jq >/dev/null 2>&1; then
-    jq -r '.tokens.account_id // empty' "$path" 2>/dev/null | sed 's/[[:space:]]//g'
   fi
 }
 
@@ -1072,36 +1036,6 @@ compact_command_display() {
   printf '%s' "$command"
 }
 
-print_detail_summary() {
-  local summary="$1"
-  local width="$2"
-
-  if (( width >= 40 )); then
-    print_usage_title_line "$summary" "$width"
-    return 0
-  fi
-
-  fit_text_rtrim "$summary" "$width"
-  printf '\n'
-  repeat_glyph "$(usage_rule_glyph)" "$width"
-  printf '\n'
-}
-
-print_summary_kv_line() {
-  local label="$1"
-  local value="$2"
-  local width="$3"
-  local label_w="${4:-8}"
-  local value_w
-
-  value_w=$((width - label_w - 2))
-  (( value_w < 1 )) && value_w=1
-  fit_text "$label" "$label_w"
-  printf '  '
-  fit_text_rtrim "$value" "$value_w"
-  printf '\n'
-}
-
 result_title_for_summary() {
   local summary="$1"
 
@@ -1310,13 +1244,52 @@ compact_missing_dir_message() {
   fi
 }
 
+COMPACT_ERROR_STATIC_ROWS=(
+  $'refusing to remove without --yes\t-\tremove needs --yes'
+  $'usage: --ttl seconds\t-\tttl needs seconds'
+  $'usage: codex-auth add <name> --file <file>\t28\tadd needs file\tadd needs --file <file>'
+  $'usage: codex-auth add <name> [--current | --file <file> | codex login args...]\t28\tadd needs name\tusage: add <name>'
+  $'add accepts one source: --current or --file\t40\tchoose one source\tchoose --current or --file'
+  $'add cannot mix --file/--current with login args\t40\tfile + login args\tcannot mix file and login args'
+  $'no active auth to save\t-\tno active auth'
+  $'jq is required for usage output\t24\tjq needed\tjq needed for usage'
+  $'jq is required for usage refresh\t24\tjq needed\tjq needed for refresh'
+  $'jq is required for recovery\t24\tjq needed\tjq needed for recover'
+  $'node needed for codex\t24\tnode needed\tnode needed for codex'
+  $'codex command not found\t32\tcodex missing\tcodex command not found'
+  $'auth change already running\t32\tauth busy\tauth change busy'
+  $'could not hide active auth for login\t32\thide auth failed\tcould not hide active auth'
+  $'login failed; restored previous auth\t32\tlogin failed; restored\tlogin failed; auth restored'
+  $'login did not produce valid auth; restored previous auth\t32\tbad login auth; restored\tlogin auth invalid; restored'
+  $'login did not produce valid auth\t32\tbad login auth\tlogin auth invalid'
+  $'profile names may only use letters, numbers, dot, underscore, and dash\t28\tbad profile name\tbad name: A-Z 0-9 . _ -'
+  $'usage: codex-auth list [-v]\t-\tusage: list [-v]'
+  $'usage: codex-auth remove <name> --yes\t28\tremove name --yes\tusage: remove <name> --yes'
+  $'usage: codex-auth import <name> <file>\t34\timport name file\tusage: import <name> <file>'
+  $'usage: codex-auth export <name> <file>\t34\texport name file\tusage: export <name> <file>'
+  $'usage: codex-auth save <name> [file]\t34\tsave name file\tusage: save <name> [file]'
+  $'usage: codex-auth use <name>\t34\tuse name\tusage: use <name>'
+  $'usage: codex-auth login <name> [codex login args...]\t28\tlogin needs name\tusage: login <name>'
+)
+
+COMPACT_ERROR_PREFIX_ROWS=(
+  $'auth file not found: \tbase\t28\tmissing %s\tmissing file: %s'
+  $'auth file is empty: \tbase\t28\tempty %s\tempty file: %s'
+  $'not a Codex auth.json with OPENAI_API_KEY or tokens: \tbase\t28\tbad auth %s\tbad auth file: %s'
+  $'export dir missing: \tdir'
+  $'export path is a directory: \tbase\t60\texport path is dir\texport path is dir: %s'
+  $'unknown command: \tcommand\t28\tunknown %s\tunknown %s; help\t. Use: codex-auth help'
+  $'unknown usage option: \traw\t28\tbad opt %s\tunknown option %s'
+  $'profile not found: \tprofile'
+)
+
 compact_error_static_message() {
   local cols="$1"
   local message="$2"
-  local source cutoff short wide
+  local row source cutoff short wide
 
-  while IFS=$'\t' read -r source cutoff short wide; do
-    [[ -n "$source" ]] || continue
+  for row in "${COMPACT_ERROR_STATIC_ROWS[@]}"; do
+    IFS=$'\t' read -r source cutoff short wide <<<"$row"
     if [[ "$message" == "$source" ]]; then
       if [[ "$cutoff" == "-" ]]; then
         printf '%s' "$short"
@@ -1325,33 +1298,7 @@ compact_error_static_message() {
       fi
       return 0
     fi
-  done <<'EOF'
-refusing to remove without --yes	-	remove needs --yes
-usage: --ttl seconds	-	ttl needs seconds
-usage: codex-auth add <name> --file <file>	28	add needs file	add needs --file <file>
-usage: codex-auth add <name> [--current | --file <file> | codex login args...]	28	add needs name	usage: add <name>
-add accepts one source: --current or --file	40	choose one source	choose --current or --file
-add cannot mix --file/--current with login args	40	file + login args	cannot mix file and login args
-no active auth to save	-	no active auth
-jq is required for usage output	24	jq needed	jq needed for usage
-jq is required for usage refresh	24	jq needed	jq needed for refresh
-jq is required for recovery	24	jq needed	jq needed for recover
-node needed for codex	24	node needed	node needed for codex
-codex command not found	32	codex missing	codex command not found
-auth change already running	32	auth busy	auth change busy
-could not hide active auth for login	32	hide auth failed	could not hide active auth
-login failed; restored previous auth	32	login failed; restored	login failed; auth restored
-login did not produce valid auth; restored previous auth	32	bad login auth; restored	login auth invalid; restored
-login did not produce valid auth	32	bad login auth	login auth invalid
-profile names may only use letters, numbers, dot, underscore, and dash	28	bad profile name	bad name: A-Z 0-9 . _ -
-usage: codex-auth list [-v]	-	usage: list [-v]
-usage: codex-auth remove <name> --yes	28	remove name --yes	usage: remove <name> --yes
-usage: codex-auth import <name> <file>	34	import name file	usage: import <name> <file>
-usage: codex-auth export <name> <file>	34	export name file	usage: export <name> <file>
-usage: codex-auth save <name> [file]	34	save name file	usage: save <name> [file]
-usage: codex-auth use <name>	34	use name	usage: use <name>
-usage: codex-auth login <name> [codex login args...]	28	login needs name	usage: login <name>
-EOF
+  done
   return 1
 }
 
@@ -1367,63 +1314,51 @@ compact_profile_not_found_message() {
   fi
 }
 
+compact_error_prefixed_message() {
+  local cols="$1"
+  local message="$2"
+  local row prefix kind cutoff short wide suffix tail value
+
+  for row in "${COMPACT_ERROR_PREFIX_ROWS[@]}"; do
+    IFS=$'\t' read -r prefix kind cutoff short wide suffix <<<"$row"
+    [[ "$message" == "$prefix"* ]] || continue
+    tail="${message#"$prefix"}"
+    case "$kind" in
+      base)
+        value="${tail##*/}"
+        ;;
+      dir)
+        compact_missing_dir_message "$cols" "${tail##*/}"
+        return 0
+        ;;
+      command)
+        value="${tail%"$suffix"}"
+        ;;
+      raw)
+        value="$tail"
+        ;;
+      profile)
+        compact_profile_not_found_message "$cols" "$tail"
+        return 0
+        ;;
+    esac
+    compact_value_choice "$cols" "$cutoff" "$short" "$wide" "$value"
+    return 0
+  done
+  return 1
+}
+
 compact_error_message() {
   local message="$1"
   local cols="$2"
-  local tail command option base
 
   if (( cols < 68 )); then
     if compact_error_static_message "$cols" "$message"; then
       return 0
     fi
-    case "$message" in
-      auth\ file\ not\ found:\ *)
-        tail="${message#auth file not found: }"
-        base="${tail##*/}"
-        compact_value_choice "$cols" 28 'missing %s' 'missing file: %s' "$base"
-        return 0
-        ;;
-      auth\ file\ is\ empty:\ *)
-        tail="${message#auth file is empty: }"
-        base="${tail##*/}"
-        compact_value_choice "$cols" 28 'empty %s' 'empty file: %s' "$base"
-        return 0
-        ;;
-      not\ a\ Codex\ auth.json\ with\ OPENAI_API_KEY\ or\ tokens:\ *)
-        tail="${message#not a Codex auth.json with OPENAI_API_KEY or tokens: }"
-        base="${tail##*/}"
-        compact_value_choice "$cols" 28 'bad auth %s' 'bad auth file: %s' "$base"
-        return 0
-        ;;
-      export\ dir\ missing:\ *)
-        tail="${message#export dir missing: }"
-        base="${tail##*/}"
-        compact_missing_dir_message "$cols" "$base"
-        return 0
-        ;;
-      export\ path\ is\ a\ directory:\ *)
-        tail="${message#export path is a directory: }"
-        base="${tail##*/}"
-        compact_value_choice "$cols" 60 'export path is dir' 'export path is dir: %s' "$base"
-        return 0
-        ;;
-      unknown\ command:\ *.\ Use:\ codex-auth\ help)
-        command="${message#unknown command: }"
-        command="${command%. Use: codex-auth help}"
-        compact_value_choice "$cols" 28 'unknown %s' 'unknown %s; help' "$command"
-        return 0
-        ;;
-      unknown\ usage\ option:\ *)
-        option="${message#unknown usage option: }"
-        compact_value_choice "$cols" 28 'bad opt %s' 'unknown option %s' "$option"
-        return 0
-        ;;
-      profile\ not\ found:\ *)
-        tail="${message#profile not found: }"
-        compact_profile_not_found_message "$cols" "$tail"
-        return 0
-        ;;
-    esac
+    if compact_error_prefixed_message "$cols" "$message"; then
+      return 0
+    fi
   fi
 
   if (( cols < 32 )) && [[ "$message" == usage:\ codex-auth\ * ]]; then
@@ -1476,7 +1411,7 @@ print_error() {
         line_prefix="$prefix"
       fi
       line_width=$((cols - ${#line_prefix}))
-      (( line_width < 1 )) && line_width=1
+      line_width=$(( line_width < 1 ? 1 : line_width ))
       rendered="$(fit_profile_text_rtrim "$word" "$line_width")"
       printf '%s%s\n' "$line_prefix" "$rendered" >&2
       wrote_line=1
@@ -2169,6 +2104,19 @@ cmd_use() {
   fi
 }
 
+login_fail_with_restore() {
+  local hidden_auth="$1"
+  local restored_message="$2"
+  local plain_message="$3"
+  local message="$plain_message"
+
+  if restore_hidden_auth "$hidden_auth"; then
+    message="$restored_message"
+  fi
+  print_error "$message"
+  exit 1
+}
+
 cmd_login() {
   local name="$1"
   shift || true
@@ -2193,23 +2141,9 @@ cmd_login() {
     chmod 600 "$hidden_auth"
   fi
 
-  if ! CODEX_AUTH_RUNNER=1 "$codex_cli" login "$@"; then
-    if restore_hidden_auth "$hidden_auth"; then
-      print_error "login failed; restored previous auth"
-    else
-      print_error "login failed"
-    fi
-    exit 1
-  fi
+  CODEX_AUTH_RUNNER=1 "$codex_cli" login "$@" || login_fail_with_restore "$hidden_auth" "login failed; restored previous auth" "login failed"
 
-  if ! auth_file_is_valid "$AUTH_FILE"; then
-    if restore_hidden_auth "$hidden_auth"; then
-      print_error "login did not produce valid auth; restored previous auth"
-    else
-      print_error "login did not produce valid auth"
-    fi
-    exit 1
-  fi
+  auth_file_is_valid "$AUTH_FILE" || login_fail_with_restore "$hidden_auth" "login did not produce valid auth; restored previous auth" "login did not produce valid auth"
 
   cmd_save "$name" "$AUTH_FILE" "login $name"
   rm -f "$hidden_auth"
@@ -2398,14 +2332,6 @@ usage_active_glyph() {
     printf '●'
   else
     printf '*'
-  fi
-}
-
-usage_best_glyph() {
-  if usage_unicode_enabled; then
-    printf '◆'
-  else
-    printf '+'
   fi
 }
 
@@ -2707,18 +2633,6 @@ print_toned_fit_rtrim() {
   usage_tone_reset
 }
 
-print_toned_fit_center_rtrim() {
-  local text="$1"
-  local width="$2"
-  local tone="${3:-}"
-  local rendered
-
-  rendered="$(fit_text_center "$text" "$width")"
-  usage_tone_color "$tone"
-  rtrim_spaces "$rendered"
-  usage_tone_reset
-}
-
 print_toned_fit_center() {
   local text="$1"
   local width="$2"
@@ -2812,6 +2726,7 @@ usage_bar() {
   local filled_glyph="█"
   local empty_glyph="░"
   local partial_glyphs=("" "▏" "▎" "▍" "▌" "▋" "▊" "▉")
+  local ascii_single_glyphs=("." "+" "#")
 
   [[ "${CODEX_AUTH_ASCII:-0}" == "1" ]] && empty_glyph="."
   percent="${percent%\%}"
@@ -2820,18 +2735,11 @@ usage_bar() {
     return 0
   fi
   value="$percent"
-  (( value < 0 )) && value=0
-  (( value > 100 )) && value=100
+  value=$(( value < 0 ? 0 : value > 100 ? 100 : value ))
 
   if [[ "${CODEX_AUTH_ASCII:-0}" == "1" ]]; then
     if (( width == 1 )); then
-      if (( value <= 0 )); then
-        printf '.'
-      elif (( value >= 100 )); then
-        printf '#'
-      else
-        printf '+'
-      fi
+      printf '%s' "${ascii_single_glyphs[$(( value <= 0 ? 0 : value >= 100 ? 2 : 1 ))]}"
       return 0
     fi
     full=$(((value * width + 50) / 100))
@@ -5255,21 +5163,6 @@ canonical_usage_active_marks() {
 MENU_ACTION=""
 MENU_PROFILE=""
 
-usage_switch_action_label() {
-  local profile="$1"
-  local weekly="${2:-}"
-  local short="${3:-}"
-  local short_label="${4:-5h}"
-  local detail
-
-  detail="$(usage_switch_detail_label "$weekly" "$short" "$short_label")"
-  if [[ -z "$detail" ]]; then
-    printf '%s' "$profile"
-  else
-    printf '%s (%s)' "$profile" "$detail"
-  fi
-}
-
 usage_switch_detail_label() {
   local weekly="${1:-}"
   local short="${2:-}"
@@ -5627,16 +5520,6 @@ selector_palette_primary_header() {
   selector_palette_center_header_cell "$profile_label" "$profile_w"
 }
 
-selector_palette_header_cell() {
-  local text="$1"
-  local width="$2"
-
-  (( width <= 0 )) && return 0
-  usage_tone_color muted
-  fit_text "$text" "$width"
-  usage_tone_reset
-}
-
 selector_palette_center_header_cell() {
   local text="$1"
   local width="$2"
@@ -5876,15 +5759,6 @@ selector_palette_bar() {
   else
     selector_palette_bar_empty "$width" "$bg_style" "$bar_border_glyph"
   fi
-}
-
-selector_palette_badge() {
-  local label="$1"
-  local tone="${2:-muted}"
-
-  usage_tone_color "$tone"
-  printf '%s' "$label"
-  usage_tone_reset
 }
 
 selector_action_role_narrow() {
@@ -8079,26 +7953,6 @@ parse_usage_simple_option() {
   esac
 }
 
-usage_profile_files_for_args() {
-  local name profile_file
-  local profile_files=()
-
-  if (( $# > 0 )); then
-    for name in "$@"; do
-      require_name "$name"
-      profile_file="$(profile_path "$name")"
-      [[ -f "$profile_file" ]] || die "profile not found: $name"
-      profile_files+=("$profile_file")
-    done
-  else
-    shopt -s nullglob
-    profile_files=("$PROFILE_DIR"/*.json)
-    shopt -u nullglob
-  fi
-
-  (( ${#profile_files[@]} == 0 )) || printf '%s\n' "${profile_files[@]}"
-}
-
 profile_files_for_args_into() {
   local -n profile_files_ref="$1"
   local quiet_missing="$2"
@@ -8164,24 +8018,6 @@ usage_collect_records_for_mode() {
   else
     collect_usage_records "$active_fp" "$@"
   fi
-}
-
-usage_best_selection() {
-  local records="$1"
-  local best_profile best_mark best_week best_short
-  local default_profile=""
-  local active_is_best=0
-
-  IFS=$'\t' read -r best_profile best_mark best_week best_short <<<"$(find_best_ok_profile "$records" 1)"
-  if [[ -n "$best_profile" ]]; then
-    if [[ "$best_mark" == "*" ]]; then
-      active_is_best=1
-    else
-      default_profile="$best_profile"
-    fi
-  fi
-
-  printf '%s\t%s\n' "$default_profile" "$active_is_best"
 }
 
 usage_best_selection_into() {
@@ -8689,12 +8525,23 @@ codex_run_stop_watch() {
   wait "$watch_pid" 2>/dev/null || true
 }
 
+codex_run_script_child_matches() {
+  local child="$1"
+  local run_file="$2"
+  local log_file="$3"
+  local cmd
+
+  [[ "$child" =~ ^[0-9]+$ && "$child" != "${BASHPID:-}" && -r "/proc/$child/cmdline" ]] || return 1
+  cmd="$(tr '\0' ' ' <"/proc/$child/cmdline" 2>/dev/null || true)"
+  [[ "$cmd" == *"script "* && "$cmd" == *"$run_file"* && "$cmd" == *"$log_file"* ]]
+}
+
 codex_run_kill_script_for_log() {
   local parent_pid="$1"
   local run_file="$2"
   local log_file="$3"
   local signal="${4:-TERM}"
-  local child cmd grandchild killed_child
+  local child grandchild killed_child
 
   [[ "$parent_pid" =~ ^[0-9]+$ ]] || return 0
   if ! command -v pgrep >/dev/null 2>&1; then
@@ -8702,11 +8549,7 @@ codex_run_kill_script_for_log() {
   fi
 
   while IFS= read -r child; do
-    [[ "$child" =~ ^[0-9]+$ ]] || continue
-    [[ "$child" == "${BASHPID:-}" ]] && continue
-    [[ -r "/proc/$child/cmdline" ]] || continue
-    cmd="$(tr '\0' ' ' <"/proc/$child/cmdline" 2>/dev/null || true)"
-    [[ "$cmd" == *"script "* && "$cmd" == *"$run_file"* && "$cmd" == *"$log_file"* ]] || continue
+    codex_run_script_child_matches "$child" "$run_file" "$log_file" || continue
     killed_child=0
     while IFS= read -r grandchild; do
       [[ "$grandchild" =~ ^[0-9]+$ ]] || continue
@@ -8719,6 +8562,32 @@ codex_run_kill_script_for_log() {
   done < <(pgrep -P "$parent_pid" 2>/dev/null)
 }
 
+codex_run_limit_monitor_alive() {
+  local target_pid="$1"
+  local parent_pid="$2"
+  local watched_pid="$target_pid"
+
+  [[ "$watched_pid" =~ ^[0-9]+$ ]] || watched_pid="$parent_pid"
+  [[ "$watched_pid" =~ ^[0-9]+$ ]] || return 1
+  kill -0 "$watched_pid" 2>/dev/null
+}
+
+codex_run_kill_limited_target() {
+  local target_pid="$1"
+  local parent_pid="$2"
+  local run_file="$3"
+  local log_file="$4"
+  local signal="$5"
+  local require_alive="${6:-0}"
+
+  if [[ "$target_pid" =~ ^[0-9]+$ ]]; then
+    (( require_alive == 0 )) || kill -0 "$target_pid" 2>/dev/null || return 0
+    usage_kill_process_tree "$target_pid" "$signal"
+  else
+    codex_run_kill_script_for_log "$parent_pid" "$run_file" "$log_file" "$signal"
+  fi
+}
+
 codex_run_limit_monitor_loop() {
   local log_file="$1"
   local target_pid="$2"
@@ -8729,26 +8598,12 @@ codex_run_limit_monitor_loop() {
   [[ "$interval" =~ ^[1-9][0-9]*$ ]] || interval=2
 
   while true; do
-    if [[ "$target_pid" =~ ^[0-9]+$ ]]; then
-      kill -0 "$target_pid" 2>/dev/null || return 0
-    elif [[ "$parent_pid" =~ ^[0-9]+$ ]]; then
-      kill -0 "$parent_pid" 2>/dev/null || return 0
-    else
-      return 0
-    fi
+    codex_run_limit_monitor_alive "$target_pid" "$parent_pid" || return 0
 
     if codex_run_limit_detected "$log_file"; then
-      if [[ "$target_pid" =~ ^[0-9]+$ ]]; then
-        usage_kill_process_tree "$target_pid" TERM
-      else
-        codex_run_kill_script_for_log "$parent_pid" "$run_file" "$log_file" TERM
-      fi
+      codex_run_kill_limited_target "$target_pid" "$parent_pid" "$run_file" "$log_file" TERM
       sleep 1 || true
-      if [[ "$target_pid" =~ ^[0-9]+$ ]] && kill -0 "$target_pid" 2>/dev/null; then
-        usage_kill_process_tree "$target_pid" KILL
-      elif [[ ! "$target_pid" =~ ^[0-9]+$ ]]; then
-        codex_run_kill_script_for_log "$parent_pid" "$run_file" "$log_file" KILL
-      fi
+      codex_run_kill_limited_target "$target_pid" "$parent_pid" "$run_file" "$log_file" KILL 1
       return 0
     fi
     sleep "$interval" || return 0
