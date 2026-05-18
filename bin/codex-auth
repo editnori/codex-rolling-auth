@@ -6333,48 +6333,48 @@ selector_fzf_menu() {
   fi
 }
 
-selector_numbered_menu() {
-  local -n rows_ref="$1"
-  local summary_text="$2"
-  local total_w="$3"
-  local role_w="$4"
-  local profile_w="$5"
-  local cell_w="$6"
-  local status_w="$7"
-  local mode="$8"
-  local selector_palette_mode="$9"
-  local choice i kind action profile_choice action_count=0 cols line_w prefix
-  local term_lines fallback_height fallback_top_padding=0 fallback_pad_i
-  local selector_controls
-  local selected=0
-  local fallback_actions=()
-  local fallback_profiles=()
+selector_numbered_controls() {
+  local row_count="$1"
+  local cols="$2"
+  local sep
 
-  cols="$(terminal_width)"
-  term_lines="${LINES:-}"
-  [[ "$term_lines" =~ ^[0-9]+$ ]] || term_lines="$(tput lines 2>/dev/null || true)"
   if usage_unicode_enabled; then
-    if (( cols < 36 )); then
-      selector_controls="1-${#rows_ref[@]} · q stay"
-    else
-      selector_controls="1-${#rows_ref[@]} select · q stay"
-    fi
+    sep=' · '
   else
-    if (( cols < 36 )); then
-      selector_controls="1-${#rows_ref[@]} | q stay"
-    else
-      selector_controls="1-${#rows_ref[@]} select | q stay"
-    fi
+    sep=' | '
   fi
+  if (( cols < 36 )); then
+    printf '1-%s%sq stay' "$row_count" "$sep"
+  else
+    printf '1-%s select%sq stay' "$row_count" "$sep"
+  fi
+}
+
+selector_numbered_top_padding() {
+  local row_count="$1"
+  local term_lines="$2"
+  local fallback_height
+
   if [[ "${CODEX_AUTH_SELECTOR_CENTER:-0}" == "1" && "$term_lines" =~ ^[0-9]+$ ]]; then
-    fallback_height=$((3 + ${#rows_ref[@]} + 1))
+    fallback_height=$((3 + row_count + 1))
     if (( term_lines > fallback_height + 1 )); then
-      fallback_top_padding=$(((term_lines - fallback_height) / 2))
+      printf '%s' $(((term_lines - fallback_height) / 2))
+      return 0
     fi
   fi
-  for ((fallback_pad_i = 0; fallback_pad_i < fallback_top_padding; fallback_pad_i++)); do
-    printf '\n'
-  done
+  printf '0'
+}
+
+selector_numbered_header() {
+  local selector_palette_mode="$1"
+  local selector_controls="$2"
+  local summary_text="$3"
+  local total_w="$4"
+  local role_w="$5"
+  local profile_w="$6"
+  local cell_w="$7"
+  local status_w="$8"
+  local mode="$9"
 
   if (( selector_palette_mode )); then
     printf '%*s' 4 ''
@@ -6390,32 +6390,98 @@ selector_numbered_menu() {
     selector_header_text "$summary_text" "$selector_controls" "$role_w" "$profile_w" "$cell_w" "$status_w" "$total_w" "$mode" "auth profiles"
     printf '\n'
   fi
-  for i in "${!rows_ref[@]}"; do
-    IFS=$'\t' read -r kind action profile_choice display <<<"${rows_ref[$i]}"
-    [[ "$profile_choice" == "-" ]] && profile_choice=""
-    if [[ "$kind" == "action" ]]; then
-      fallback_actions+=("$action")
-      fallback_profiles+=("$profile_choice")
-      action_count=$((action_count + 1))
-      prefix="$(printf '%2d. ' "$action_count")"
-      line_w=$((cols - ${#prefix}))
-      (( line_w < 1 )) && line_w=1
+}
+
+selector_numbered_print_display() {
+  local display="$1"
+  local line_w="$2"
+
+  if [[ "$display" == *$'\033'* ]]; then
+    if (( $(ansi_visible_length "$display") <= line_w )); then
+      printf '%s' "$display"
     else
-      prefix=''
-      line_w="$cols"
+      fit_text_rtrim "$(strip_ansi "$display")" "$line_w"
     fi
-    (( line_w < 1 )) && line_w=1
-    printf '%s' "$prefix"
-    if [[ "$display" == *$'\033'* ]]; then
-      if (( $(ansi_visible_length "$display") <= line_w )); then
-        printf '%s' "$display"
-      else
-        fit_text_rtrim "$(strip_ansi "$display")" "$line_w"
-      fi
-    else
-      fit_text_rtrim "$display" "$line_w"
-    fi
+  else
+    fit_text_rtrim "$display" "$line_w"
+  fi
+}
+
+selector_numbered_print_row() {
+  local row="$1"
+  local cols="$2"
+  local -n action_count_ref="$3"
+  local -n fallback_actions_ref="$4"
+  local -n fallback_profiles_ref="$5"
+  local kind action profile_choice display line_w prefix
+
+  IFS=$'\t' read -r kind action profile_choice display <<<"$row"
+  [[ "$profile_choice" == "-" ]] && profile_choice=""
+  if [[ "$kind" == "action" ]]; then
+    fallback_actions_ref+=("$action")
+    fallback_profiles_ref+=("$profile_choice")
+    action_count_ref=$((action_count_ref + 1))
+    prefix="$(printf '%2d. ' "$action_count_ref")"
+    line_w=$((cols - ${#prefix}))
+  else
+    prefix=''
+    line_w="$cols"
+  fi
+  (( line_w < 1 )) && line_w=1
+  printf '%s' "$prefix"
+  selector_numbered_print_display "$display" "$line_w"
+  printf '\n'
+}
+
+selector_numbered_read_choice() {
+  local choice="$1"
+  local fallback_count="$2"
+  local -n selected_ref="$3"
+
+  if [[ -z "$choice" ]]; then
+    selected_ref=0
+  elif [[ "$choice" == "q" || "$choice" == "Q" ]]; then
+    MENU_ACTION="skip"
+    MENU_PROFILE=""
+    return 1
+  elif [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= fallback_count )); then
+    selected_ref=$((choice - 1))
+  else
+    MENU_ACTION="skip"
+    MENU_PROFILE=""
+    return 1
+  fi
+}
+
+selector_numbered_menu() {
+  local -n rows_ref="$1"
+  local summary_text="$2"
+  local total_w="$3"
+  local role_w="$4"
+  local profile_w="$5"
+  local cell_w="$6"
+  local status_w="$7"
+  local mode="$8"
+  local selector_palette_mode="$9"
+  local choice i action_count=0 cols
+  local term_lines fallback_top_padding=0 fallback_pad_i
+  local selector_controls
+  local selected=0
+  local fallback_actions=()
+  local fallback_profiles=()
+
+  cols="$(terminal_width)"
+  term_lines="${LINES:-}"
+  [[ "$term_lines" =~ ^[0-9]+$ ]] || term_lines="$(tput lines 2>/dev/null || true)"
+  selector_controls="$(selector_numbered_controls "${#rows_ref[@]}" "$cols")"
+  fallback_top_padding="$(selector_numbered_top_padding "${#rows_ref[@]}" "$term_lines")"
+  for ((fallback_pad_i = 0; fallback_pad_i < fallback_top_padding; fallback_pad_i++)); do
     printf '\n'
+  done
+
+  selector_numbered_header "$selector_palette_mode" "$selector_controls" "$summary_text" "$total_w" "$role_w" "$profile_w" "$cell_w" "$status_w" "$mode"
+  for i in "${!rows_ref[@]}"; do
+    selector_numbered_print_row "${rows_ref[$i]}" "$cols" action_count fallback_actions fallback_profiles
   done
   if usage_unicode_enabled; then
     printf '› '
@@ -6423,19 +6489,7 @@ selector_numbered_menu() {
     printf '> '
   fi
   IFS= read -r choice < /dev/tty || return 0
-  if [[ -z "$choice" ]]; then
-    selected=0
-  elif [[ "$choice" == "q" || "$choice" == "Q" ]]; then
-    MENU_ACTION="skip"
-    MENU_PROFILE=""
-    return 0
-  elif [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#fallback_actions[@]} )); then
-    selected=$((choice - 1))
-  else
-    MENU_ACTION="skip"
-    MENU_PROFILE=""
-    return 0
-  fi
+  selector_numbered_read_choice "$choice" "${#fallback_actions[@]}" selected || return 0
 
   MENU_ACTION="${fallback_actions[$selected]}"
   MENU_PROFILE="${fallback_profiles[$selected]}"
