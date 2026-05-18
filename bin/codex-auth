@@ -1920,20 +1920,6 @@ cmd_list() {
   print_profile_list_rows "$active_name" "$active_fp" "$list_verbose" "$role_w" "$profile_w" "$mode_w" "$account_w" profiles profile_mode profile_hint profile_fp account_count account_primary
 }
 
-current_detail_widths() {
-  local cols="$1"
-  local label_w value_w total_w
-
-  IFS=$'\t' read -r label_w value_w <<<"$(detail_widths "$cols")"
-  if (( cols < 68 )); then
-    label_w=7
-    value_w=$((cols - label_w - 1))
-    (( value_w < 10 )) && value_w=10
-  fi
-  total_w=$((label_w + 1 + value_w))
-  printf '%s\t%s\t%s\n' "$label_w" "$value_w" "$total_w"
-}
-
 current_meta_files_into() {
   local -n files_ref="$1"
   local path
@@ -1981,29 +1967,17 @@ current_matched_profile() {
   done
 }
 
-print_current_optional_details() {
-  local hint="$1"
-  local summary="$2"
-  local mode_display="$3"
-  local account_display="$4"
-  local label_w="$5"
-  local value_w="$6"
-  local status_text
-
-  if [[ -n "$hint" && "$summary" != *"account "* ]]; then
-    print_detail_line "account" "$account_display" "$label_w" "$value_w"
-  fi
-  status_text="$(current_codex_status "$mode_display" "$value_w")"
-  if [[ -n "$status_text" ]]; then
-    print_detail_text_line "codex" "$status_text" "$label_w" "$value_w"
-  fi
-}
-
 cmd_current() {
   ensure_dirs
-  local cols label_w value_w total_w
+  local cols label_w value_w total_w status_text
   cols="$(terminal_width)"
-  IFS=$'\t' read -r label_w value_w total_w <<<"$(current_detail_widths "$cols")"
+  IFS=$'\t' read -r label_w value_w <<<"$(detail_widths "$cols")"
+  if (( cols < 68 )); then
+    label_w=7
+    value_w=$((cols - label_w - 1))
+    (( value_w < 10 )) && value_w=10
+  fi
+  total_w=$((label_w + 1 + value_w))
   USAGE_COLOR_ENABLED=0
   color_enabled && USAGE_COLOR_ENABLED=1
 
@@ -2032,7 +2006,13 @@ cmd_current() {
   summary="$(current_profile_summary "$matched" "$mode" "$hint" "$account_display" "$total_w" "$mode_display")"
 
   print_palette_summary_header "Auth" "Active profile" "$summary" "$total_w" flat 0
-  print_current_optional_details "$hint" "$summary" "$mode_display" "$account_display" "$label_w" "$value_w"
+  if [[ -n "$hint" && "$summary" != *"account "* ]]; then
+    print_detail_line "account" "$account_display" "$label_w" "$value_w"
+  fi
+  status_text="$(current_codex_status "$mode_display" "$value_w")"
+  if [[ -n "$status_text" ]]; then
+    print_detail_text_line "codex" "$status_text" "$label_w" "$value_w"
+  fi
 }
 
 cmd_save() {
