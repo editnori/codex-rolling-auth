@@ -2710,16 +2710,6 @@ usage_bar_rail() {
   usage_tone_reset
 }
 
-usage_role_profile_gap() {
-  local role_w="${1:-0}"
-
-  if (( role_w > 1 )); then
-    printf '2'
-  else
-    printf '1'
-  fi
-}
-
 usage_render_total_width() {
   local role_w="$1"
   local profile_w="$2"
@@ -2727,7 +2717,7 @@ usage_render_total_width() {
   local status_w="$4"
   local role_profile_gap status_gap
 
-  role_profile_gap="$(usage_role_profile_gap "$role_w")"
+  role_profile_gap=$((1 + (role_w > 1)))
   status_gap="$role_profile_gap"
   if (( status_w > 0 )); then
     printf '%s' "$((role_w + role_profile_gap + profile_w + 1 + cell_w + 1 + cell_w + status_gap + status_w))"
@@ -3156,8 +3146,8 @@ usage_render_widths() {
 
   wanted_profile_w="$(usage_profile_width_hint "$cols" "$wanted_profile_w" "$USAGE_VERBOSE")"
   IFS=$'\t' read -r mode role_w profile_min status_min reset_w label_w min_bar_w max_bar_w <<<"$(usage_width_mode_defaults "$cols" "$USAGE_VERBOSE")"
-  role_profile_gap="$(usage_role_profile_gap "$role_w")"
-  status_gap="$(usage_role_profile_gap "$role_w")"
+  role_profile_gap=$((1 + (role_w > 1)))
+  status_gap="$role_profile_gap"
   if [[ "$show_status" != "1" ]]; then
     status_min=0
     status_gap=0
@@ -3628,8 +3618,8 @@ print_usage_render_line() {
   local reset="${11:-}"
   local role_profile_gap status_gap
 
-  role_profile_gap="$(usage_role_profile_gap "$role_w")"
-  status_gap="$(usage_role_profile_gap "$role_w")"
+  role_profile_gap=$((1 + (role_w > 1)))
+  status_gap="$role_profile_gap"
   printf '%s' "$prefix"
   fit_text "$role" "$role_w"
   printf '%*s' "$role_profile_gap" ''
@@ -3741,29 +3731,29 @@ print_usage_render_data_line() {
   local role_w="${12}"
   local profile_w="${13}"
   local cell_w="${14}"
-	  local status_w="${15}"
-	  local bar_width="${16}"
-	  local mode="${17}"
-	  local unavailable_text role_profile_gap status_gap
+  local status_w="${15}"
+  local bar_width="${16}"
+  local mode="${17}"
+  local unavailable_text role_profile_gap status_gap
 
-	  print_toned_fit "$role" "$role_w" "$(usage_role_tone "$role")"
-	  role_profile_gap="$(usage_role_profile_gap "$role_w")"
-	  status_gap="$(usage_role_profile_gap "$role_w")"
-	  printf '%*s' "$role_profile_gap" ''
-	  fit_profile_text "$(usage_display_profile_name "$profile" "$role" "$profile_w")" "$profile_w"
-	  printf ' '
-	  if [[ "$valid" != "0" ]]; then
-	    unavailable_text="$(usage_unavailable_status_cell "$raw_status" "$display_status" "$status_w")"
+  print_toned_fit "$role" "$role_w" "$(usage_role_tone "$role")"
+  role_profile_gap=$((1 + (role_w > 1)))
+  status_gap="$role_profile_gap"
+  printf '%*s' "$role_profile_gap" ''
+  fit_profile_text "$(usage_display_profile_name "$profile" "$role" "$profile_w")" "$profile_w"
+  printf ' '
+  if [[ "$valid" != "0" ]]; then
+    unavailable_text="$(usage_unavailable_status_cell "$raw_status" "$display_status" "$status_w")"
     print_usage_placeholder_limit_cell "$mode" "$cell_w"
     printf ' '
     print_usage_placeholder_limit_cell "$mode" "$cell_w"
-	    if (( status_w > 0 )); then
-	      printf '%*s' "$status_gap" ''
-	      print_toned_fit_center "$unavailable_text" "$status_w" "$(usage_status_tone "$raw_status" "$valid")"
-	    fi
-	    printf '\n'
-	    return 0
-	  fi
+    if (( status_w > 0 )); then
+      printf '%*s' "$status_gap" ''
+      print_toned_fit_center "$unavailable_text" "$status_w" "$(usage_status_tone "$raw_status" "$valid")"
+    fi
+    printf '\n'
+    return 0
+  fi
 
   print_usage_limit_cell "$weekly" "$weekly_reset" "$mode" "$bar_width" "$cell_w" "$weekly_used"
   printf ' '
