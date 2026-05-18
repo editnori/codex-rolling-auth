@@ -310,6 +310,12 @@ die() {
   exit 1
 }
 
+require_arg_count_between() {
+  local count="$1" min="$2" max="$3"
+  shift 3
+  (( count >= min && count <= max )) || die "$*"
+}
+
 codex_bin() {
   if [[ -n "$CODEX_BIN" && -x "$CODEX_BIN" ]]; then
     printf '%s\n' "$CODEX_BIN"
@@ -1019,20 +1025,17 @@ path_render_prefers_basename() {
 }
 
 path_rendered_value() {
-  local target="$1"
-  local path="$2"
-  local target_w="$3"
-  local path_w="$4"
+  local target="$1" path="$2" target_w="$3" path_w="$4"
   local rendered base
 
   rendered="$(compact_display_path "$path" "$path_w")"
   if (( target_w <= 0 )) && path_render_prefers_basename "$target" "$target_w" "$path_w" "$rendered"; then
     base="$(path_basename_if_fits "$path" "$path_w" || true)"
-    [[ -n "$base" ]] && rendered="$base"
+    rendered="${base:-$rendered}"
   fi
   if (( ${#rendered} > path_w )); then
     base="$(path_basename_if_fits "$path" "$path_w" || true)"
-    [[ -n "$base" ]] && rendered="$base"
+    rendered="${base:-$rendered}"
   fi
   if (( target_w <= 0 )) && [[ "$target" == "usage" && "$path_w" -lt 15 ]]; then
     base="state.json"
@@ -1042,14 +1045,8 @@ path_rendered_value() {
 }
 
 print_path_line() {
-  local role="$1"
-  local target="$2"
-  local path="$3"
-  local role_w="$4"
-  local target_w="$5"
-  local path_w="$6"
-  local tone="${7:-muted}"
-  local rendered
+  local role="$1" target="$2" path="$3" role_w="$4" target_w="$5" path_w="$6"
+  local tone="${7:-muted}" rendered
 
   rendered="$(path_rendered_value "$target" "$path" "$target_w" "$path_w")"
   print_toned_fit "$(path_role_label "$role" "$role_w")" "$role_w" "$tone"
@@ -5810,8 +5807,7 @@ usage_metadata_summary_line() {
   if (( render_w < 40 )); then
     summary_w="$render_w"
   else
-    (( summary_w < 64 )) && summary_w=64
-    (( summary_w > 132 )) && summary_w=132
+    summary_w="$(clamp_int_between "$summary_w" 64 132)"
   fi
   line="$(usage_plain_summary_line "$summary_w" "$@")"
   sep="$(usage_separator)"
@@ -8990,17 +8986,17 @@ main() {
     usage|limits) cmd_usage "$@" ;;
     list|ls) cmd_list "$@" ;;
     current|status) cmd_current "$@" ;;
-    save) [[ $# -ge 1 && $# -le 2 ]] || die "usage: codex-auth save <name> [file]"; cmd_save "$@" ;;
-    import) [[ $# -eq 2 ]] || die "usage: codex-auth import <name> <file>"; cmd_import "$1" "$2" ;;
-    use|switch) [[ $# -eq 1 ]] || die "usage: codex-auth use <name>"; cmd_use "$1" ;;
-    login) [[ $# -ge 1 ]] || die "usage: codex-auth login <name> [codex login args...]"; cmd_login "$@" ;;
+    save) require_arg_count_between "$#" 1 2 "usage: codex-auth save <name> [file]"; cmd_save "$@" ;;
+    import) require_arg_count_between "$#" 2 2 "usage: codex-auth import <name> <file>"; cmd_import "$1" "$2" ;;
+    use|switch) require_arg_count_between "$#" 1 1 "usage: codex-auth use <name>"; cmd_use "$1" ;;
+    login) require_arg_count_between "$#" 1 999999 "usage: codex-auth login <name> [codex login args...]"; cmd_login "$@" ;;
     auto) cmd_auto "$@" ;;
     run|wrap) cmd_run "$@" ;;
     recover) cmd_recover "$@" ;;
     refresh) cmd_refresh "$@" ;;
     doctor) cmd_doctor "$@" ;;
-    export) [[ $# -eq 2 ]] || die "usage: codex-auth export <name> <file>"; cmd_export "$@" ;;
-    remove|rm) [[ $# -ge 1 && $# -le 2 ]] || die "usage: codex-auth remove <name> --yes"; cmd_remove "$@" ;;
+    export) require_arg_count_between "$#" 2 2 "usage: codex-auth export <name> <file>"; cmd_export "$@" ;;
+    remove|rm) require_arg_count_between "$#" 1 2 "usage: codex-auth remove <name> --yes"; cmd_remove "$@" ;;
     paths) cmd_paths ;;
     -h|--help|help|'') usage ;;
     *) die "unknown command: $command. Use: codex-auth help" ;;
