@@ -4927,24 +4927,6 @@ selector_palette_table_widths() {
   printf '%s\t%s\t%s\t%s\n' "$primary_w" "$week_w" "$short_w" "$status_w"
 }
 
-selector_palette_effective_width() {
-  local total_w="$1"
-  local primary_w week_w short_w status_w status_gap metric_gap width
-
-  IFS=$'\t' read -r primary_w week_w short_w status_w <<<"$(selector_palette_table_widths "$total_w")"
-  status_gap="$(selector_palette_status_gap "$total_w")"
-  metric_gap="$(selector_palette_metric_gap "$total_w")"
-  if (( week_w == 0 )); then
-    width=$((primary_w + 1 + short_w))
-  else
-    width=$((primary_w + 1 + week_w + metric_gap + short_w))
-    if (( status_w > 0 )); then
-      width=$((width + status_gap + status_w))
-    fi
-  fi
-  printf '%s' "$width"
-}
-
 selector_palette_fzf_colors() {
   printf '%s' 'dark,fg:#eeeeee,fg+:#f4f0e8,bg:#141414,bg+:#262626,hl:#fab283,hl+:#ffd0a0,border:#323232,label:#fab283,prompt:#fab283,pointer:#fab283,header:#9a9a9a,info:#808080,gutter:#141414'
 }
@@ -6114,11 +6096,21 @@ selector_fzf_apply_frame() {
   local -n fzf_margin_args_ref="$6"
 
   if (( fzf_opencode_theme )); then
-    local palette_effective_w right_margin terminal_w
+    local palette_effective_w right_margin terminal_w primary_w week_w short_w status_w status_gap metric_gap
     fzf_pointer_ref=' '
     fzf_prompt_ref='filter '
     terminal_w="$(terminal_width)"
-    palette_effective_w="$(selector_palette_effective_width "$total_w")"
+    IFS=$'\t' read -r primary_w week_w short_w status_w <<<"$(selector_palette_table_widths "$total_w")"
+    status_gap="$(selector_palette_status_gap "$total_w")"
+    metric_gap="$(selector_palette_metric_gap "$total_w")"
+    if (( week_w == 0 )); then
+      palette_effective_w=$((primary_w + 1 + short_w))
+    else
+      palette_effective_w=$((primary_w + 1 + week_w + metric_gap + short_w))
+      if (( status_w > 0 )); then
+        palette_effective_w=$((palette_effective_w + status_gap + status_w))
+      fi
+    fi
     right_margin=$((terminal_w - palette_effective_w - 4))
     if (( right_margin > 0 )); then
       fzf_margin_args_ref+=(--margin="0,$right_margin,0,0")
