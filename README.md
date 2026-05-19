@@ -20,6 +20,7 @@ That installs:
 
 - `codex-auth`, the profile manager and rolling runner
 - `codex`, an optional shim that runs `codex-auth auto --quiet --no-background` and then starts the real Codex binary
+- background patched-Codex selection: when a matching patched binary exists, the shim uses it with in-process rolling auth enabled; when Codex updates, the shim falls back to stock Codex and starts a background rebuild
 
 If you only want the manager and not the `codex` shim:
 
@@ -65,6 +66,18 @@ Check for old nested Codex launch trees and MCP sidecars:
 codex-auth doctor
 ```
 
+Check patched Codex status:
+
+```bash
+codex-auth patch-codex --status
+```
+
+Build the patched Codex binary in the foreground:
+
+```bash
+codex-auth patch-codex
+```
+
 Terminate only the direct MCP sidecars under legacy `--yolo` Codex processes:
 
 ```bash
@@ -80,6 +93,9 @@ codex-auth doctor --kill-sidecars --yes
 - `codex-auth run` is explicit opt-in. It can monitor a bounded session log to retry after usage-limit errors, but the normal `codex` shim does not use it.
 - Set `CODEX_AUTH_ROLL_WATCH=1` to enable in-session periodic profile checks for `codex-auth run`; it is off by default to avoid background sidecar churn.
 - Set `CODEX_AUTH_ROLL_LIVE_MONITOR=0` to disable live log monitoring for `codex-auth run`.
+- Set `CODEX_AUTH_PATCH_AUTO=0` to stop the `codex` shim from using or building patched Codex.
+- Patched Codex builds live under `$CODEX_HOME/patched-codex`. The shim only uses a patched binary when its marker matches the current stock Codex version/hash.
+- Patched builds are stamped as the installed Codex version plus `+local`, so they do not appear older to Codex's update check.
 - Set `CODEX_AUTH_REFRESH_JOBS` to tune concurrent usage refreshes. The default is 2 and `CODEX_AUTH_REFRESH_JOBS_MAX` caps it at 4 unless you explicitly change the cap.
 - `codex-auth doctor --kill-sidecars --yes` does not kill the Codex TUI processes; it only terminates direct MCP sidecars under legacy `--yolo` Codex roots.
 - Set `CODEX_AUTH_USAGE_HEADER=1` or `CODEX_AUTH_USAGE_STATUS=1` if you want the full table header or status column back.

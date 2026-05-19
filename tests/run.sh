@@ -2,6 +2,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+unset CODEX_AUTH_RUNNER CODEX_AUTH_CODEX_BIN
 
 fail() {
   printf 'not ok - %s\n' "$*" >&2
@@ -27,10 +28,27 @@ write_fake_codex() {
   mkdir -p "$(dirname "$path")"
   printf '%s\n' \
     '#!/usr/bin/env bash' \
+    'if [[ "${1:-}" == "--version" ]]; then' \
+    '  printf "codex-cli 9.8.7\n"' \
+    '  exit 0' \
+    'fi' \
     'printf "real:%s\n" "$*" >> "$CODEX_TEST_LOG"' \
     'if [[ "${1:-}" == "app-server" ]]; then' \
     '  printf "app-server\n" >> "$CODEX_TEST_LOG"' \
     'fi' > "$path"
+  chmod 0755 "$path"
+}
+
+write_fake_patched_codex() {
+  local path="$1"
+  mkdir -p "$(dirname "$path")"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'if [[ "${1:-}" == "--version" ]]; then' \
+    '  printf "codex-cli 9.8.7+local\n"' \
+    '  exit 0' \
+    'fi' \
+    'printf "patched:%s rolling=%s\n" "$*" "${CODEX_AUTH_ROLLING:-}" >> "$CODEX_TEST_LOG"' > "$path"
   chmod 0755 "$path"
 }
 
@@ -75,7 +93,7 @@ test_shim_auto_execs_real_codex() {
 
   assert_contains 'auth:auto --quiet --no-background' "$log"
   assert_not_contains 'auth:run' "$log"
-  assert_contains 'real:resume abc' "$log"
+  assert_contains 'real:--yolo resume abc' "$log"
 }
 
 test_shim_bypasses_auto_for_app_server() {
@@ -87,7 +105,7 @@ test_shim_bypasses_auto_for_app_server() {
 
   PATH="$tmp/bin:$PATH" CODEX_TEST_LOG="$log" CODEX_AUTH_CODEX_BIN="$tmp/real-codex" "$REPO_ROOT/bin/codex" app-server --listen stdio://
 
-  assert_not_contains 'auth:' "$log"
+  assert_not_contains 'auth:auto' "$log"
   assert_contains 'real:app-server --listen stdio://' "$log"
   assert_contains 'app-server' "$log"
 }
@@ -101,8 +119,28 @@ test_shim_honors_auto_bypass() {
 
   PATH="$tmp/bin:$PATH" CODEX_TEST_LOG="$log" CODEX_AUTH_AUTO=0 CODEX_AUTH_CODEX_BIN="$tmp/real-codex" "$REPO_ROOT/bin/codex" resume abc
 
-  assert_not_contains 'auth:' "$log"
-  assert_contains 'real:resume abc' "$log"
+  assert_not_contains 'auth:auto' "$log"
+  assert_contains 'real:--yolo resume abc' "$log"
+}
+
+test_shim_uses_matching_patched_codex() {
+  local tmp home log key marker patched_bin
+  tmp="$(mktemp -d)"
+  home="$tmp/home"
+  log="$tmp/calls.log"
+  marker="$home/patched-codex/current.env"
+  patched_bin="$home/patched-codex/bin/codex"
+  write_fake_codex "$tmp/real-codex"
+  write_fake_patched_codex "$patched_bin"
+  mkdir -p "$(dirname "$marker")"
+
+  key="$(CODEX_HOME="$home" CODEX_AUTH_STOCK_CODEX_BIN="$tmp/real-codex" "$REPO_ROOT/bin/codex-auth" patch-codex --print-key)"
+  printf 'patch_version=1\nstock_key=%s\n' "$key" > "$marker"
+
+  PATH="$REPO_ROOT/bin:/usr/bin:/bin" CODEX_TEST_LOG="$log" CODEX_HOME="$home" CODEX_AUTH_CODEX_BIN="$tmp/real-codex" "$REPO_ROOT/bin/codex" resume abc
+
+  assert_contains 'patched:--yolo resume abc rolling=1' "$log"
+  assert_not_contains 'real:--yolo resume abc' "$log"
 }
 
 test_install_promotes_existing_codex_to_real() {
@@ -116,7 +154,7 @@ test_install_promotes_existing_codex_to_real() {
   [[ -x "$prefix/bin/codex-real" ]] || fail "codex-real was not installed"
 
   CODEX_TEST_LOG="$log" CODEX_AUTH_AUTO=0 "$prefix/bin/codex" ping
-  assert_contains 'real:ping' "$log"
+  assert_contains 'real:--yolo ping' "$log"
 }
 
 test_install_recovers_real_from_old_backup() {
@@ -136,7 +174,7 @@ test_install_recovers_real_from_old_backup() {
   [[ -x "$prefix/bin/codex-real" ]] || fail "codex-real was not recovered from backup"
 
   CODEX_TEST_LOG="$log" CODEX_AUTH_AUTO=0 "$prefix/bin/codex" ping
-  assert_contains 'real:ping' "$log"
+  assert_contains 'real:--yolo ping' "$log"
   assert_not_contains 'codex-auth run' "$prefix/bin/codex-real"
 }
 
@@ -158,7 +196,7 @@ test_install_recovers_real_from_path() {
   [[ -x "$prefix/bin/codex-real" ]] || fail "codex-real was not recovered from PATH"
 
   CODEX_TEST_LOG="$log" CODEX_AUTH_AUTO=0 "$prefix/bin/codex" ping
-  assert_contains 'real:ping' "$log"
+  assert_contains 'real:--yolo ping' "$log"
 }
 
 test_install_recovers_real_from_home_bun() {
@@ -179,7 +217,7 @@ test_install_recovers_real_from_home_bun() {
   [[ -x "$prefix/bin/codex-real" ]] || fail "codex-real was not recovered from HOME bun"
 
   CODEX_TEST_LOG="$log" CODEX_AUTH_AUTO=0 "$prefix/bin/codex" ping
-  assert_contains 'real:ping' "$log"
+  assert_contains 'real:--yolo ping' "$log"
 }
 
 test_run_uses_cached_auto_without_app_server_refresh() {
@@ -273,6 +311,7 @@ main() {
     test_shim_auto_execs_real_codex \
     test_shim_bypasses_auto_for_app_server \
     test_shim_honors_auto_bypass \
+    test_shim_uses_matching_patched_codex \
     test_install_promotes_existing_codex_to_real \
     test_install_recovers_real_from_old_backup \
     test_install_recovers_real_from_path \

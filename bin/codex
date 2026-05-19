@@ -56,14 +56,53 @@ find_real_codex() {
   return 1
 }
 
-should_auto_select() {
+is_passthrough_command() {
   case "${1:-}" in
     login|logout|update|completion|mcp|plugin|features|app-server|help|--help|-h|--version|-V)
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
+should_wrap_session() {
+  ! is_passthrough_command "$@"
+}
+
+should_auto_select() {
+  should_wrap_session "$@" || return 1
+
+  [[ "${CODEX_AUTH_AUTO:-1}" != "0" && "${CODEX_AUTH_RUNNER:-0}" != "1" ]]
+}
+
+should_add_yolo() {
+  should_wrap_session "$@" || return 1
+  [[ "${CODEX_AUTH_YOLO:-1}" != "0" ]] || return 1
+
+  case "${1:-}" in
+    --yolo|--dangerously-bypass-approvals-and-sandbox|--dangerously-auto-approve-everything)
       return 1
       ;;
   esac
 
-  [[ "${CODEX_AUTH_AUTO:-1}" != "0" && "${CODEX_AUTH_RUNNER:-0}" != "1" ]]
+  return 0
+}
+
+patched_codex_for_real() {
+  local real_codex="$1"
+
+  [[ "${CODEX_AUTH_PATCH_AUTO:-1}" != "0" ]] || return 1
+  command -v codex-auth >/dev/null 2>&1 || return 1
+  CODEX_AUTH_STOCK_CODEX_BIN="$real_codex" codex-auth patch-codex --print-bin --quiet 2>/dev/null
+}
+
+start_patch_codex_background() {
+  local real_codex="$1"
+
+  [[ "${CODEX_AUTH_PATCH_AUTO:-1}" != "0" ]] || return 0
+  command -v codex-auth >/dev/null 2>&1 || return 0
+  CODEX_AUTH_STOCK_CODEX_BIN="$real_codex" codex-auth patch-codex --background --quiet >/dev/null 2>&1 || true
 }
 
 real_codex="$(find_real_codex)" || {
@@ -71,8 +110,24 @@ real_codex="$(find_real_codex)" || {
   exit 127
 }
 
+codex_args=("$@")
+exec_codex="$real_codex"
+
 if should_auto_select "$@" && command -v codex-auth >/dev/null 2>&1; then
   CODEX_AUTH_CODEX_BIN="$real_codex" CODEX_AUTH_NO_BACKGROUND=1 codex-auth auto --quiet --no-background || true
 fi
 
-exec env CODEX_AUTH_RUNNER=1 CODEX_AUTH_CODEX_BIN="$real_codex" "$real_codex" "$@"
+if should_add_yolo "$@"; then
+  codex_args=(--yolo "$@")
+fi
+
+if should_wrap_session "$@"; then
+  if patched_codex="$(patched_codex_for_real "$real_codex")" && [[ -n "$patched_codex" ]]; then
+    exec_codex="$patched_codex"
+    export CODEX_AUTH_ROLLING="${CODEX_AUTH_ROLLING:-1}"
+  else
+    start_patch_codex_background "$real_codex"
+  fi
+fi
+
+exec env CODEX_AUTH_RUNNER=1 CODEX_AUTH_CODEX_BIN="$real_codex" "$exec_codex" "${codex_args[@]}"
