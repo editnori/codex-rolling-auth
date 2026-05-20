@@ -7964,25 +7964,6 @@ codex_run_make_resume_args() {
   fi
 }
 
-codex_run_write_launcher() {
-  local run_file="$1"
-  local codex_cli="$2"
-  shift 2
-  local arg
-
-  {
-    printf '#!/usr/bin/env bash\n'
-    printf 'set -euo pipefail\n'
-    printf 'export CODEX_AUTH_RUNNER=1\n'
-    printf 'exec %q' "$codex_cli"
-    for arg in "$@"; do
-      printf ' %q' "$arg"
-    done
-    printf '\n'
-  } > "$run_file"
-  chmod 700 "$run_file"
-}
-
 codex_run_watch_loop() {
   local auto_ttl="$1"
   local interval="${CODEX_AUTH_ROLL_INTERVAL:-60}"
@@ -8104,6 +8085,7 @@ codex_run_execute_attempt() {
   local -n watch_pid_ref="$7"
   local -n monitor_pid_ref="$8"
   local -n target_pid_ref="$9"
+  local launcher_arg
 
   log_file_ref=""
   run_file_ref=""
@@ -8115,7 +8097,17 @@ codex_run_execute_attempt() {
   status_ref=0
   if [[ "$log_enabled" != "0" && -n "$log_file_ref" && -t 0 && -t 1 && -r /dev/tty ]] && command -v script >/dev/null 2>&1; then
     run_file_ref="$(mktemp "$CODEX_HOME/.tmp/codex-run.XXXXXX.sh")"
-    codex_run_write_launcher "$run_file_ref" "$codex_cli" "${run_args_ref[@]}"
+    {
+      printf '#!/usr/bin/env bash\n'
+      printf 'set -euo pipefail\n'
+      printf 'export CODEX_AUTH_RUNNER=1\n'
+      printf 'exec %q' "$codex_cli"
+      for launcher_arg in "${run_args_ref[@]}"; do
+        printf ' %q' "$launcher_arg"
+      done
+      printf '\n'
+    } > "$run_file_ref"
+    chmod 700 "$run_file_ref"
     set +e
     codex_run_start_limit_monitor "$log_file_ref" "" "$$" "$run_file_ref"
     monitor_pid_ref="$CODEX_RUN_LIMIT_MONITOR_PID"
