@@ -374,15 +374,14 @@ restore_hidden_auth() {
 }
 
 credential_fingerprint() {
-  local path="$1"
+  local path="$1" hash
   [[ -f "$path" ]] || return 1
   if command -v jq >/dev/null 2>&1; then
-    jq -r 'if .OPENAI_API_KEY then "api:" + .OPENAI_API_KEY elif .tokens.refresh_token then "chatgpt:" + .tokens.refresh_token elif .tokens.access_token then "chatgpt-access:" + .tokens.access_token else empty end' "$path" \
-      | sha256sum \
-      | awk '{print $1}'
+    hash="$(jq -r 'if .OPENAI_API_KEY then "api:" + .OPENAI_API_KEY elif .tokens.refresh_token then "chatgpt:" + .tokens.refresh_token elif .tokens.access_token then "chatgpt-access:" + .tokens.access_token else empty end' "$path" | sha256sum)"
   else
-    sha256sum "$path" | awk '{print $1}'
+    hash="$(sha256sum "$path")"
   fi
+  printf '%s\n' "${hash%% *}"
 }
 
 auth_metadata_records() {
@@ -412,10 +411,11 @@ auth_metadata_records() {
       | join("\u001f")
     ' "$@" 2>/dev/null
   else
-    local path
+    local path hash
     for path in "$@"; do
       [[ -f "$path" ]] || continue
-      printf '%s\037unknown\037\037%s\n' "$path" "$(sha256sum "$path" | awk '{print $1}')"
+      hash="$(sha256sum "$path")"
+      printf '%s\037unknown\037\037%s\n' "$path" "${hash%% *}"
     done
   fi
 }
