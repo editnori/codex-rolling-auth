@@ -7197,17 +7197,9 @@ patch_codex_root() {
   printf '%s\n' "${CODEX_AUTH_PATCH_CODEX_DIR:-$CODEX_HOME/patched-codex}"
 }
 
-patch_codex_bin_path() {
-  printf '%s/bin/codex\n' "$(patch_codex_root)"
-}
-
-patch_codex_marker_path() {
-  printf '%s/current.env\n' "$(patch_codex_root)"
-}
-
 patch_codex_marker_value() {
   local key="$1"
-  local marker="${2:-$(patch_codex_marker_path)}"
+  local marker="${2:-$(patch_codex_root)/current.env}"
 
   [[ -f "$marker" ]] || return 1
   awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$marker"
@@ -7217,7 +7209,7 @@ patch_codex_ready_for_key() {
   local stock_key="$1"
   local patched_bin marker_key marker_patch_version
 
-  patched_bin="$(patch_codex_bin_path)"
+  patched_bin="$(patch_codex_root)/bin/codex"
   [[ -x "$patched_bin" ]] || return 1
   marker_key="$(patch_codex_marker_value stock_key || true)"
   marker_patch_version="$(patch_codex_marker_value patch_version || true)"
@@ -7406,7 +7398,7 @@ patch_codex_status() {
   printf 'stock bin: %s\n' "$stock_bin"
   printf 'stock version: %s\n' "$stock_version"
   printf 'stock hash: %s\n' "$stock_hash"
-  printf 'patched bin: %s\n' "$(patch_codex_bin_path)"
+  printf 'patched bin: %s/bin/codex\n' "$(patch_codex_root)"
   [[ -n "$marker_version" ]] && printf 'patched stock version: %s\n' "$marker_version"
   [[ -n "$package_version" ]] && printf 'patched package version: %s\n' "$package_version"
   [[ -n "$source_commit" ]] && printf 'source commit: %s\n' "$source_commit"
@@ -7501,7 +7493,7 @@ cmd_patch_codex() {
   fi
   if (( print_bin )); then
     patch_codex_ready_for_key "$stock_key" || return 1
-    patch_codex_bin_path
+    printf '%s/bin/codex\n' "$(patch_codex_root)"
     return 0
   fi
   if (( status )); then
@@ -7618,14 +7610,14 @@ cmd_patch_codex() {
     built_bin="$target_dir/debug/codex"
   fi
   [[ -x "$built_bin" ]] || die "build did not produce $built_bin"
-  target_bin="$(patch_codex_bin_path)"
+  target_bin="$(patch_codex_root)/bin/codex"
   mkdir -p "$(dirname "$target_bin")"
   tmp_bin="$(mktemp "$(patch_codex_root)/.tmp/codex.XXXXXX")"
   install -m 0755 "$built_bin" "$tmp_bin"
   "$tmp_bin" --version >/dev/null 2>&1 || die "patched codex smoke failed"
   mv "$tmp_bin" "$target_bin"
 
-  marker="$(patch_codex_marker_path)"
+  marker="$(patch_codex_root)/current.env"
   tmp="$(mktemp "$(patch_codex_root)/.tmp/current.env.XXXXXX")"
   {
     printf 'patch_version=%s\n' "$PATCH_CODEX_PATCH_VERSION"
