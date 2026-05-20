@@ -1988,12 +1988,11 @@ usage_mode_is_pico_or_nano() {
 
 print_usage_limit_cell() {
   local percent="$1"
-  local reset_time="$2"
   local mode="$3"
   local bar_width="$4"
   local cell_w="$5"
   local used_percent="${6:-}"
-  local reset_label="$reset_time"
+  local reset_label="$2"
   local percent_label="$percent"
   local reset_prefix=""
   local label_w=4
@@ -2617,11 +2616,10 @@ EOF
 
 print_usage_summary_line() {
   local width="$1"
-  local default_profile="${2:-}"
+  local best_profile="${2:-}"
   shift 2
   local record valid weekly_used short_used mark profile plan weekly short status short_label weekly_reset short_reset cache_age
   local active_profile="" active_short="" active_weekly="" active_label="5h"
-  local best_profile="$default_profile"
   local has_best=0 has_active=0 active_has_usage=0 old_summary=0
   local caps=0 login=0 unavailable=0 offline=0 stale=0 ready=0
   local cache_age_max=-1 cache_age_label=""
@@ -3311,9 +3309,9 @@ usage_record_for_profile() {
 
 canonical_usage_active_marks() {
   local seen_active=0
-  local valid weekly_used short_used mark profile plan weekly short status short_label weekly_reset short_reset cache_age
+  local valid weekly_used short_used mark profile _plan weekly short status short_label weekly_reset short_reset _cache_age
 
-  while IFS=$'\t' read -r valid weekly_used short_used mark profile plan weekly short status short_label weekly_reset short_reset cache_age; do
+  while IFS=$'\t' read -r valid weekly_used short_used mark profile _plan weekly short status short_label weekly_reset short_reset _cache_age; do
     [[ -n "$profile" ]] || continue
     if [[ "$mark" == "*" ]]; then
       if (( seen_active )); then
@@ -3323,7 +3321,7 @@ canonical_usage_active_marks() {
       fi
     fi
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-      "$valid" "$weekly_used" "$short_used" "$mark" "$profile" "$plan" "$weekly" "$short" "$status" "$short_label" "$weekly_reset" "$short_reset" "$cache_age"
+      "$valid" "$weekly_used" "$short_used" "$mark" "$profile" "$_plan" "$weekly" "$short" "$status" "$short_label" "$weekly_reset" "$short_reset" "$_cache_age"
   done
 }
 
@@ -4554,7 +4552,7 @@ selector_menu_row_for_record() {
   local selector_profile_w="$profile_w" action_w=5
   (( selector_profile_w < 10 )) && selector_profile_w=10
 
-  IFS=$'\t' read -r valid weekly_used short_used mark profile plan weekly short status short_label weekly_reset short_reset cache_age <<<"$record"
+  IFS=$'\t' read -r valid weekly_used short_used mark profile _plan weekly short status short_label weekly_reset short_reset _cache_age <<<"$record"
   [[ -n "$profile" ]] || return 1
   row_action="switch"
   row_profile_field="$profile"
