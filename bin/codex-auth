@@ -1665,21 +1665,6 @@ now_epoch() {
   date +%s
 }
 
-window_label() {
-  local mins="${1:-}"
-  if [[ ! "$mins" =~ ^[0-9]+$ || "$mins" == "0" ]]; then
-    printf 'short'
-  elif (( mins % 1440 == 0 )); then
-    printf '%dd' "$((mins / 1440))"
-  elif (( mins >= 60 && mins % 60 >= 55 )); then
-    printf '%dh' "$(((mins + 59) / 60))"
-  elif (( mins % 60 == 0 )); then
-    printf '%dh' "$((mins / 60))"
-  else
-    printf '%dm' "$mins"
-  fi
-}
-
 color_enabled() {
   [[ -t 1 && -z "${NO_COLOR:-}" ]]
 }
@@ -3724,7 +3709,17 @@ usage_record_for_profile() {
   fi
 
   local short weekly status short_label weekly_reset_text short_reset_text stale_age_label
-  short_label="$(window_label "$short_window")"
+  if [[ ! "$short_window" =~ ^[0-9]+$ || "$short_window" == "0" ]]; then
+    short_label="short"
+  elif (( short_window % 1440 == 0 )); then
+    short_label="$((short_window / 1440))d"
+  elif (( short_window >= 60 && short_window % 60 >= 55 )); then
+    short_label="$(((short_window + 59) / 60))h"
+  elif (( short_window % 60 == 0 )); then
+    short_label="$((short_window / 60))h"
+  else
+    short_label="${short_window}m"
+  fi
   IFS=$'\t' read -r short_used short short_reset_text <<<"$(usage_limit_remaining_fields "$short_used" "$short_window" "$short_reset")"
   IFS=$'\t' read -r weekly_used weekly weekly_reset_text <<<"$(usage_limit_remaining_fields "$weekly_used" "$weekly_window" "$weekly_reset")"
   status="ok"
@@ -4670,18 +4665,6 @@ selector_palette_take_short_limit() {
   fi
 }
 
-selector_palette_compact_active_limit() {
-  local text="$1"
-  local compact_name value
-
-  IFS=$'\t' read -r _ compact_name _ value <<<"$(selector_palette_limit_parts "$text")"
-  if [[ -n "$value" ]]; then
-    printf 'act %s %s' "$compact_name" "$value"
-  elif [[ -n "$compact_name" ]]; then
-    printf 'act %s' "$compact_name"
-  fi
-}
-
 selector_palette_limit_parts() {
   local text="$1"
   local name="" compact_name="" label="" value="" token
@@ -4806,7 +4789,7 @@ selector_palette_context_add_active() {
   local best_value="$3"
   local compact_best_value="$4"
   local total_w="$5"
-  local active_value compact_active_value
+  local active_value compact_active_value compact_active_name compact_active_limit_value
 
   [[ -n "$active_part" ]] || return 0
   active_value="$active_part"
@@ -4815,7 +4798,14 @@ selector_palette_context_add_active() {
     line_ref+="   $active_value"
     return 0
   fi
-  compact_active_value="$(selector_palette_compact_active_limit "${active_part#active }")"
+  IFS=$'\t' read -r _ compact_active_name _ compact_active_limit_value <<<"$(selector_palette_limit_parts "${active_part#active }")"
+  if [[ -n "$compact_active_limit_value" ]]; then
+    compact_active_value="act $compact_active_name $compact_active_limit_value"
+  elif [[ -n "$compact_active_name" ]]; then
+    compact_active_value="act $compact_active_name"
+  else
+    compact_active_value=""
+  fi
   if [[ -n "$compact_active_value" ]] && (( ${#line_ref} + ${#compact_active_value} + 3 <= total_w )); then
     line_ref+="   $compact_active_value"
   elif [[ -n "$compact_active_value" && "$compact_best_value" != "$best_value" ]] \
