@@ -2051,39 +2051,6 @@ usage_bar() {
   repeat_glyph "$empty_glyph" "$empty_count"
 }
 
-usage_bar_rail() {
-  local percent="$1"
-  local width="$2"
-  local tone="${3:-}"
-  local inner_w left_rail right_rail
-
-  if (( width < 3 )); then
-    usage_tone_color "$tone"
-    usage_bar "$percent" "$width"
-    usage_tone_reset
-    return 0
-  fi
-
-  inner_w=$((width - 2))
-  if usage_unicode_enabled; then
-    left_rail="▕"
-    right_rail="▐"
-  else
-    left_rail="["
-    right_rail="]"
-  fi
-
-  usage_tone_color muted
-  printf '%s' "$left_rail"
-  usage_tone_reset
-  usage_tone_color "$tone"
-  usage_bar "$percent" "$inner_w"
-  usage_tone_reset
-  usage_tone_color muted
-  printf '%s' "$right_rail"
-  usage_tone_reset
-}
-
 usage_render_total_width() {
   local role_w="$1"
   local profile_w="$2"
@@ -2325,12 +2292,34 @@ usage_print_limit_bar_cell() {
   local bar_width="$6"
   local cell_w="$7"
   local tone="$8"
-  local visible pad
+  local visible pad inner_w left_rail right_rail
 
   usage_tone_color "$tone"
   printf "%${label_w}s " "$percent_label"
   usage_tone_reset
-  usage_bar_rail "$percent" "$bar_width" "$tone"
+  if (( bar_width < 3 )); then
+    usage_tone_color "$tone"
+    usage_bar "$percent" "$bar_width"
+    usage_tone_reset
+  else
+    inner_w=$((bar_width - 2))
+    if usage_unicode_enabled; then
+      left_rail="▕"
+      right_rail="▐"
+    else
+      left_rail="["
+      right_rail="]"
+    fi
+    usage_tone_color muted
+    printf '%s' "$left_rail"
+    usage_tone_reset
+    usage_tone_color "$tone"
+    usage_bar "$percent" "$inner_w"
+    usage_tone_reset
+    usage_tone_color muted
+    printf '%s' "$right_rail"
+    usage_tone_reset
+  fi
   visible=$((label_w + 1 + bar_width))
   usage_print_limit_cell_reset "$reset_label" "$reset_prefix" visible
   pad=$((cell_w - visible))
