@@ -1320,35 +1320,6 @@ profile_list_summary() {
   printf '%s' "$summary"
 }
 
-profile_list_alias_of() {
-  local hint="$1"
-  local name="$2"
-  local -n account_count_ref="$3"
-  local -n account_primary_ref="$4"
-
-  if [[ -n "$hint" && "${account_count_ref["$hint"]:-0}" -gt 1 && "$name" != "${account_primary_ref["$hint"]:-}" ]]; then
-    printf '%s' "${account_primary_ref["$hint"]}"
-  fi
-}
-
-profile_list_row_action() {
-  local active_name="$1"
-  local name="$2"
-  local alias_of="$3"
-  local active_fp="$4"
-  local fp="$5"
-
-  if [[ -n "$active_name" && "$name" == "$active_name" ]]; then
-    printf 'stay'
-  elif [[ -n "$alias_of" ]]; then
-    printf 'alias'
-  elif [[ -n "$active_fp" && "$fp" == "$active_fp" ]]; then
-    printf 'alias'
-  else
-    printf 'use'
-  fi
-}
-
 print_profile_list_header() {
   local count="$1"
   local active_name="$2"
@@ -1391,8 +1362,17 @@ print_profile_list_rows() {
     mode="${profile_mode_ref["$name"]:-unknown}"
     hint="${profile_hint_ref["$name"]:-}"
     fp="${profile_fp_ref["$name"]:-}"
-    alias_of="$(profile_list_alias_of "$hint" "$name" "$account_count_var" "$account_primary_var")"
-    action="$(profile_list_row_action "$active_name" "$name" "$alias_of" "$active_fp" "$fp")"
+    alias_of=""
+    if [[ -n "$hint" && "${account_count_ref["$hint"]:-0}" -gt 1 && "$name" != "${account_primary_ref["$hint"]:-}" ]]; then
+      alias_of="${account_primary_ref["$hint"]}"
+    fi
+    if [[ -n "$active_name" && "$name" == "$active_name" ]]; then
+      action="stay"
+    elif [[ -n "$alias_of" || ( -n "$active_fp" && "$fp" == "$active_fp" ) ]]; then
+      action="alias"
+    else
+      action="use"
+    fi
     if [[ -n "$alias_of" ]]; then
       alias_label="$(usage_display_profile_name "$alias_of" "" "$account_w")"
       if usage_unicode_enabled; then
