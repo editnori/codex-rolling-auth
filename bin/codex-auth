@@ -6169,11 +6169,7 @@ cmd_paths() {
   ensure_dirs
   local cols role_w=5 target_w=8 path_w total_w home_label
   cols="$(terminal_width)"
-  if (( cols < 22 )); then
-    role_w=5
-    target_w=0
-  elif (( cols < 39 )); then
-    role_w=5
+  if (( cols < 39 )); then
     target_w=0
   elif (( cols >= 72 )); then
     role_w=6
