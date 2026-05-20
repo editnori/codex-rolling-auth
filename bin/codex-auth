@@ -4370,33 +4370,6 @@ selector_header_primary_line() {
   selector_header_meta_line "$label" "$value" "$total_w" "$label_w" "$frame" "$outer_w"
 }
 
-print_usage_title_line() {
-  local title="$1"
-  local total_w="$2"
-  local title_w rule_w glyph
-
-  [[ -n "$title" ]] || return 0
-  (( total_w >= 40 )) || return 0
-
-  title_w=${#title}
-  if (( title_w + 2 >= total_w )); then
-    fit_text "$title" "$total_w"
-    printf '\n'
-    return 0
-  fi
-
-  glyph="$(usage_rule_glyph)"
-  rule_w=$((total_w - title_w - 1))
-  usage_tone_color accent
-  printf '%s' "$title"
-  usage_tone_reset
-  printf ' '
-  usage_tone_color muted
-  repeat_glyph "$glyph" "$rule_w"
-  usage_tone_reset
-  printf '\n'
-}
-
 usage_frame_chars() {
   if usage_unicode_enabled; then
     printf '╭\t╮\t╰\t╯\t│\t│\t─\n'
@@ -4490,22 +4463,6 @@ usage_summary_merge_pool_subject() {
   return 0
 }
 
-usage_summary_parts() {
-  local summary="$1"
-  local total_w="$2"
-  local -n first_ref="$3"
-  local -n active_ref="$4"
-  local -n pool_ref="$5"
-  local sep
-
-  sep="$(usage_separator)"
-  IFS=$'\t' read -r first_ref pool_ref <<<"$(usage_summary_split_once "$summary" "$sep")"
-  usage_summary_extend_best_head first_ref pool_ref "$sep"
-  usage_summary_normalize_best_active first_ref
-  usage_summary_take_active_part active_ref pool_ref "$sep"
-  usage_summary_merge_pool_subject first_ref active_ref pool_ref "$total_w" "$sep"
-}
-
 print_usage_summary_body() {
   local first="$1"
   local active_part="$2"
@@ -4551,10 +4508,15 @@ print_usage_summary_block() {
   local total_w="$2"
   local title="${3:-}"
   local first active_part pool_part
-  local tl tr bl br vl vr glyph label rule_w
+  local tl tr bl br vl vr glyph label rule_w title_w sep
   local frame=0 body_w="$total_w"
 
-  usage_summary_parts "$summary" "$total_w" first active_part pool_part
+  sep="$(usage_separator)"
+  IFS=$'\t' read -r first pool_part <<<"$(usage_summary_split_once "$summary" "$sep")"
+  usage_summary_extend_best_head first pool_part "$sep"
+  usage_summary_normalize_best_active first
+  usage_summary_take_active_part active_part pool_part "$sep"
+  usage_summary_merge_pool_subject first active_part pool_part "$total_w" "$sep"
   if [[ -n "$title" ]] && (( total_w >= 42 )); then
     frame=1
     body_w=$((total_w - 4))
@@ -4572,8 +4534,23 @@ print_usage_summary_block() {
     repeat_glyph "$glyph" "$rule_w"
     printf '%s\n' "$tr"
     usage_tone_reset
-  else
-    print_usage_title_line "$title" "$total_w"
+  elif [[ -n "$title" ]] && (( total_w >= 40 )); then
+    title_w=${#title}
+    if (( title_w + 2 >= total_w )); then
+      fit_text "$title" "$total_w"
+      printf '\n'
+    else
+      glyph="$(usage_rule_glyph)"
+      rule_w=$((total_w - title_w - 1))
+      usage_tone_color accent
+      printf '%s' "$title"
+      usage_tone_reset
+      printf ' '
+      usage_tone_color muted
+      repeat_glyph "$glyph" "$rule_w"
+      usage_tone_reset
+      printf '\n'
+    fi
   fi
   print_usage_summary_body "$first" "$active_part" "$pool_part" "$body_w" "$frame" "$total_w"
   return 0
