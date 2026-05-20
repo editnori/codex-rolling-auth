@@ -428,7 +428,7 @@ auth_record_fingerprint() {
   elif [[ -n "$secret" ]]; then
     printf '%s' "$secret"
   else
-    printf '' | sha256sum | awk '{print $1}'
+    printf '%s\n' 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
   fi
 }
 
