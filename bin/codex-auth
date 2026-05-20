@@ -122,7 +122,8 @@ print_help_item() {
   local cmd="$1"
   local desc="$2"
   local width="$3"
-  local action action_w command_w desc_w line gap row pattern
+  local action action_w command_w desc_w line gap row pattern token first
+  local tokens=()
   local action_rows=(
     "usage --refresh --select"$'\t'"select"
     "usage --cached"$'\t'"cache"
@@ -159,7 +160,39 @@ print_help_item() {
   (( width < 56 )) && action_w=6
 
   if (( width < 56 )); then
-    print_help_compact_command "$action" "$cmd" "$width" "$action_w"
+    command_w=$((width - action_w - 1))
+    (( command_w < 1 )) && command_w=1
+    read -r -a tokens <<<"$cmd"
+    line=""
+    first=1
+    for token in "${tokens[@]}"; do
+      if [[ -z "$line" ]]; then
+        line="$token"
+      elif (( ${#line} + 1 + ${#token} <= command_w )); then
+        line+=" $token"
+      else
+        if (( first )); then
+          print_toned_fit "$action" "$action_w" "$(help_action_tone "$action")"
+        else
+          printf '%*s' "$action_w" ''
+        fi
+        printf ' '
+        print_toned_fit_rtrim "$line" "$command_w" accent
+        printf '\n'
+        first=0
+        line="$token"
+      fi
+    done
+    if [[ -n "$line" ]]; then
+      if (( first )); then
+        print_toned_fit "$action" "$action_w" "$(help_action_tone "$action")"
+      else
+        printf '%*s' "$action_w" ''
+      fi
+      printf ' '
+      print_toned_fit_rtrim "$line" "$command_w" accent
+      printf '\n'
+    fi
     return 0
   fi
 
@@ -179,49 +212,6 @@ print_help_item() {
   printf '%*s' "$gap" ''
   print_toned_fit_rtrim "$desc" "$desc_w" muted
   printf '\n'
-}
-
-print_help_compact_command() {
-  local action="$1"
-  local cmd="$2"
-  local width="$3"
-  local action_w="$4"
-  local command_w token line="" first=1
-  local tokens=()
-
-  command_w=$((width - action_w - 1))
-  (( command_w < 1 )) && command_w=1
-  read -r -a tokens <<<"$cmd"
-
-  for token in "${tokens[@]}"; do
-    if [[ -z "$line" ]]; then
-      line="$token"
-    elif (( ${#line} + 1 + ${#token} <= command_w )); then
-      line+=" $token"
-    else
-      if (( first )); then
-        print_toned_fit "$action" "$action_w" "$(help_action_tone "$action")"
-      else
-        printf '%*s' "$action_w" ''
-      fi
-      printf ' '
-      print_toned_fit_rtrim "$line" "$command_w" accent
-      printf '\n'
-      first=0
-      line="$token"
-    fi
-  done
-
-  if [[ -n "$line" ]]; then
-    if (( first )); then
-      print_toned_fit "$action" "$action_w" "$(help_action_tone "$action")"
-    else
-      printf '%*s' "$action_w" ''
-    fi
-    printf ' '
-    print_toned_fit_rtrim "$line" "$command_w" accent
-    printf '\n'
-  fi
 }
 
 help_action_tone() {
