@@ -1641,28 +1641,6 @@ current_codex_status() {
   fi
 }
 
-profile_list_load_metadata() {
-  local -n files_ref="$1"
-  local -n active_fp_ref="$2"
-  local -n profile_mode_ref="$3"
-  local -n profile_hint_ref="$4"
-  local -n profile_fp_ref="$5"
-  local fp meta_path mode hint secret name
-
-  while IFS=$'\037' read -r meta_path mode hint secret; do
-    [[ -n "$meta_path" ]] || continue
-    fp="$(auth_record_fingerprint "$secret")"
-    if [[ "$meta_path" == "$AUTH_FILE" ]]; then
-      active_fp_ref="$fp"
-    else
-      name="$(basename "$meta_path" .json)"
-      profile_mode_ref["$name"]="$mode"
-      profile_hint_ref["$name"]="$hint"
-      profile_fp_ref["$name"]="$fp"
-    fi
-  done < <(auth_metadata_records "${files_ref[@]}")
-}
-
 profile_list_scan_profiles() {
   local active_fp="$1"
   local account_count_var="$6"
@@ -1785,10 +1763,22 @@ cmd_list() {
   local -A profile_mode=()
   local -A profile_hint=()
   local -A profile_fp=()
+  local fp meta_path mode hint secret name
 
   [[ -f "$AUTH_FILE" ]] && meta_files+=("$AUTH_FILE")
   meta_files+=("${profiles[@]}")
-  profile_list_load_metadata meta_files active_fp profile_mode profile_hint profile_fp
+  while IFS=$'\037' read -r meta_path mode hint secret; do
+    [[ -n "$meta_path" ]] || continue
+    fp="$(auth_record_fingerprint "$secret")"
+    if [[ "$meta_path" == "$AUTH_FILE" ]]; then
+      active_fp="$fp"
+    else
+      name="$(basename "$meta_path" .json)"
+      profile_mode["$name"]="$mode"
+      profile_hint["$name"]="$hint"
+      profile_fp["$name"]="$fp"
+    fi
+  done < <(auth_metadata_records "${meta_files[@]}")
   profile_list_scan_profiles "$active_fp" profiles profile_mode profile_hint profile_fp account_count account_primary active_name count alias_count
 
   local cols role_w profile_w mode_w account_w
