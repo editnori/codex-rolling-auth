@@ -4655,46 +4655,6 @@ selector_palette_limit_parts() {
   printf '%s\t%s\t%s\t%s\n' "$name" "$compact_name" "$label" "$value"
 }
 
-selector_palette_keyword_tone() {
-  case "${1:-}" in
-    best)
-      printf 'accent'
-      ;;
-    active|act)
-      printf 'active'
-      ;;
-    ready)
-      printf 'good'
-      ;;
-    cap)
-      printf 'bad'
-      ;;
-    login)
-      printf 'warn'
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
-selector_palette_context_word_tone() {
-  local word="$1"
-  local section="${2:-}"
-
-  if [[ "$word" == *% ]]; then
-    usage_limit_tone "$word"
-    return 0
-  fi
-  if selector_palette_keyword_tone "$word"; then
-    return 0
-  fi
-  if selector_palette_keyword_tone "$section"; then
-    return 0
-  fi
-  printf 'muted'
-}
-
 print_selector_palette_context_line() {
   local line="$1"
   local total_w="$2"
@@ -4718,7 +4678,45 @@ print_selector_palette_context_line() {
       word="${BASH_REMATCH[2]}"
       rest="${BASH_REMATCH[3]}"
       printf '%s' "$spaces"
-      tone="$(selector_palette_context_word_tone "$word" "$section")"
+      if [[ "$word" == *% ]]; then
+        tone="$(usage_limit_tone "$word")"
+      else
+        case "$word:${section:-}" in
+          best:*)
+            tone="accent"
+            ;;
+          active:*|act:*)
+            tone="active"
+            ;;
+          ready:*)
+            tone="good"
+            ;;
+          cap:*)
+            tone="bad"
+            ;;
+          login:*)
+            tone="warn"
+            ;;
+          *:best)
+            tone="accent"
+            ;;
+          *:active|*:act)
+            tone="active"
+            ;;
+          *:ready)
+            tone="good"
+            ;;
+          *:cap)
+            tone="bad"
+            ;;
+          *:login)
+            tone="warn"
+            ;;
+          *)
+            tone="muted"
+            ;;
+        esac
+      fi
       usage_tone_color "$tone"
       printf '%s' "$word"
       usage_tone_reset
