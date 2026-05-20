@@ -553,9 +553,7 @@ detail_widths() {
   local label_w=8
   local value_w
 
-  if (( cols < 39 )); then
-    label_w=8
-  elif (( cols >= 72 )); then
+  if (( cols >= 72 )); then
     label_w=10
   fi
   value_w=$((cols - label_w - 1))
