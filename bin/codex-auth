@@ -3803,35 +3803,6 @@ usage_summary_parts() {
   printf '%s\037%s\037%s\n' "$first" "$active_part" "$rest"
 }
 
-print_usage_summary_block() {
-  local summary="$1"
-  local total_w="$2"
-  local first active_part pool_part
-  local label_w=5 show_active=0 show_pool=0 blank_after=0
-
-  IFS=$'\037' read -r first active_part pool_part <<<"$(usage_summary_parts "$summary" "$total_w" 1)"
-  if (( total_w >= 64 )); then
-    label_w=7
-    show_active=1
-    show_pool=1
-    blank_after=1
-  elif (( total_w >= 40 )); then
-    label_w=6
-    show_active=1
-    blank_after=1
-  fi
-
-  selector_header_meta_line "" "$first" "$total_w" "$label_w"
-  if (( show_active )) && [[ -n "$active_part" ]]; then
-    selector_header_meta_line "" "$active_part" "$total_w" "$label_w"
-  fi
-  if (( show_pool )) && [[ -n "$pool_part" ]]; then
-    selector_header_meta_line "stats" "$pool_part" "$total_w" "$label_w"
-  fi
-  (( blank_after )) && printf '\n'
-  return 0
-}
-
 selector_palette_limit_context() {
   local text="$1"
   local name="" compact_name="" label="" value="" token
@@ -4291,7 +4262,29 @@ selector_fzf_menu() {
       action_label="act"
     fi
     fzf_header="$(
-      print_usage_summary_block "$summary_text" "$total_w"
+      IFS=$'\037' read -r first active_part pool_part <<<"$(usage_summary_parts "$summary_text" "$total_w" 1)"
+      label_w=5
+      show_active=0
+      show_pool=0
+      blank_after=0
+      if (( total_w >= 64 )); then
+        label_w=7
+        show_active=1
+        show_pool=1
+        blank_after=1
+      elif (( total_w >= 40 )); then
+        label_w=6
+        show_active=1
+        blank_after=1
+      fi
+      selector_header_meta_line "" "$first" "$total_w" "$label_w"
+      if (( show_active )) && [[ -n "$active_part" ]]; then
+        selector_header_meta_line "" "$active_part" "$total_w" "$label_w"
+      fi
+      if (( show_pool )) && [[ -n "$pool_part" ]]; then
+        selector_header_meta_line "stats" "$pool_part" "$total_w" "$label_w"
+      fi
+      (( blank_after )) && printf '\n'
       print_usage_render_header "$action_label" "$role_w" "$profile_w" "$cell_w" "$status_w" "$mode"
       repeat_glyph "$(usage_glyph '─' '-')" "$total_w"
       printf '\n'
