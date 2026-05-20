@@ -8258,46 +8258,14 @@ codex_run_watch_loop() {
   done
 }
 
-codex_run_auto_args() {
-  local auto_ttl="${1:-}"
-
-  CODEX_RUN_AUTO_ARGS=(--quiet --no-background)
-  if [[ "$auto_ttl" =~ ^[0-9]+$ ]]; then
-    CODEX_RUN_AUTO_ARGS+=(--ttl "$auto_ttl")
-  fi
-  return 0
-}
-
 codex_run_auto_select() {
   local run_auto="${1:-1}"
   local auto_ttl="${2:-}"
+  local auto_args=(--quiet --no-background)
 
   [[ "$run_auto" != "0" && "${CODEX_AUTH_AUTO:-1}" != "0" ]] || return 0
-  codex_run_auto_args "$auto_ttl"
-  CODEX_AUTH_NO_BACKGROUND=1 cmd_auto "${CODEX_RUN_AUTO_ARGS[@]}" || true
-}
-
-codex_run_start_watch_if_enabled() {
-  local run_auto="${1:-1}"
-  local watch_enabled="${2:-0}"
-  local auto_ttl="${3:-}"
-
-  CODEX_RUN_WATCH_PID=""
-  if [[ "$run_auto" != "0" && "$watch_enabled" != "0" && "${CODEX_AUTH_AUTO:-1}" != "0" ]]; then
-    codex_run_watch_loop "$auto_ttl" &
-    CODEX_RUN_WATCH_PID=$!
-  fi
-}
-
-codex_run_script_child_matches() {
-  local child="$1"
-  local run_file="$2"
-  local log_file="$3"
-  local cmd
-
-  [[ "$child" =~ ^[0-9]+$ && "$child" != "${BASHPID:-}" && -r "/proc/$child/cmdline" ]] || return 1
-  cmd="$(tr '\0' ' ' <"/proc/$child/cmdline" 2>/dev/null || true)"
-  [[ "$cmd" == *"script "* && "$cmd" == *"$run_file"* && "$cmd" == *"$log_file"* ]]
+  [[ "$auto_ttl" =~ ^[0-9]+$ ]] && auto_args+=(--ttl "$auto_ttl")
+  CODEX_AUTH_NO_BACKGROUND=1 cmd_auto "${auto_args[@]}" || true
 }
 
 codex_run_kill_script_for_log() {
@@ -8305,7 +8273,7 @@ codex_run_kill_script_for_log() {
   local run_file="$2"
   local log_file="$3"
   local signal="${4:-TERM}"
-  local child grandchild killed_child
+  local child grandchild killed_child cmd
 
   [[ "$parent_pid" =~ ^[0-9]+$ ]] || return 0
   if ! command -v pgrep >/dev/null 2>&1; then
@@ -8313,7 +8281,9 @@ codex_run_kill_script_for_log() {
   fi
 
   while IFS= read -r child; do
-    codex_run_script_child_matches "$child" "$run_file" "$log_file" || continue
+    [[ "$child" =~ ^[0-9]+$ && "$child" != "${BASHPID:-}" && -r "/proc/$child/cmdline" ]] || continue
+    cmd="$(tr '\0' ' ' <"/proc/$child/cmdline" 2>/dev/null || true)"
+    [[ "$cmd" == *"script "* && "$cmd" == *"$run_file"* && "$cmd" == *"$log_file"* ]] || continue
     killed_child=0
     while IFS= read -r grandchild; do
       [[ "$grandchild" =~ ^[0-9]+$ ]] || continue
@@ -8511,8 +8481,11 @@ cmd_run() {
   while true; do
     codex_run_auto_select "$run_auto" "$auto_ttl"
 
-    codex_run_start_watch_if_enabled "$run_auto" "$watch_enabled" "$auto_ttl"
-    watch_pid="$CODEX_RUN_WATCH_PID"
+    watch_pid=""
+    if [[ "$run_auto" != "0" && "$watch_enabled" != "0" && "${CODEX_AUTH_AUTO:-1}" != "0" ]]; then
+      codex_run_watch_loop "$auto_ttl" &
+      watch_pid=$!
+    fi
 
     codex_run_execute_attempt "$codex_cli" "$log_enabled" run_args status log_file run_file watch_pid monitor_pid target_pid
 
