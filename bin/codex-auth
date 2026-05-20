@@ -4281,48 +4281,6 @@ usage_metadata_summary_line() {
   printf '%s' "$line"
 }
 
-selector_header_spaced_text() {
-  local text="$1"
-  local sep
-  sep="$(usage_separator)"
-
-  text="${text//capped /cap }"
-  while [[ "$text" == *"$sep"* ]]; do
-    printf '%s   ' "${text%%"$sep"*}"
-    text="${text#*"$sep"}"
-  done
-  printf '%s' "$text"
-}
-
-selector_header_identity_text() {
-  local text="$1"
-  local value_w="$2"
-  local name detail name_w detail_w
-
-  IFS=' ' read -r name detail <<<"$text"
-  if [[ -z "$detail" || ! "$value_w" =~ ^[0-9]+$ || "$value_w" -lt 18 ]]; then
-    printf '%s' "$text"
-    return 0
-  fi
-
-  name_w=12
-  (( value_w < 34 )) && name_w=10
-  (( value_w < 26 )) && name_w=8
-  if (( name_w > value_w - 8 )); then
-    name_w=$((value_w - 8))
-  fi
-  if (( name_w < 6 )); then
-    printf '%s' "$text"
-    return 0
-  fi
-
-  detail_w=$((value_w - name_w - 2))
-  (( detail_w < 1 )) && detail_w=1
-  fit_profile_text "$name" "$name_w"
-  printf '  '
-  fit_text "$detail" "$detail_w"
-}
-
 selector_header_meta_line() {
   local label="$1"
   local text="$2"
@@ -4331,16 +4289,41 @@ selector_header_meta_line() {
   local frame="${5:-0}"
   local outer_w="${6:-$total_w}"
   local value_w value label_tone="muted" tl tr bl br vl vr glyph
+  local sep name detail name_w detail_w
 
   (( label_w < 1 )) && label_w=1
   value_w=$((total_w - label_w - 2))
   (( value_w < 1 )) && value_w=1
   case "$label" in
     best|active|old|status)
-      value="$(selector_header_identity_text "$text" "$value_w")"
+      IFS=' ' read -r name detail <<<"$text"
+      if [[ -z "$detail" || ! "$value_w" =~ ^[0-9]+$ || "$value_w" -lt 18 ]]; then
+        value="$text"
+      else
+        name_w=12
+        (( value_w < 34 )) && name_w=10
+        (( value_w < 26 )) && name_w=8
+        if (( name_w > value_w - 8 )); then
+          name_w=$((value_w - 8))
+        fi
+        if (( name_w < 6 )); then
+          value="$text"
+        else
+          detail_w=$((value_w - name_w - 2))
+          (( detail_w < 1 )) && detail_w=1
+          value="$(fit_profile_text "$name" "$name_w"; printf '  '; fit_text "$detail" "$detail_w")"
+        fi
+      fi
       ;;
     *)
-      value="$(selector_header_spaced_text "$text")"
+      sep="$(usage_separator)"
+      value="${text//capped /cap }"
+      detail=""
+      while [[ "$value" == *"$sep"* ]]; do
+        detail+="${value%%"$sep"*}   "
+        value="${value#*"$sep"}"
+      done
+      value="$detail$value"
       ;;
   esac
   case "$label" in
