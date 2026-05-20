@@ -279,6 +279,93 @@ selector_fast_display_status_into() {
   fi
 }
 
+selector_fast_role_tone_into() {
+  local -n out_ref="$1"
+
+  case "${2:-}" in
+    best|b|◆|+) out_ref="accent" ;;
+    active|stay|s|●|\*) out_ref="active" ;;
+    use|u) out_ref="good" ;;
+    cap|c) out_ref="bad" ;;
+    login|l) out_ref="warn" ;;
+    warn) out_ref="warn" ;;
+    *) out_ref="muted" ;;
+  esac
+}
+
+selector_fast_limit_tone_into() {
+  local -n out_ref="$1"
+  local percent="${2:-}"
+  local percent_value
+
+  percent="${percent%\%}"
+  if [[ ! "$percent" =~ ^-?[0-9]+$ ]]; then
+    out_ref="muted"
+    return 0
+  fi
+
+  percent_value="$percent"
+  if (( percent_value < 25 )); then
+    out_ref="bad"
+  elif (( percent_value < 50 )); then
+    out_ref="warn"
+  else
+    out_ref="good"
+  fi
+}
+
+selector_fast_status_tone_into() {
+  local -n out_ref="$1"
+  local status="${2:-}"
+  local valid="${3:-0}"
+
+  if [[ "$status" == "offline" || "$status" == "refresh timeout" || "$status" == "refresh unavailable" ]]; then
+    out_ref="warn"
+  elif [[ "$valid" != "0" || "$status" == "login" ]]; then
+    out_ref="muted"
+  elif [[ "$status" == stale* ]]; then
+    out_ref="warn"
+  elif [[ "$status" == "ok" ]]; then
+    out_ref="good"
+  else
+    out_ref="bad"
+  fi
+}
+
+selector_fast_tone_code_into() {
+  local -n out_ref="$1"
+  local mode="$2"
+  local tone="${3:-}"
+  local color=""
+
+  out_ref=""
+  usage_color_active || return 0
+  case "$tone" in
+    good) color="166;227;161" ;;
+    warn|accent) color="250;178;131" ;;
+    active) color="157;124;216" ;;
+    bad) color="224;108;117" ;;
+    track_edge) color="16;16;16" ;;
+  esac
+  case "$mode:$tone" in
+    38:muted) color="128;128;128" ;;
+    48:track) color="35;35;35" ;;
+  esac
+  [[ -n "$color" ]] && printf -v out_ref '\033[%s;2;%sm' "$mode" "$color"
+}
+
+selector_fast_tone_text_into() {
+  local -n out_ref="$1"
+  local text="$2"
+  local tone="${3:-}"
+  local prefix="" reset=""
+
+  [[ -n "$text" ]] || { out_ref=""; return 0; }
+  selector_fast_tone_code_into prefix 38 "$tone"
+  usage_color_active && reset=$'\033[0m'
+  out_ref="${prefix}${text}${reset}"
+}
+
 selector_fast_compact_status_into() {
   local -n out_ref="$1"
   local status="$2"
@@ -322,16 +409,21 @@ selector_palette_row_into() {
   local valid="$7"
   local total_w="$8"
   local primary_w week_w short_w status_w status_gap metric_gap
-  local action profile action_cell profile_cell primary_cell week_cell short_cell status_cell compact_status spaces
+  local action raw_action profile action_cell profile_cell primary_cell week_cell short_cell status_cell compact_status spaces
+  local action_tone week_tone short_tone status_tone
 
   selector_palette_table_widths_into primary_w week_w short_w status_w status_gap metric_gap "$total_w"
-  action="${primary%% *}"
+  raw_action="${primary%% *}"
+  action="$raw_action"
   profile="${primary#* }"
   [[ "$profile" == "$primary" ]] && profile=""
   [[ "$action" == "best" ]] && action="use"
   selector_fast_fit_into action_cell "$action" 5 left
+  selector_fast_role_tone_into action_tone "$raw_action"
+  selector_fast_tone_text_into action_cell "$action_cell" "$action_tone"
   if (( primary_w <= 7 )); then
     selector_fast_fit_into primary_cell "$action" "$primary_w" left
+    selector_fast_tone_text_into primary_cell "$primary_cell" "$action_tone"
   else
     selector_usage_display_profile_name_into profile_cell "$profile" "$action" "$((primary_w - 7))"
     selector_fast_fit_into profile_cell "$profile_cell" "$((primary_w - 7))" left
@@ -341,12 +433,20 @@ selector_palette_row_into() {
   if [[ "$valid" == "0" ]]; then
     selector_fast_fit_into week_cell "${weekly:--}" "$week_w" center
     selector_fast_fit_into short_cell "${short:--}" "$short_w" center
+    selector_fast_limit_tone_into week_tone "$weekly"
+    selector_fast_limit_tone_into short_tone "$short"
   else
     selector_fast_fit_into week_cell "-" "$week_w" center
     selector_fast_fit_into short_cell "-" "$short_w" center
+    week_tone="muted"
+    short_tone="muted"
   fi
+  selector_fast_tone_text_into week_cell "$week_cell" "$week_tone"
+  selector_fast_tone_text_into short_cell "$short_cell" "$short_tone"
   selector_fast_compact_status_into compact_status "$status" "$status_w"
   selector_fast_fit_into status_cell "$compact_status" "$status_w" left
+  selector_fast_status_tone_into status_tone "$_raw_status" "$valid"
+  selector_fast_tone_text_into status_cell "$status_cell" "$status_tone"
   printf -v spaces '%*s' "$metric_gap" ''
   out_ref="${primary_cell} ${week_cell}${spaces}${short_cell}"
   if (( status_w > 0 )); then

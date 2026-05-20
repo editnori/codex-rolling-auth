@@ -361,12 +361,13 @@ EOF
     return 0
   fi
 
-  PATH="$tmp/bin:$PATH" CODEX_TEST_FZF_INPUT="$fzf_input" CODEX_TEST_FZF_ARGS="$fzf_args" TERM=xterm CODEX_HOME="$home" timeout 2 script -qec "$REPO_ROOT/bin/codex-auth usage --cached --select" /dev/null >"$output"
+  env -u NO_COLOR PATH="$tmp/bin:$PATH" CODEX_TEST_FZF_INPUT="$fzf_input" CODEX_TEST_FZF_ARGS="$fzf_args" TERM=xterm CODEX_HOME="$home" timeout 2 script -qec "$REPO_ROOT/bin/codex-auth usage --cached --select" /dev/null >"$output"
 
   assert_contains '--with-nth=4..' "$fzf_args"
   assert_contains '--height=~' "$fzf_args"
   assert_not_contains '--height=100%' "$fzf_args"
   assert_contains $'action\tswitch\ta' "$fzf_input"
+  assert_contains $'\033[' "$fzf_input"
   assert_not_contains '1. ' "$fzf_input"
   assert_contains 'active a' "$output"
 }
