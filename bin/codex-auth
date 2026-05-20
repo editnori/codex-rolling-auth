@@ -3377,19 +3377,6 @@ print_selector_palette_primary() {
   esac
 }
 
-selector_palette_profile_label() {
-  local profile="$1"
-  local total_w="${2:-0}"
-
-  [[ "$total_w" =~ ^[0-9]+$ ]] || total_w=0
-
-  if (( total_w <= 30 )); then
-    usage_display_profile_name "$profile" "" 6
-  else
-    printf '%s' "$profile"
-  fi
-}
-
 selector_palette_table_widths() {
   local total_w="$1"
   local primary_w week_w short_w status_w metric_w status_gap=1 metric_gap=1 status_max=13
@@ -4545,10 +4532,16 @@ selector_menu_row_for_record() {
   [[ -n "$profile" ]] || return 1
   row_action="switch"
   row_profile_field="$profile"
+  if (( selector_palette_mode )); then
+    if (( total_w <= 30 )); then
+      palette_profile="$(usage_display_profile_name "$profile" "" 6)"
+    else
+      palette_profile="$profile"
+    fi
+  fi
 
   if [[ "$valid" != "0" && "$status" == "login" ]]; then
     if (( selector_palette_mode )); then
-      palette_profile="$(selector_palette_profile_label "$profile" "$total_w")"
       display="$(print_selector_palette_table_row "login $palette_profile" "-" "-" "login needed" "$status" "$valid" "$total_w")"
     else
       detail="needed"
@@ -4558,7 +4551,6 @@ selector_menu_row_for_record() {
   elif [[ "$valid" == "0" ]]; then
     if (( selector_palette_mode )); then
       display_status="$(usage_display_status "$status" "normal")"
-      palette_profile="$(selector_palette_profile_label "$profile" "$total_w")"
       if [[ "$mark" == "*" ]]; then
         action_role="stay"
       elif [[ "$mark" == "=" ]]; then
@@ -4600,7 +4592,6 @@ selector_menu_row_for_record() {
   else
     if (( selector_palette_mode )); then
       display_status="$(usage_display_status "$status" "normal")"
-      palette_profile="$(selector_palette_profile_label "$profile" "$total_w")"
       case "$mark" in
         "*") action_role="stay" ;;
         "=") action_role="same" ;;
@@ -4685,7 +4676,11 @@ arrow_action_menu() {
     rows+=("$row_kind"$'\t'"$row_action"$'\t'"$row_profile_field"$'\t'"$row_display")
   done
   if (( ! has_active_row )) && [[ -f "$AUTH_FILE" ]]; then
-    palette_profile="$(selector_palette_profile_label "current" "$total_w")"
+    if (( total_w <= 30 )); then
+      palette_profile="$(usage_display_profile_name "current" "" 6)"
+    else
+      palette_profile="current"
+    fi
     display="$(print_selector_palette_table_row "stay $palette_profile" "-" "-" "same" "ok" "1" "$total_w")"
     rows+=("action"$'\t'"skip"$'\t'"-"$'\t'"$display")
   fi
