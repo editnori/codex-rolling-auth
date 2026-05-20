@@ -2915,40 +2915,31 @@ usage_header_state() {
   fi
 }
 
-usage_fit_header_label() {
-  local text="$1"
-  local width="$2"
-  local compact="$text"
-
-  if [[ "$width" =~ ^[0-9]+$ && "$width" -gt 0 && ${#text} -gt width ]]; then
-    case "$text" in
-      "weekly left/used ↺ reset")
-        compact="week left/used ↺ reset"
-        ;;
-      "weekly left/used reset")
-        compact="week left/used reset"
-        ;;
-      "weekly left/used "*)
-        compact="${text/weekly/week}"
-        ;;
-    esac
-  fi
-
-  if [[ "$width" =~ ^[0-9]+$ && "$width" -gt 0 && ${#compact} -le width ]]; then
-    printf '%s' "$compact"
-  else
-    printf '%s' "$text"
-  fi
-}
-
 usage_metric_header_cell() {
   local text="$1"
   local width="$2"
   local force_compact="${4:-0}"
-  local display="$text"
+  local display="$text" compact="$text"
 
   if (( USAGE_VERBOSE > force_compact )); then
-    usage_fit_header_label "$text" "$width"
+    if [[ "$width" =~ ^[0-9]+$ && "$width" -gt 0 && ${#text} -gt width ]]; then
+      case "$text" in
+        "weekly left/used ↺ reset")
+          compact="week left/used ↺ reset"
+          ;;
+        "weekly left/used reset")
+          compact="week left/used reset"
+          ;;
+        "weekly left/used "*)
+          compact="${text/weekly/week}"
+          ;;
+      esac
+    fi
+    if [[ "$width" =~ ^[0-9]+$ && "$width" -gt 0 && ${#compact} -le width ]]; then
+      printf '%s' "$compact"
+    else
+      printf '%s' "$text"
+    fi
     return 0
   fi
 
