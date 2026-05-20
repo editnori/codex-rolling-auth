@@ -2456,41 +2456,28 @@ usage_role_label() {
   local valid="${5:-0}"
   local status="${6:-}"
   local role_w="${7:-1}"
-  local action
+  local action=""
 
-  action="$(usage_role_action "$mark" "$profile" "$default_profile" "$valid" "$status")"
-  if (( role_w <= 1 )); then
-    usage_role_narrow_label "$action"
+  if [[ "$mark" == "*" ]]; then
+    action="stay"
+  elif [[ "$mark" == "=" ]]; then
+    action="same"
+  elif [[ -n "$default_profile" && "$profile" == "$default_profile" ]]; then
+    action="use"
+  elif [[ "$status" == *cap* ]]; then
+    action="cap"
+  elif [[ "$status" == "login" ]]; then
+    action="login"
+  elif [[ "$valid" == "0" && "$status" == "ok" ]]; then
+    action="use"
+  fi
+
+  if (( role_w > 1 )); then
+    printf '%s' "$action"
     return 0
   fi
 
-  printf '%s' "$action"
-}
-
-usage_role_action() {
-  local mark="$1"
-  local profile="$2"
-  local default_profile="$3"
-  local valid="$4"
-  local status="$5"
-
-  if [[ "$mark" == "*" ]]; then
-    printf 'stay'
-  elif [[ "$mark" == "=" ]]; then
-    printf 'same'
-  elif [[ -n "$default_profile" && "$profile" == "$default_profile" ]]; then
-    printf 'use'
-  elif [[ "$status" == *cap* ]]; then
-    printf 'cap'
-  elif [[ "$status" == "login" ]]; then
-    printf 'login'
-  elif [[ "$valid" == "0" && "$status" == "ok" ]]; then
-    printf 'use'
-  fi
-}
-
-usage_role_narrow_label() {
-  case "$1" in
+  case "$action" in
     stay)
       printf 's'
       ;;
