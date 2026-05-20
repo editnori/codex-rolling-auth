@@ -7184,21 +7184,6 @@ usage_best_selection_into() {
   fi
 }
 
-usage_render_or_prepare() {
-  local records="$1"
-  local default_profile="$2"
-  local active_is_best="$3"
-  local -n rendered_output_ref="$4"
-
-  rendered_output_ref=0
-  if [[ "$USAGE_SELECT" == "1" ]]; then
-    prepare_usage_records "$records" "$default_profile"
-  elif [[ "$USAGE_QUIET" != "1" ]]; then
-    render_usage_records "$records" "$default_profile" "$active_is_best"
-    rendered_output_ref=1
-  fi
-}
-
 usage_auto_switch_result() {
   local rendered_output="$1"
   local default_profile="$2"
@@ -7282,7 +7267,12 @@ cmd_usage() {
     usage_best_selection_into "$records" default_profile active_is_best
 
     local rendered_output=0
-    usage_render_or_prepare "$records" "$default_profile" "$active_is_best" rendered_output
+    if [[ "$USAGE_SELECT" == "1" ]]; then
+      prepare_usage_records "$records" "$default_profile"
+    elif [[ "$USAGE_QUIET" != "1" ]]; then
+      render_usage_records "$records" "$default_profile" "$active_is_best"
+      rendered_output=1
+    fi
 
     case "$auto_switch:$USAGE_SELECT" in
       1:*) usage_auto_switch_result "$rendered_output" "$default_profile" "$active_is_best"; return 0 ;;
