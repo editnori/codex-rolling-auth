@@ -4243,11 +4243,10 @@ print_palette_title_line() {
   local label="$1"
   local right="$2"
   local total_w="$3"
-  local namespace="Auth"
   local sep left compact_label compact_left gap
 
   sep="$(usage_separator)"
-  left="$namespace$sep$label"
+  left="Auth$sep$label"
   if (( ${#left} > total_w || ( ${#right} > 0 && ${#left} + ${#right} + 2 > total_w ) )); then
     case "$label" in
       Codex\ profiles|Saved\ profiles) compact_label="Profiles" ;;
@@ -4255,7 +4254,7 @@ print_palette_title_line() {
       Removed\ profile) compact_label="Removed" ;;
       *) compact_label="$label" ;;
     esac
-    compact_left="$namespace$sep$compact_label"
+    compact_left="Auth$sep$compact_label"
     if (( ${#compact_left} < ${#left} )); then
       left="$compact_left"
     fi
