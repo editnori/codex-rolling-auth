@@ -4754,41 +4754,6 @@ selector_fzf_menu() {
   fi
 }
 
-selector_numbered_print_row() {
-  local row="$1"
-  local cols="$2"
-  local -n action_count_ref="$3"
-  local -n fallback_actions_ref="$4"
-  local -n fallback_profiles_ref="$5"
-  local kind action profile_choice display line_w prefix plain
-
-  IFS=$'\t' read -r kind action profile_choice display <<<"$row"
-  [[ "$profile_choice" == "-" ]] && profile_choice=""
-  if [[ "$kind" == "action" ]]; then
-    fallback_actions_ref+=("$action")
-    fallback_profiles_ref+=("$profile_choice")
-    action_count_ref=$((action_count_ref + 1))
-    prefix="$(printf '%2d. ' "$action_count_ref")"
-    line_w=$((cols - ${#prefix}))
-  else
-    prefix=''
-    line_w="$cols"
-  fi
-  (( line_w < 1 )) && line_w=1
-  printf '%s' "$prefix"
-  if [[ "$display" == *$'\033'* ]]; then
-    plain="$(LC_ALL=C sed $'s/\033\\[[0-9;]*m//g' <<<"$display")"
-    if (( ${#plain} <= line_w )); then
-      printf '%s' "$display"
-    else
-      fit_text_rtrim "$plain" "$line_w"
-    fi
-  else
-    fit_text_rtrim "$display" "$line_w"
-  fi
-  printf '\n'
-}
-
 selector_numbered_menu() {
   local -n rows_ref="$1"
   local summary_text="$2"
@@ -4800,6 +4765,7 @@ selector_numbered_menu() {
   local mode="$8"
   local selector_palette_mode="$9"
   local choice i action_count=0 cols
+  local kind action profile_choice display line_w prefix plain
   local term_lines fallback_height fallback_top_padding=0 fallback_pad_i
   local selector_controls sep
   local selected=0
@@ -4840,7 +4806,31 @@ selector_numbered_menu() {
     printf '\n'
   fi
   for i in "${!rows_ref[@]}"; do
-    selector_numbered_print_row "${rows_ref[$i]}" "$cols" action_count fallback_actions fallback_profiles
+    IFS=$'\t' read -r kind action profile_choice display <<<"${rows_ref[$i]}"
+    [[ "$profile_choice" == "-" ]] && profile_choice=""
+    if [[ "$kind" == "action" ]]; then
+      fallback_actions+=("$action")
+      fallback_profiles+=("$profile_choice")
+      action_count=$((action_count + 1))
+      prefix="$(printf '%2d. ' "$action_count")"
+      line_w=$((cols - ${#prefix}))
+    else
+      prefix=''
+      line_w="$cols"
+    fi
+    (( line_w < 1 )) && line_w=1
+    printf '%s' "$prefix"
+    if [[ "$display" == *$'\033'* ]]; then
+      plain="$(LC_ALL=C sed $'s/\033\\[[0-9;]*m//g' <<<"$display")"
+      if (( ${#plain} <= line_w )); then
+        printf '%s' "$display"
+      else
+        fit_text_rtrim "$plain" "$line_w"
+      fi
+    else
+      fit_text_rtrim "$display" "$line_w"
+    fi
+    printf '\n'
   done
   if usage_unicode_enabled; then
     printf '› '
