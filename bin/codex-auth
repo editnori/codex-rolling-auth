@@ -5300,7 +5300,7 @@ index a2e4e8e..89327c2 100644
  use tokio::sync::Semaphore;
 __PATCH_BLANK__
  use codex_agent_identity::decode_agent_identity_jwt;
-@@ -95,6 +97,11 @@ const REFRESH_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
+@@ -95,6 +97,10 @@ const REFRESH_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
  pub(super) const REVOKE_TOKEN_URL: &str = "https://auth.openai.com/oauth/revoke";
  pub const REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR: &str = "CODEX_REFRESH_TOKEN_URL_OVERRIDE";
  pub const REVOKE_TOKEN_URL_OVERRIDE_ENV_VAR: &str = "CODEX_REVOKE_TOKEN_URL_OVERRIDE";
@@ -5311,7 +5311,7 @@ __PATCH_BLANK__
  static NEXT_DUMMY_AUTH_ID: AtomicU64 = AtomicU64::new(1);
 __PATCH_BLANK__
  #[derive(Debug, Error)]
-@@ -1258,6 +1265,7 @@ pub struct AuthManager {
+@@ -1258,6 +1264,7 @@ pub struct AuthManager {
      chatgpt_base_url: Option<String>,
      refresh_lock: Semaphore,
      external_auth: RwLock<Option<Arc<dyn ExternalAuth>>>,
@@ -5319,7 +5319,7 @@ __PATCH_BLANK__
  }
 __PATCH_BLANK__
  /// Configuration view required to construct a shared [`AuthManager`].
-@@ -1332,6 +1340,7 @@ impl AuthManager {
+@@ -1332,6 +1339,7 @@ impl AuthManager {
              chatgpt_base_url,
              refresh_lock: Semaphore::new(/*permits*/ 1),
              external_auth: RwLock::new(None),
@@ -5327,7 +5327,7 @@ __PATCH_BLANK__
          }
      }
 __PATCH_BLANK__
-@@ -1351,6 +1360,7 @@ impl AuthManager {
+@@ -1351,6 +1359,7 @@ impl AuthManager {
              chatgpt_base_url: None,
              refresh_lock: Semaphore::new(/*permits*/ 1),
              external_auth: RwLock::new(None),
@@ -5335,7 +5335,7 @@ __PATCH_BLANK__
          })
      }
 __PATCH_BLANK__
-@@ -1369,6 +1379,7 @@ impl AuthManager {
+@@ -1369,6 +1378,7 @@ impl AuthManager {
              chatgpt_base_url: None,
              refresh_lock: Semaphore::new(/*permits*/ 1),
              external_auth: RwLock::new(None),
@@ -5343,7 +5343,7 @@ __PATCH_BLANK__
          })
      }
 __PATCH_BLANK__
-@@ -1387,6 +1398,7 @@ impl AuthManager {
+@@ -1387,6 +1397,7 @@ impl AuthManager {
              external_auth: RwLock::new(Some(
                  Arc::new(BearerTokenRefresher::new(config)) as Arc<dyn ExternalAuth>
              )),
@@ -5351,7 +5351,7 @@ __PATCH_BLANK__
          })
      }
 __PATCH_BLANK__
-@@ -1413,6 +1425,8 @@ impl AuthManager {
+@@ -1413,6 +1424,8 @@ impl AuthManager {
              return Some(auth);
          }
 __PATCH_BLANK__
@@ -5360,7 +5360,7 @@ __PATCH_BLANK__
          let auth = self.auth_cached()?;
          if Self::is_stale_for_proactive_refresh(&auth)
              && let Err(err) = self.refresh_token().await
-@@ -1423,6 +1437,81 @@ impl AuthManager {
+@@ -1423,6 +1436,80 @@ impl AuthManager {
          self.auth_cached()
      }
 __PATCH_BLANK__
