@@ -542,39 +542,6 @@ short_account_hint() {
   fi
 }
 
-verbose_account_hint() {
-  local hint="$1"
-  local width="${2:-13}"
-  local clean length right left
-
-  if [[ -z "$hint" ]]; then
-    usage_meta_glyph
-    return 0
-  fi
-  if (( ${#hint} <= width )); then
-    printf '%s' "$hint"
-    return 0
-  fi
-
-  clean="${hint//-/}"
-  if [[ "$hint" =~ ^[0-9a-fA-F-]+$ && ${#clean} -gt 12 ]]; then
-    if (( width >= 13 )); then
-      right=$((width - 9))
-      (( right < 4 )) && right=4
-      printf '%s%s%s' "${clean:0:8}" "$(usage_trunc_glyph)" "${clean:${#clean}-right:right}"
-    elif (( width >= 8 )); then
-      right=4
-      left=$((width - right - 1))
-      (( left < 3 )) && left=3
-      printf '%s%s%s' "${clean:0:left}" "$(usage_trunc_glyph)" "${clean:${#clean}-right:right}"
-    else
-      fit_profile_text "$clean" "$width"
-    fi
-  else
-    fit_profile_text "$hint" "$width"
-  fi
-}
-
 profile_list_widths() {
   local cols="$1"
   local role_w=5
@@ -1591,7 +1558,7 @@ print_profile_list_rows() {
   local -n profile_fp_ref="${11}"
   local -n account_count_ref="$account_count_var"
   local -n account_primary_ref="$account_primary_var"
-  local path name mode hint fp action alias_of account_display account_base
+  local path name mode hint fp action alias_of account_display account_base clean right left
 
   for path in "${profiles_ref[@]}"; do
     name="$(basename "$path" .json)"
@@ -1604,7 +1571,27 @@ print_profile_list_rows() {
       account_display="$(profile_account_alias_display "$hint" "$account_w" "$list_verbose" "$alias_of")"
     elif [[ -n "$hint" ]]; then
       if (( list_verbose )); then
-        account_base="$(verbose_account_hint "$hint" "$account_w")"
+        if (( ${#hint} <= account_w )); then
+          account_base="$hint"
+        else
+          clean="${hint//-/}"
+          if [[ "$hint" =~ ^[0-9a-fA-F-]+$ && ${#clean} -gt 12 ]]; then
+            if (( account_w >= 13 )); then
+              right=$((account_w - 9))
+              (( right < 4 )) && right=4
+              account_base="${clean:0:8}$(usage_trunc_glyph)${clean:${#clean}-right:right}"
+            elif (( account_w >= 8 )); then
+              right=4
+              left=$((account_w - right - 1))
+              (( left < 3 )) && left=3
+              account_base="${clean:0:left}$(usage_trunc_glyph)${clean:${#clean}-right:right}"
+            else
+              account_base="$(fit_profile_text "$clean" "$account_w")"
+            fi
+          else
+            account_base="$(fit_profile_text "$hint" "$account_w")"
+          fi
+        fi
       else
         account_base="$(short_account_hint "$hint" "$account_w")"
       fi
