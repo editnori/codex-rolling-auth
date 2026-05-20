@@ -4074,17 +4074,17 @@ selector_fzf_menu() {
   local status_w="$7"
   local mode="$8"
   local selector_palette_mode="$9"
-  local fzf_height choice kind action profile_choice fzf_prompt fzf_pointer fzf_header term_lines
+  local choice kind action profile_choice fzf_prompt fzf_pointer fzf_header term_lines
   local fzf_header_line_count=1
   local fzf_color_args=()
   local fzf_border_args=()
   local fzf_padding_args=()
   local fzf_header_args=()
   local fzf_opencode_theme=0
-  local selector_controls selector_control_sep max_height
+  local selector_controls selector_control_sep max_height fzf_content_height
   local fzf_color_arg
   local fzf_codex_colors='dark,fg:#eeeeee,fg+:#f4f0e8,bg:#141414,bg+:#262626,hl:#fab283,hl+:#ffd0a0,border:#323232,label:#fab283,prompt:#fab283,pointer:#fab283,header:#9a9a9a,info:#808080,gutter:#141414'
-  local fzf_vertical_padding=0 fzf_header_line action_label
+  local fzf_header_line action_label
 
   fzf_color_arg=""
   if [[ -n "${CODEX_AUTH_FZF_THEME:-}" ]]; then
@@ -4137,22 +4137,16 @@ selector_fzf_menu() {
       fzf_header_line_count=$((fzf_header_line_count + 1))
     done <<<"$fzf_header"
     (( fzf_header_line_count < 1 )) && fzf_header_line_count=1
-    fzf_height=$((${#rows_ref[@]} + fzf_header_line_count + 1))
+    fzf_content_height=$((${#rows_ref[@]} + fzf_header_line_count + 1))
     term_lines="${LINES:-}"
     [[ "$term_lines" =~ ^[0-9]+$ ]] || term_lines="$(tput lines 2>/dev/null || true)"
     if [[ "$term_lines" =~ ^[0-9]+$ ]]; then
       max_height=$((term_lines - 2))
       max_height=$(( max_height < 6 ? 6 : max_height ))
-      if (( fzf_height + 2 <= max_height )); then
-        fzf_height=$((fzf_height + 2))
-        fzf_vertical_padding=1
+      if (( fzf_content_height + 2 <= max_height )); then
+        fzf_padding_args+=(--padding=1,0,1,0)
       fi
-      fzf_height=$(( fzf_height > max_height ? max_height : fzf_height ))
-    elif (( fzf_height < 22 )); then
-      fzf_height=$((fzf_height + 2))
-      fzf_vertical_padding=1
-    fi
-    if (( fzf_vertical_padding )); then
+    elif (( fzf_content_height < 22 )); then
       fzf_padding_args+=(--padding=1,0,1,0)
     fi
     fzf_header_args+=(--header-lines="$fzf_header_line_count" --header-first)
