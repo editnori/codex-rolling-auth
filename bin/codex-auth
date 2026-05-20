@@ -8326,48 +8326,33 @@ codex_run_kill_script_for_log() {
   done < <(pgrep -P "$parent_pid" 2>/dev/null)
 }
 
-codex_run_limit_monitor_alive() {
-  local target_pid="$1"
-  local parent_pid="$2"
-  local watched_pid="$target_pid"
-
-  [[ "$watched_pid" =~ ^[0-9]+$ ]] || watched_pid="$parent_pid"
-  [[ "$watched_pid" =~ ^[0-9]+$ ]] || return 1
-  kill -0 "$watched_pid" 2>/dev/null
-}
-
-codex_run_kill_limited_target() {
-  local target_pid="$1"
-  local parent_pid="$2"
-  local run_file="$3"
-  local log_file="$4"
-  local signal="$5"
-  local require_alive="${6:-0}"
-
-  if [[ "$target_pid" =~ ^[0-9]+$ ]]; then
-    (( require_alive == 0 )) || kill -0 "$target_pid" 2>/dev/null || return 0
-    usage_kill_process_tree "$target_pid" "$signal"
-  else
-    codex_run_kill_script_for_log "$parent_pid" "$run_file" "$log_file" "$signal"
-  fi
-}
-
 codex_run_limit_monitor_loop() {
   local log_file="$1"
   local target_pid="$2"
   local parent_pid="${3:-}"
   local run_file="${4:-}"
   local interval="${CODEX_AUTH_ROLL_MONITOR_INTERVAL:-2}"
+  local watched_pid="$target_pid"
 
   [[ "$interval" =~ ^[1-9][0-9]*$ ]] || interval=2
+  [[ "$watched_pid" =~ ^[0-9]+$ ]] || watched_pid="$parent_pid"
+  [[ "$watched_pid" =~ ^[0-9]+$ ]] || return 0
 
   while true; do
-    codex_run_limit_monitor_alive "$target_pid" "$parent_pid" || return 0
+    kill -0 "$watched_pid" 2>/dev/null || return 0
 
     if codex_run_limit_detected "$log_file"; then
-      codex_run_kill_limited_target "$target_pid" "$parent_pid" "$run_file" "$log_file" TERM
+      if [[ "$target_pid" =~ ^[0-9]+$ ]]; then
+        usage_kill_process_tree "$target_pid" TERM
+      else
+        codex_run_kill_script_for_log "$parent_pid" "$run_file" "$log_file" TERM
+      fi
       sleep 1 || true
-      codex_run_kill_limited_target "$target_pid" "$parent_pid" "$run_file" "$log_file" KILL 1
+      if [[ "$target_pid" =~ ^[0-9]+$ ]]; then
+        kill -0 "$target_pid" 2>/dev/null && usage_kill_process_tree "$target_pid" KILL
+      else
+        codex_run_kill_script_for_log "$parent_pid" "$run_file" "$log_file" KILL
+      fi
       return 0
     fi
     sleep "$interval" || return 0
