@@ -7522,31 +7522,6 @@ patch_codex_ready_for_key() {
   [[ "$marker_key" == "$stock_key" && "$marker_patch_version" == "$PATCH_CODEX_PATCH_VERSION" ]]
 }
 
-patch_codex_extract_package_version() {
-  local stock_version="$1"
-  local candidate
-
-  candidate="${stock_version##* }"
-  if [[ "$candidate" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
-    printf '%s' "$candidate"
-  else
-    printf '0.0.0'
-  fi
-}
-
-patch_codex_local_package_version() {
-  local base="$1"
-  local suffix="${CODEX_AUTH_PATCH_VERSION_SUFFIX:-local}"
-
-  if [[ -z "$suffix" || "$suffix" == "0" ]]; then
-    printf '%s' "$base"
-  elif [[ "$base" == *+* ]]; then
-    printf '%s.%s' "$base" "$suffix"
-  else
-    printf '%s+%s' "$base" "$suffix"
-  fi
-}
-
 patch_codex_set_workspace_version() {
   local source_dir="$1"
   local package_version="$2"
@@ -7912,7 +7887,7 @@ cmd_patch_codex() {
   command -v git >/dev/null 2>&1 || die "git is required for patch-codex"
   command -v cargo >/dev/null 2>&1 || die "cargo is required for patch-codex"
 
-  local lock_wait lock_fd source_commit package_base package_version built_bin target_dir target_bin tmp_bin marker tmp
+  local lock_wait lock_fd source_commit package_base package_version package_suffix built_bin target_dir target_bin tmp_bin marker tmp
   local build_args=()
   lock_wait="${CODEX_AUTH_PATCH_LOCK_WAIT:-0}"
   [[ "$lock_wait" =~ ^[0-9]+$ ]] || lock_wait=0
@@ -7928,8 +7903,18 @@ cmd_patch_codex() {
   fi
 
   [[ -n "$source_dir" ]] || source_dir="$(patch_codex_root)/sources/$stock_key/source"
-  package_base="$(patch_codex_extract_package_version "$stock_version")"
-  package_version="$(patch_codex_local_package_version "$package_base")"
+  package_base="${stock_version##* }"
+  if [[ ! "$package_base" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+    package_base="0.0.0"
+  fi
+  package_suffix="${CODEX_AUTH_PATCH_VERSION_SUFFIX:-local}"
+  if [[ -z "$package_suffix" || "$package_suffix" == "0" ]]; then
+    package_version="$package_base"
+  elif [[ "$package_base" == *+* ]]; then
+    package_version="$package_base.$package_suffix"
+  else
+    package_version="$package_base+$package_suffix"
+  fi
 
   [[ "$quiet" == "1" ]] || print_status_note patch "source $ref"
   patch_codex_prepare_source "$source_dir" "$ref" "$no_fetch"
