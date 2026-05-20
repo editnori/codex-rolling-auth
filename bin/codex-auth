@@ -1447,23 +1447,6 @@ profile_list_summary() {
   printf '%s' "$summary"
 }
 
-profile_list_note_account() {
-  local name="$1"
-  local hint="$2"
-  local -n account_count_ref="$3"
-  local -n account_primary_ref="$4"
-  local -n alias_count_ref="$5"
-
-  [[ -n "$hint" ]] || return 0
-  account_count_ref["$hint"]=$(( ${account_count_ref["$hint"]:-0} + 1 ))
-  if (( account_count_ref["$hint"] > 1 )); then
-    alias_count_ref=$((alias_count_ref + 1))
-  fi
-  if [[ -z "${account_primary_ref["$hint"]:-}" || ( "${account_primary_ref["$hint"]:-}" == "current" && "$name" != "current" ) ]]; then
-    account_primary_ref["$hint"]="$name"
-  fi
-}
-
 profile_list_alias_of() {
   local hint="$1"
   local name="$2"
@@ -1519,7 +1502,15 @@ profile_list_scan_profiles() {
     if [[ -z "$active_name_ref" && -n "$active_fp" && "$fp" == "$active_fp" ]]; then
       active_name_ref="$name"
     fi
-    profile_list_note_account "$name" "$hint" "$account_count_var" "$account_primary_var" "$alias_count_var"
+    if [[ -n "$hint" ]]; then
+      account_count_ref["$hint"]=$(( ${account_count_ref["$hint"]:-0} + 1 ))
+      if (( account_count_ref["$hint"] > 1 )); then
+        alias_count_ref=$((alias_count_ref + 1))
+      fi
+      if [[ -z "${account_primary_ref["$hint"]:-}" || ( "${account_primary_ref["$hint"]:-}" == "current" && "$name" != "current" ) ]]; then
+        account_primary_ref["$hint"]="$name"
+      fi
+    fi
     count_ref=$((count_ref + 1))
   done
 }
