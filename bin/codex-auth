@@ -3358,22 +3358,6 @@ usage_summary_append_optional_parts() {
   return 0
 }
 
-usage_summary_clear_optional_flags() {
-  local -n show_week_out="$1"
-  local -n show_login_out="$2"
-  local -n show_unavailable_out="$3"
-  local -n show_offline_out="$4"
-  local -n show_stale_out="$5"
-  local -n show_cache_out="$6"
-
-  show_week_out=0
-  show_login_out=0
-  show_unavailable_out=0
-  show_offline_out=0
-  show_stale_out=0
-  show_cache_out=0
-}
-
 usage_summary_apply_fallback() {
   local -n line_out="$1"
   local -n show_ready_out="$2"
@@ -3453,7 +3437,14 @@ print_usage_summary_line() {
 
   usage_summary_apply_fallback line show_ready show_caps cap_label fallback_used \
     "$width" "$old_summary" "$has_active" "$active_has_usage" "$has_best" "$ready" "$caps" "$sep" "$active_profile" "$active_label" "$active_short"
-  (( ! fallback_used )) || usage_summary_clear_optional_flags show_week show_login show_unavailable show_offline show_stale show_cache
+  if (( fallback_used )); then
+    show_week=0
+    show_login=0
+    show_unavailable=0
+    show_offline=0
+    show_stale=0
+    show_cache=0
+  fi
 
   print_usage_summary_rendered_line "$line" "$width" \
     "$sep" "$old_summary" "$has_active" "$has_best" "$ready" "$active_profile" "$active_label" "$active_short" \
