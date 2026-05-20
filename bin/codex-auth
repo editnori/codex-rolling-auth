@@ -8112,22 +8112,16 @@ codex_run_write_launcher() {
 codex_run_watch_loop() {
   local auto_ttl="$1"
   local interval="${CODEX_AUTH_ROLL_INTERVAL:-60}"
+  local auto_args
 
   [[ "$interval" =~ ^[1-9][0-9]*$ ]] || interval=60
   while true; do
     sleep "$interval" || exit 0
-    codex_run_auto_select 1 "$auto_ttl"
+    [[ "${CODEX_AUTH_AUTO:-1}" != "0" ]] || continue
+    auto_args=(--quiet --no-background)
+    [[ "$auto_ttl" =~ ^[0-9]+$ ]] && auto_args+=(--ttl "$auto_ttl")
+    CODEX_AUTH_NO_BACKGROUND=1 cmd_auto "${auto_args[@]}" || true
   done
-}
-
-codex_run_auto_select() {
-  local run_auto="${1:-1}"
-  local auto_ttl="${2:-}"
-  local auto_args=(--quiet --no-background)
-
-  [[ "$run_auto" != "0" && "${CODEX_AUTH_AUTO:-1}" != "0" ]] || return 0
-  [[ "$auto_ttl" =~ ^[0-9]+$ ]] && auto_args+=(--ttl "$auto_ttl")
-  CODEX_AUTH_NO_BACKGROUND=1 cmd_auto "${auto_args[@]}" || true
 }
 
 codex_run_kill_script_for_log() {
@@ -8284,6 +8278,7 @@ cmd_run() {
   local keep_log="${CODEX_AUTH_KEEP_RUN_LOG:-0}"
   local log_enabled="${CODEX_AUTH_ROLL_LOG:-1}"
   local args=()
+  local auto_args=()
   local codex_cli attempt status log_file run_file watch_pid monitor_pid target_pid
 
   [[ "$max_attempts" =~ ^[1-9][0-9]*$ ]] || max_attempts=5
@@ -8331,7 +8326,11 @@ cmd_run() {
   trap 'codex_run_cleanup "${watch_pid:-}" "${monitor_pid:-}" "${run_file:-}" "${log_file:-}" "${keep_log:-0}"; exit 130' HUP INT TERM
 
   while true; do
-    codex_run_auto_select "$run_auto" "$auto_ttl"
+    if [[ "$run_auto" != "0" && "${CODEX_AUTH_AUTO:-1}" != "0" ]]; then
+      auto_args=(--quiet --no-background)
+      [[ "$auto_ttl" =~ ^[0-9]+$ ]] && auto_args+=(--ttl "$auto_ttl")
+      CODEX_AUTH_NO_BACKGROUND=1 cmd_auto "${auto_args[@]}" || true
+    fi
 
     watch_pid=""
     if [[ "$run_auto" != "0" && "$watch_enabled" != "0" && "${CODEX_AUTH_AUTO:-1}" != "0" ]]; then
