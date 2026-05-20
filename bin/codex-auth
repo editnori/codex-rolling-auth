@@ -3725,27 +3725,6 @@ usage_clamped_percent() {
   printf '%s' "$value"
 }
 
-selector_palette_bar_bg_segments() {
-  local tone="$1"
-  local width="$2"
-  local used="$3"
-  local bar_border_glyph="$4"
-
-  if (( used > 0 )); then
-    usage_tone_bg "$tone"
-    usage_tone_color track_edge
-    repeat_glyph "$bar_border_glyph" "$used"
-    usage_tone_reset
-  fi
-  if (( width > used )); then
-    usage_tone_bg track
-    usage_tone_color track_edge
-    repeat_glyph "$bar_border_glyph" "$((width - used))"
-    usage_tone_reset
-  fi
-  return 0
-}
-
 selector_palette_bar() {
   local percent="$1"
   local width="$2"
@@ -3773,7 +3752,18 @@ selector_palette_bar() {
       used="$full"
     fi
     if usage_color_active && [[ "$bg_style" == "bg" ]]; then
-      selector_palette_bar_bg_segments "$tone" "$width" "$used" "$bar_border_glyph"
+      if (( used > 0 )); then
+        usage_tone_bg "$tone"
+        usage_tone_color track_edge
+        repeat_glyph "$bar_border_glyph" "$used"
+        usage_tone_reset
+      fi
+      if (( width > used )); then
+        usage_tone_bg track
+        usage_tone_color track_edge
+        repeat_glyph "$bar_border_glyph" "$((width - used))"
+        usage_tone_reset
+      fi
     elif usage_unicode_enabled; then
       usage_tone_color "$tone"
       repeat_glyph "█" "$full"
