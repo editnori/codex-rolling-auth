@@ -2025,56 +2025,6 @@ usage_profile_width_hint() {
   done
 }
 
-usage_width_mode_defaults() {
-  local cols="$1"
-  local verbose="${2:-0}"
-  local row
-  local row_min row_max row_verbose
-  local mode role_w profile_min status_min reset_w label_w min_bar_w max_bar_w
-  local rows=(
-    "0 25 -1 pico 1 4 3 0 4 0 0"
-    "26 39 -1 nano 1 5 3 0 4 0 0"
-    "40 49 -1 micro 1 8 5 0 4 3 8"
-    "50 59 -1 tiny 1 8 5 5 4 3 8"
-    "60 71 -1 tight 6 8 7 5 4 4 8"
-    "72 93 1 compact 6 8 12 5 4 5 12"
-    "72 93 0 normal 6 8 12 11 4 4 16"
-    "94 111 1 normal 7 8 12 11 4 4 18"
-    "94 111 0 normal 7 8 12 11 4 4 20"
-    "112 9999 1 wide 7 8 12 11 4 4 18"
-    "112 9999 0 wide 7 8 12 11 4 4 22"
-  )
-
-  for row in "${rows[@]}"; do
-    read -r row_min row_max row_verbose mode role_w profile_min status_min reset_w label_w min_bar_w max_bar_w <<<"$row"
-    (( cols >= row_min && cols <= row_max )) || continue
-    (( row_verbose < 0 || row_verbose == verbose )) || continue
-    break
-  done
-
-  if (( verbose && cols >= 68 )) && [[ "$mode" == "tight" ]]; then
-    status_min=12
-  fi
-  if (( ! verbose )); then
-    if (( cols >= 61 )); then
-      role_w=5
-      status_min=12
-    else
-      role_w=1
-    fi
-  elif [[ "$mode" != "pico" && "$mode" != "nano" && "$mode" != "micro" && "$mode" != "tiny" && "$mode" != "tight" ]]; then
-    label_w=6
-    max_bar_w=12
-    if (( cols >= 112 )); then
-      max_bar_w=20
-    elif (( cols >= 94 )); then
-      max_bar_w=14
-    fi
-  fi
-
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$mode" "$role_w" "$profile_min" "$status_min" "$reset_w" "$label_w" "$min_bar_w" "$max_bar_w"
-}
-
 usage_mode_is_pico_or_nano() {
   case "$1" in
     pico|nano)
@@ -2216,10 +2166,47 @@ usage_render_widths() {
   local cell_overhead reset_prefix_w=0
   local cell_w status_w status_max bar_width available max_profile_w
   local role_profile_gap=1 status_gap=1 gap_w=4
-  local row row_verbose threshold max_w
+  local row row_min row_max row_verbose threshold max_w
+  local width_rows=(
+    "0 25 -1 pico 1 4 3 0 4 0 0"
+    "26 39 -1 nano 1 5 3 0 4 0 0"
+    "40 49 -1 micro 1 8 5 0 4 3 8"
+    "50 59 -1 tiny 1 8 5 5 4 3 8"
+    "60 71 -1 tight 6 8 7 5 4 4 8"
+    "72 93 1 compact 6 8 12 5 4 5 12"
+    "72 93 0 normal 6 8 12 11 4 4 16"
+    "94 111 1 normal 7 8 12 11 4 4 18"
+    "94 111 0 normal 7 8 12 11 4 4 20"
+    "112 9999 1 wide 7 8 12 11 4 4 18"
+    "112 9999 0 wide 7 8 12 11 4 4 22"
+  )
 
   wanted_profile_w="$(usage_profile_width_hint "$cols" "$wanted_profile_w" "$USAGE_VERBOSE")"
-  IFS=$'\t' read -r mode role_w profile_min status_min reset_w label_w min_bar_w max_bar_w <<<"$(usage_width_mode_defaults "$cols" "$USAGE_VERBOSE")"
+  for row in "${width_rows[@]}"; do
+    read -r row_min row_max row_verbose mode role_w profile_min status_min reset_w label_w min_bar_w max_bar_w <<<"$row"
+    (( cols >= row_min && cols <= row_max )) || continue
+    (( row_verbose < 0 || row_verbose == USAGE_VERBOSE )) || continue
+    break
+  done
+  if (( USAGE_VERBOSE && cols >= 68 )) && [[ "$mode" == "tight" ]]; then
+    status_min=12
+  fi
+  if (( ! USAGE_VERBOSE )); then
+    if (( cols >= 61 )); then
+      role_w=5
+      status_min=12
+    else
+      role_w=1
+    fi
+  elif [[ "$mode" != "pico" && "$mode" != "nano" && "$mode" != "micro" && "$mode" != "tiny" && "$mode" != "tight" ]]; then
+    label_w=6
+    max_bar_w=12
+    if (( cols >= 112 )); then
+      max_bar_w=20
+    elif (( cols >= 94 )); then
+      max_bar_w=14
+    fi
+  fi
   role_profile_gap=$((1 + (role_w > 1)))
   status_gap="$role_profile_gap"
   if [[ "$show_status" != "1" ]]; then
