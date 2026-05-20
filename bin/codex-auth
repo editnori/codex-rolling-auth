@@ -1939,17 +1939,6 @@ usage_profile_width_hint() {
   done
 }
 
-usage_mode_is_pico_or_nano() {
-  case "$1" in
-    pico|nano)
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
 print_usage_limit_cell() {
   local percent="$1"
   local mode="$3"
@@ -1987,7 +1976,7 @@ print_usage_limit_cell() {
     reset_visible=$((1 + ${#reset_text}))
   fi
   tone="$(usage_limit_tone "$percent")"
-  if usage_mode_is_pico_or_nano "$mode"; then
+  if [[ "$mode" == "pico" || "$mode" == "nano" ]]; then
     [[ "$percent" == "-" ]] && percent_label="$(usage_glyph '·' '.')"
     usage_tone_color "$tone"
     fit_text_center "$percent_label" "$cell_w"
@@ -2195,7 +2184,7 @@ usage_display_status() {
   esac
 
   if (( stale_status )); then
-    if usage_mode_is_pico_or_nano "$mode"; then
+    if [[ "$mode" == "pico" || "$mode" == "nano" ]]; then
       if [[ "$status" == *cap ]]; then
         printf 'cap'
       else
@@ -2232,7 +2221,7 @@ usage_display_status() {
     return 0
   fi
 
-  if usage_mode_is_pico_or_nano "$mode"; then
+  if [[ "$mode" == "pico" || "$mode" == "nano" ]]; then
     case "$status" in
       ok)
         printf 'ok'
@@ -2336,7 +2325,7 @@ usage_header_limit_label() {
   local reset_glyph
 
   if (( ! USAGE_VERBOSE )); then
-    if usage_mode_is_pico_or_nano "$mode"; then
+    if [[ "$mode" == "pico" || "$mode" == "nano" ]]; then
       printf '%s%%' "$nano_label"
     else
       printf '%s%%' "$label"
@@ -2438,7 +2427,7 @@ print_usage_render_header() {
   local short_label="${USAGE_SHORT_LABEL:-5h}"
   local short_nano_label
 
-  if usage_mode_is_pico_or_nano "$mode"; then
+  if [[ "$mode" == "pico" || "$mode" == "nano" ]]; then
     profile="name"
     status="st"
     [[ "$short_label" == "short" ]] && short_label="5h"
@@ -2533,7 +2522,7 @@ EOF
     fi
     (( placeholder_label_w > cell_w )) && placeholder_label_w="$cell_w"
     placeholder_center=0
-    usage_mode_is_pico_or_nano "$mode" && placeholder_center=1
+    [[ "$mode" == "pico" || "$mode" == "nano" ]] && placeholder_center=1
     for placeholder_i in 0 1; do
       (( placeholder_i > 0 )) && printf ' '
       (( cell_w <= 0 )) && continue
