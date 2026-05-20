@@ -5589,23 +5589,6 @@ selector_palette_controls_line() {
   fi
 }
 
-summary_token_by_prefix() {
-  local summary="$1"
-  local prefix="$2"
-  local sep token
-
-  sep="$(usage_separator)"
-  while [[ -n "$summary" ]]; do
-    IFS=$'\t' read -r token summary <<<"$(usage_summary_split_once "$summary" "$sep")"
-    token="${token//capped /cap }"
-    if [[ "$token" == "$prefix "* ]]; then
-      printf '%s' "$token"
-      return 0
-    fi
-  done
-  return 1
-}
-
 print_palette_title_line() {
   local namespace="$1"
   local label="$2"
@@ -5678,9 +5661,18 @@ print_palette_summary_header() {
   local total_w="$4"
   local mode="${5:-flat}"
   local gap="${6:-1}"
-  local right=""
+  local right="" sep token rest
 
-  right="$(summary_token_by_prefix "$summary" cache || true)"
+  sep="$(usage_separator)"
+  rest="$summary"
+  while [[ -n "$rest" ]]; do
+    IFS=$'\t' read -r token rest <<<"$(usage_summary_split_once "$rest" "$sep")"
+    token="${token//capped /cap }"
+    if [[ "$token" == cache\ * ]]; then
+      right="$token"
+      break
+    fi
+  done
   print_palette_title_line "$namespace" "$label" "$right" "$total_w"
   if [[ "$mode" == "usage" && "${CODEX_AUTH_USAGE_CONTEXT:-0}" == "1" ]]; then
     selector_palette_context_line "$summary" "$total_w"
