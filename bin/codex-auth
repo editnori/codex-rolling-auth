@@ -4008,30 +4008,6 @@ print_usage_summary_block() {
   return 0
 }
 
-selector_header_text() {
-  local summary="$1"
-  local controls="$2"
-  local role_w="$3"
-  local profile_w="$4"
-  local cell_w="$5"
-  local status_w="$6"
-  local total_w="$7"
-  local mode="$8"
-  local title="${9:-}"
-  local action_label="action"
-
-  print_usage_summary_block "$summary" "$total_w" "$title"
-  if (( role_w <= 1 )); then
-    action_label=" "
-  elif (( role_w < 6 )); then
-    action_label="act"
-  fi
-  print_usage_render_header "$action_label" "$role_w" "$profile_w" "$cell_w" "$status_w" "$mode"
-  repeat_glyph "$(usage_glyph '─' '-')" "$total_w"
-  printf '\n'
-  fit_text_rtrim "$controls" "$total_w"
-}
-
 selector_palette_limit_context() {
   local text="$1"
   local name="" compact_name="" label="" value="" token
@@ -4385,7 +4361,7 @@ selector_fzf_menu() {
   local fzf_color_arg
   local fzf_codex_colors='dark,fg:#eeeeee,fg+:#f4f0e8,bg:#141414,bg+:#262626,hl:#fab283,hl+:#ffd0a0,border:#323232,label:#fab283,prompt:#fab283,pointer:#fab283,header:#9a9a9a,info:#808080,gutter:#141414'
   local palette_effective_w right_margin terminal_w primary_w week_w short_w palette_status_w status_gap metric_gap
-  local fzf_vertical_padding=0 fzf_header_line
+  local fzf_vertical_padding=0 fzf_header_line action_label
 
   fzf_height=$((${#rows_ref[@]} + 8))
   (( fzf_height < 12 )) && fzf_height=12
@@ -4488,7 +4464,19 @@ selector_fzf_menu() {
     fzf_height_arg="~$fzf_height"
     fzf_header_args+=(--header-lines="$fzf_header_line_count" --header-first)
   else
-    fzf_header="$(selector_header_text "$summary_text" "$selector_controls" "$role_w" "$profile_w" "$cell_w" "$status_w" "$total_w" "$mode")"
+    action_label="action"
+    if (( role_w <= 1 )); then
+      action_label=" "
+    elif (( role_w < 6 )); then
+      action_label="act"
+    fi
+    fzf_header="$(
+      print_usage_summary_block "$summary_text" "$total_w"
+      print_usage_render_header "$action_label" "$role_w" "$profile_w" "$cell_w" "$status_w" "$mode"
+      repeat_glyph "$(usage_glyph '─' '-')" "$total_w"
+      printf '\n'
+      fit_text_rtrim "$selector_controls" "$total_w"
+    )"
     fzf_header_args+=(--header="$fzf_header")
   fi
 
