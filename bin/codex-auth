@@ -4657,11 +4657,11 @@ selector_menu_row_for_record() {
   local status_w="$7"
   local bar_width="$8"
   local total_w="$9"
-  local selector_profile_w="${10}"
-  local action_w="${11}"
-  local record="${12}"
+  local record="${10}"
   local valid weekly_used short_used mark profile plan weekly short status short_label weekly_reset short_reset cache_age
   local display display_status palette_profile detail action_role row_action row_profile_field active_row=0
+  local selector_profile_w="$profile_w" action_w=5
+  (( selector_profile_w < 10 )) && selector_profile_w=10
 
   IFS=$'\t' read -r valid weekly_used short_used mark profile plan weekly short status short_label weekly_reset short_reset cache_age <<<"$record"
   [[ -n "$profile" ]] || return 1
@@ -4805,7 +4805,7 @@ arrow_action_menu() {
   (( selector_profile_w < 10 )) && selector_profile_w=10
 
   for record in "${records[@]}"; do
-    row="$(selector_menu_row_for_record "$default_profile" "$selector_palette_mode" "$mode" "$role_w" "$profile_w" "$cell_w" "$status_w" "$bar_width" "$total_w" "$selector_profile_w" "$action_w" "$record")" || continue
+    row="$(selector_menu_row_for_record "$default_profile" "$selector_palette_mode" "$mode" "$role_w" "$profile_w" "$cell_w" "$status_w" "$bar_width" "$total_w" "$record")" || continue
     IFS=$'\037' read -r active_row row_kind row_action row_profile_field row_display <<<"$row"
     (( active_row )) && has_active_row=1
     rows+=("$row_kind"$'\t'"$row_action"$'\t'"$row_profile_field"$'\t'"$row_display")
