@@ -5484,38 +5484,6 @@ selector_current_menu_row() {
   printf 'action\tskip\t-\t%s\n' "$display"
 }
 
-selector_palette_mode_for_fzf() {
-  local use_fzf="$1"
-
-  if (( ! use_fzf )); then
-    printf '1'
-    return 0
-  fi
-  case "${CODEX_AUTH_FZF_THEME:-}" in
-    codex|1|'')
-      printf '1'
-      ;;
-    *)
-      printf '0'
-      ;;
-  esac
-}
-
-selector_render_columns() {
-  local use_fzf="$1"
-  local selector_palette_mode="$2"
-  local render_cols="$3"
-
-  if (( use_fzf && selector_palette_mode )); then
-    render_cols=$((render_cols - 3))
-    (( render_cols < 20 )) && render_cols=20
-  elif (( ! use_fzf )); then
-    render_cols=$((render_cols - 4))
-    (( render_cols < 16 )) && render_cols=16
-  fi
-  printf '%s' "$render_cols"
-}
-
 selector_menu_rows() {
   local -n rows_ref="$1"
   local -n has_active_ref="$2"
@@ -5568,12 +5536,25 @@ arrow_action_menu() {
     use_fzf=0
   fi
 
-  selector_palette_mode="$(selector_palette_mode_for_fzf "$use_fzf")"
+  if (( ! use_fzf )); then
+    selector_palette_mode=1
+  else
+    case "${CODEX_AUTH_FZF_THEME:-}" in
+      codex|1|'') selector_palette_mode=1 ;;
+      *) selector_palette_mode=0 ;;
+    esac
+  fi
   USAGE_COLOR_ENABLED=0
   if (( use_fzf || selector_palette_mode )) && color_enabled; then
     USAGE_COLOR_ENABLED=1
   fi
-  render_cols="$(selector_render_columns "$use_fzf" "$selector_palette_mode" "$render_cols")"
+  if (( use_fzf && selector_palette_mode )); then
+    render_cols=$((render_cols - 3))
+    (( render_cols < 20 )) && render_cols=20
+  elif (( ! use_fzf )); then
+    render_cols=$((render_cols - 4))
+    (( render_cols < 16 )) && render_cols=16
+  fi
   IFS=$'\t' read -r mode role_w profile_w cell_w status_w bar_width <<<"$(usage_render_widths "$render_cols")"
   total_w="$(usage_render_total_width "$role_w" "$profile_w" "$cell_w" "$status_w")"
   total_w="$(clamp_int_between "$total_w" 0 "$render_cols")"
