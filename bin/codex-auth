@@ -662,13 +662,13 @@ print_result_block() {
     active\ *|using\ profile\ *)
       title="Active profile"
       ;;
-    saved\ *|login\ *|imported\ *|saved\ profile\ *|logged\ in\ profile\ *|imported\ profile\ *)
+    saved\ *|login\ *|imported\ *|logged\ in\ profile\ *)
       title="Saved profile"
       ;;
     export\ *|exported\ profile\ *)
       title="Export"
       ;;
-    removed\ active\ *|removed\ *|removed\ active\ profile\ *|removed\ profile\ *)
+    removed\ *)
       title="Removed profile"
       ;;
     *)
