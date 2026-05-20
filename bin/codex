@@ -49,18 +49,14 @@ find_real_codex() {
   return 1
 }
 
-is_passthrough_command() {
+should_wrap_session() {
   case "${1:-}" in
     login|logout|update|completion|mcp|plugin|features|app-server|help|--help|-h|--version|-V)
-      return 0
+      return 1
       ;;
   esac
 
-  return 1
-}
-
-should_wrap_session() {
-  ! is_passthrough_command "$@"
+  return 0
 }
 
 should_auto_select() {
