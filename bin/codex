@@ -2,21 +2,14 @@
 set -euo pipefail
 
 CODEX_AUTH_SHIM=1
-
-shim_path() {
-  realpath "$0" 2>/dev/null || printf '%s\n' "$0"
-}
-
-is_self() {
-  local candidate="$1"
-  [[ "$(realpath "$candidate" 2>/dev/null || printf '%s' "$candidate")" == "$(shim_path)" ]]
-}
+SHIM_PATH="$(realpath "$0" 2>/dev/null || printf '%s\n' "$0")"
 
 emit_real_codex_candidate() {
-  local candidate="$1"
+  local candidate="$1" candidate_path
 
   [[ -x "$candidate" ]] || return 1
-  is_self "$candidate" && return 1
+  candidate_path="$(realpath "$candidate" 2>/dev/null || printf '%s' "$candidate")"
+  [[ "$candidate_path" == "$SHIM_PATH" ]] && return 1
   printf '%s\n' "$candidate"
 }
 
