@@ -5226,9 +5226,13 @@ patch_codex_root() {
 patch_codex_marker_value() {
   local key="$1"
   local marker="${2:-$(patch_codex_root)/current.env}"
+  local line
 
   [[ -f "$marker" ]] || return 1
-  awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$marker"
+  while IFS= read -r line; do
+    [[ "$line" == "$key="* ]] && { printf '%s\n' "${line#*=}"; return 0; }
+  done < "$marker"
+  return 0
 }
 
 patch_codex_ready_for_key() {
