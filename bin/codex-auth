@@ -2278,17 +2278,6 @@ usage_cell_overhead() {
   fi
 }
 
-usage_max_profile_width() {
-  local cols="$1"
-  local role_w="$2"
-  local status_min="$3"
-  local cell_overhead="$4"
-  local min_bar_w="$5"
-  local gap_w="$6"
-
-  printf '%s' "$(( cols - role_w - status_min - (2 * (cell_overhead + min_bar_w)) - gap_w ))"
-}
-
 usage_render_widths() {
   local cols="$1"
   local mode role_w
@@ -2316,14 +2305,14 @@ usage_render_widths() {
   reset_prefix_w="$(usage_reset_prefix_width "$reset_w")"
   cell_overhead="$(usage_cell_overhead "$mode" "$label_w" "$reset_w" "$reset_prefix_w")"
 
-  max_profile_w="$(usage_max_profile_width "$cols" "$role_w" "$status_min" "$cell_overhead" "$min_bar_w" "$gap_w")"
+  max_profile_w=$(( cols - role_w - status_min - (2 * (cell_overhead + min_bar_w)) - gap_w ))
   if (( max_profile_w < 12 && reset_w > 5 )); then
     mode="tight"
     reset_w=5
     label_w=4
     reset_prefix_w="$(usage_reset_prefix_width "$reset_w")"
     cell_overhead="$(usage_cell_overhead "$mode" "$label_w" "$reset_w" "$reset_prefix_w")"
-    max_profile_w="$(usage_max_profile_width "$cols" "$role_w" "$status_min" "$cell_overhead" "$min_bar_w" "$gap_w")"
+    max_profile_w=$(( cols - role_w - status_min - (2 * (cell_overhead + min_bar_w)) - gap_w ))
   fi
 
   profile_w="$(clamp_int_between "$wanted_profile_w" "$profile_min" "$max_profile_w")"
