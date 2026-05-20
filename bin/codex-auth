@@ -1159,127 +1159,100 @@ print_empty_profiles() {
   print_detail_line "saved" "$saved_path" "$label_w" "$value_w" good
 }
 
-status_note_base() {
-  local kind="$1"
-  local -n line_ref="$2"
-  local -n tone_ref="$3"
-  local glyph
-
-  case "$kind" in
-    refresh)
-      if usage_unicode_enabled; then
-        line_ref="↻ refresh"
-      else
-        line_ref="refresh"
-      fi
-      tone_ref="accent"
-      ;;
-    ready)
-      line_ref="ready"
-      tone_ref="good"
-      ;;
-    blocked)
-      line_ref="! blocked"
-      tone_ref="bad"
-      ;;
-    cache)
-      line_ref="cache"
-      tone_ref="warn"
-      ;;
-    recover)
-      if usage_unicode_enabled; then
-        line_ref="↳ recover"
-      else
-        line_ref="recover"
-      fi
-      tone_ref="accent"
-      ;;
-    roll)
-      line_ref="roll"
-      tone_ref="warn"
-      ;;
-    *)
-      glyph="$(usage_meta_glyph)"
-      line_ref="$glyph $kind"
-      ;;
-  esac
-}
-
-status_note_apply_detail() {
-  local kind="$1"
-  local cols="$2"
-  local -n line_ref="$3"
-  local -n detail_ref="$4"
-
-  case "$kind:$detail_ref" in
-    "ready:already on best profile")
-      if (( cols < 28 )); then
-        line_ref="already best"
-      else
-        line_ref="already on best profile"
-      fi
-      detail_ref=""
-      ;;
-    "blocked:no ready profile")
-      line_ref="! no ready profile"
-      detail_ref=""
-      ;;
-    "blocked:choose switch/login/skip")
-      line_ref="! choose row"
-      detail_ref=""
-      ;;
-    "cache:refresh busy")
-      detail_ref="busy"
-      ;;
-    "roll:usage limit, rotating")
-      line_ref="roll auth"
-      (( cols >= 32 )) && detail_ref="resume"
-      ;;
-  esac
-}
-
-status_note_compact_overflow() {
-  local kind="$1"
-  local detail="$2"
-  local -n line_ref="$3"
-  local compact_detail
-
-  case "$kind:$detail" in
-    "blocked:no ready profile")
-      line_ref="! no ready profile"
-      ;;
-    "ready:already on best profile")
-      line_ref="ready already best"
-      ;;
-    "recover:latest session")
-      if usage_unicode_enabled; then
-        line_ref="↳ recover latest"
-      else
-        line_ref="recover latest"
-      fi
-      ;;
-    "recover:session "*)
-      compact_detail="${detail#session }"
-      if usage_unicode_enabled; then
-        line_ref="↳ recover $compact_detail"
-      else
-        line_ref="recover $compact_detail"
-      fi
-      ;;
-  esac
-}
-
 print_status_note() {
   local kind="$1"
   local detail="${2:-}"
-  local cols line tone="muted"
+  local cols line tone="muted" glyph compact_detail
 
   cols="$(terminal_width)"
-  status_note_base "$kind" line tone
-  status_note_apply_detail "$kind" "$cols" line detail
+  case "$kind" in
+    refresh)
+      if usage_unicode_enabled; then
+        line="↻ refresh"
+      else
+        line="refresh"
+      fi
+      tone="accent"
+      ;;
+    ready)
+      line="ready"
+      tone="good"
+      ;;
+    blocked)
+      line="! blocked"
+      tone="bad"
+      ;;
+    cache)
+      line="cache"
+      tone="warn"
+      ;;
+    recover)
+      if usage_unicode_enabled; then
+        line="↳ recover"
+      else
+        line="recover"
+      fi
+      tone="accent"
+      ;;
+    roll)
+      line="roll"
+      tone="warn"
+      ;;
+    *)
+      glyph="$(usage_meta_glyph)"
+      line="$glyph $kind"
+      ;;
+  esac
+  case "$kind:$detail" in
+    "ready:already on best profile")
+      if (( cols < 28 )); then
+        line="already best"
+      else
+        line="already on best profile"
+      fi
+      detail=""
+      ;;
+    "blocked:no ready profile")
+      line="! no ready profile"
+      detail=""
+      ;;
+    "blocked:choose switch/login/skip")
+      line="! choose row"
+      detail=""
+      ;;
+    "cache:refresh busy")
+      detail="busy"
+      ;;
+    "roll:usage limit, rotating")
+      line="roll auth"
+      (( cols >= 32 )) && detail="resume"
+      ;;
+  esac
   [[ -n "$detail" ]] && line+=" $detail"
   if (( ${#line} > cols )); then
-    status_note_compact_overflow "$kind" "$detail" line
+    case "$kind:$detail" in
+      "blocked:no ready profile")
+        line="! no ready profile"
+        ;;
+      "ready:already on best profile")
+        line="ready already best"
+        ;;
+      "recover:latest session")
+        if usage_unicode_enabled; then
+          line="↳ recover latest"
+        else
+          line="recover latest"
+        fi
+        ;;
+      "recover:session "*)
+        compact_detail="${detail#session }"
+        if usage_unicode_enabled; then
+          line="↳ recover $compact_detail"
+        else
+          line="recover $compact_detail"
+        fi
+        ;;
+    esac
   fi
 
   USAGE_COLOR_ENABLED=0
