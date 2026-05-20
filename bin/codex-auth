@@ -2094,57 +2094,6 @@ cmd_login() {
   rm -f "$hidden_auth"
 }
 
-parse_add_positional_arg() {
-  local arg="$1"
-  local -n add_source_ref="$2"
-  local -n add_source_seen_ref="$3"
-  local -n add_login_args_ref="$4"
-
-  if [[ -f "$arg" && -z "$add_source_ref" ]]; then
-    add_source_ref="$arg"
-    add_source_seen_ref=1
-  else
-    add_login_args_ref+=("$arg")
-  fi
-}
-
-parse_add_args() {
-  local source_var="$1"
-  local source_seen_var="$2"
-  local login_args_var="$3"
-  local -n source_ref="$source_var"
-  local -n source_seen_ref="$source_seen_var"
-  local -n login_args_ref="$login_args_var"
-  shift 3
-
-  while (( $# > 0 )); do
-    case "$1" in
-      --current)
-        (( source_seen_ref == 0 )) || die "add accepts one source: --current or --file"
-        source_ref="$AUTH_FILE"
-        source_seen_ref=1
-        shift
-        ;;
-      --file|--from)
-        [[ -n "${2:-}" ]] || die "usage: codex-auth add <name> --file <file>"
-        (( source_seen_ref == 0 )) || die "add accepts one source: --current or --file"
-        source_ref="$2"
-        source_seen_ref=1
-        shift 2
-        ;;
-      --)
-        shift
-        login_args_ref+=("$@")
-        break
-        ;;
-      *)
-        parse_add_positional_arg "$1" "$source_var" "$source_seen_var" "$login_args_var"
-        shift
-        ;;
-    esac
-  done
-}
-
 cmd_add() {
   local name="${1:-}"
   [[ -n "$name" ]] || die "usage: codex-auth add <name> [--current | --file <file> | codex login args...]"
@@ -2155,7 +2104,37 @@ cmd_add() {
   local source_seen=0
   local login_args=()
 
-  parse_add_args source source_seen login_args "$@"
+  while (( $# > 0 )); do
+    case "$1" in
+      --current)
+        (( source_seen == 0 )) || die "add accepts one source: --current or --file"
+        source="$AUTH_FILE"
+        source_seen=1
+        shift
+        ;;
+      --file|--from)
+        [[ -n "${2:-}" ]] || die "usage: codex-auth add <name> --file <file>"
+        (( source_seen == 0 )) || die "add accepts one source: --current or --file"
+        source="$2"
+        source_seen=1
+        shift 2
+        ;;
+      --)
+        shift
+        login_args+=("$@")
+        break
+        ;;
+      *)
+        if [[ -f "$1" && -z "$source" ]]; then
+          source="$1"
+          source_seen=1
+        else
+          login_args+=("$1")
+        fi
+        shift
+        ;;
+    esac
+  done
 
   if [[ -n "$source" ]]; then
     (( ${#login_args[@]} == 0 )) || die "add cannot mix --file/--current with login args"
