@@ -4218,19 +4218,6 @@ selector_header_text() {
   fit_text_rtrim "$controls" "$total_w"
 }
 
-selector_palette_header_text() {
-  local summary="$1"
-  local controls="$2"
-  local total_w="$3"
-
-  selector_palette_controls_line "$controls" "$total_w"
-  printf '\n'
-  if [[ "${CODEX_AUTH_SELECTOR_CONTEXT:-0}" == "1" ]]; then
-    selector_palette_context_line "$summary" "$total_w"
-  fi
-  selector_palette_table_header "$total_w"
-}
-
 selector_palette_take_short_limit() {
   local text="$1"
   local name label value
@@ -4613,7 +4600,14 @@ selector_fzf_prepare_header() {
   local fzf_vertical_padding=0 fzf_header_line max_height
 
   if (( fzf_opencode_theme )); then
-    fzf_header_ref="$(selector_palette_header_text "$summary_text" "$selector_controls" "$total_w")"
+    fzf_header_ref="$(
+      selector_palette_controls_line "$selector_controls" "$total_w"
+      printf '\n'
+      if [[ "${CODEX_AUTH_SELECTOR_CONTEXT:-0}" == "1" ]]; then
+        selector_palette_context_line "$summary_text" "$total_w"
+      fi
+      selector_palette_table_header "$total_w"
+    )"
     fzf_header_line_count_ref=0
     while IFS= read -r fzf_header_line; do
       fzf_header_line_count_ref=$((fzf_header_line_count_ref + 1))
