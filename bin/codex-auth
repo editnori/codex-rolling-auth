@@ -876,86 +876,65 @@ COMPACT_ERROR_PREFIX_ROWS=(
   $'profile not found: \tprofile'
 )
 
-compact_error_static_message() {
-  local cols="$1"
-  local message="$2"
-  local row source cutoff short wide
-
-  for row in "${COMPACT_ERROR_STATIC_ROWS[@]}"; do
-    IFS=$'\t' read -r source cutoff short wide <<<"$row"
-    if [[ "$message" == "$source" ]]; then
-      if [[ "$cutoff" == "-" ]]; then
-        printf '%s' "$short"
-      else
-        compact_width_choice "$cols" "$cutoff" "$short" "$wide"
-      fi
-      return 0
-    fi
-  done
-  return 1
-}
-
-compact_error_prefixed_message() {
-  local cols="$1"
-  local message="$2"
-  local row prefix kind cutoff short wide suffix tail value
-
-  for row in "${COMPACT_ERROR_PREFIX_ROWS[@]}"; do
-    IFS=$'\t' read -r prefix kind cutoff short wide suffix <<<"$row"
-    [[ "$message" == "$prefix"* ]] || continue
-    tail="${message#"$prefix"}"
-    case "$kind" in
-      base)
-        value="${tail##*/}"
-        ;;
-      dir)
-        value="${tail##*/}"
-        if (( cols < 24 )); then
-          printf 'missing dir'
-        elif (( cols < 28 )); then
-          printf 'missing dir %s' "$value"
-        else
-          printf 'missing dir: %s' "$value"
-        fi
-        return 0
-        ;;
-      command)
-        value="${tail%"$suffix"}"
-        ;;
-      raw)
-        value="$tail"
-        ;;
-      profile)
-        if (( cols < 40 )); then
-          value="$(fit_profile_text_rtrim "$tail" "$((cols - 15))")"
-          printf 'missing %s' "$value"
-        else
-          printf 'not found: %s' "$tail"
-        fi
-        return 0
-        ;;
-    esac
-    if (( cols < cutoff )); then
-      printf "$short" "$value"
-    else
-      printf "$wide" "$value"
-    fi
-    return 0
-  done
-  return 1
-}
-
 compact_error_message() {
   local message="$1"
   local cols="$2"
+  local row source cutoff short wide prefix kind suffix tail value
 
   if (( cols < 68 )); then
-    if compact_error_static_message "$cols" "$message"; then
+    for row in "${COMPACT_ERROR_STATIC_ROWS[@]}"; do
+      IFS=$'\t' read -r source cutoff short wide <<<"$row"
+      if [[ "$message" == "$source" ]]; then
+        if [[ "$cutoff" == "-" ]]; then
+          printf '%s' "$short"
+        else
+          compact_width_choice "$cols" "$cutoff" "$short" "$wide"
+        fi
+        return 0
+      fi
+    done
+    for row in "${COMPACT_ERROR_PREFIX_ROWS[@]}"; do
+      IFS=$'\t' read -r prefix kind cutoff short wide suffix <<<"$row"
+      [[ "$message" == "$prefix"* ]] || continue
+      tail="${message#"$prefix"}"
+      case "$kind" in
+        base)
+          value="${tail##*/}"
+          ;;
+        dir)
+          value="${tail##*/}"
+          if (( cols < 24 )); then
+            printf 'missing dir'
+          elif (( cols < 28 )); then
+            printf 'missing dir %s' "$value"
+          else
+            printf 'missing dir: %s' "$value"
+          fi
+          return 0
+          ;;
+        command)
+          value="${tail%"$suffix"}"
+          ;;
+        raw)
+          value="$tail"
+          ;;
+        profile)
+          if (( cols < 40 )); then
+            value="$(fit_profile_text_rtrim "$tail" "$((cols - 15))")"
+            printf 'missing %s' "$value"
+          else
+            printf 'not found: %s' "$tail"
+          fi
+          return 0
+          ;;
+      esac
+      if (( cols < cutoff )); then
+        printf "$short" "$value"
+      else
+        printf "$wide" "$value"
+      fi
       return 0
-    fi
-    if compact_error_prefixed_message "$cols" "$message"; then
-      return 0
-    fi
+    done
   fi
 
   if (( cols < 32 )) && [[ "$message" == usage:\ codex-auth\ * ]]; then
