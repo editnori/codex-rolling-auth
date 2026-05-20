@@ -4546,68 +4546,6 @@ print_palette_summary_header() {
   fi
 }
 
-selector_fzf_prepare_header() {
-  local -n header_rows_ref="$1"
-  local summary_text="$2"
-  local selector_controls="$3"
-  local total_w="$4"
-  local role_w="$5"
-  local profile_w="$6"
-  local cell_w="$7"
-  local status_w="$8"
-  local mode="$9"
-  local fzf_opencode_theme="${10}"
-  local term_lines="${11}"
-  local -n fzf_header_ref="${12}"
-  local -n fzf_height_ref="${13}"
-  local -n fzf_height_arg_ref="${14}"
-  local -n fzf_outer_top_padding_ref="${15}"
-  local -n fzf_header_line_count_ref="${16}"
-  local -n fzf_padding_args_ref="${17}"
-  local -n fzf_header_args_ref="${18}"
-  local fzf_vertical_padding=0 fzf_header_line max_height
-
-  if (( fzf_opencode_theme )); then
-    fzf_header_ref="$(
-      selector_palette_controls_line "$selector_controls" "$total_w"
-      printf '\n'
-      if [[ "${CODEX_AUTH_SELECTOR_CONTEXT:-0}" == "1" ]]; then
-        selector_palette_context_line "$summary_text" "$total_w"
-      fi
-      selector_palette_table_header "$total_w"
-    )"
-    fzf_header_line_count_ref=0
-    while IFS= read -r fzf_header_line; do
-      fzf_header_line_count_ref=$((fzf_header_line_count_ref + 1))
-    done <<<"$fzf_header_ref"
-    (( fzf_header_line_count_ref < 1 )) && fzf_header_line_count_ref=1
-    fzf_height_ref=$((${#header_rows_ref[@]} + fzf_header_line_count_ref + 1))
-    if [[ "$term_lines" =~ ^[0-9]+$ ]]; then
-      max_height=$((term_lines - 2))
-      max_height=$(( max_height < 6 ? 6 : max_height ))
-      if (( fzf_height_ref + 2 <= max_height )); then
-        fzf_height_ref=$((fzf_height_ref + 2))
-        fzf_vertical_padding=1
-      fi
-      fzf_height_ref=$(( fzf_height_ref > max_height ? max_height : fzf_height_ref ))
-    elif (( fzf_height_ref < 22 )); then
-      fzf_height_ref=$((fzf_height_ref + 2))
-      fzf_vertical_padding=1
-    fi
-    if (( fzf_vertical_padding )); then
-      fzf_padding_args_ref+=(--padding=1,0,1,0)
-    fi
-    if [[ "${CODEX_AUTH_SELECTOR_CENTER:-0}" == "1" && "$term_lines" =~ ^[0-9]+$ ]] && (( term_lines > fzf_height_ref + 1 )); then
-      fzf_outer_top_padding_ref=$(((term_lines - fzf_height_ref) / 2))
-    fi
-    fzf_height_arg_ref="~$fzf_height_ref"
-    fzf_header_args_ref+=(--header-lines="$fzf_header_line_count_ref" --header-first)
-  else
-    fzf_header_ref="$(selector_header_text "$summary_text" "$selector_controls" "$role_w" "$profile_w" "$cell_w" "$status_w" "$total_w" "$mode")"
-    fzf_header_args_ref+=(--header="$fzf_header_ref")
-  fi
-}
-
 selector_fzf_menu() {
   local -n rows_ref="$1"
   local summary_text="$2"
@@ -4633,6 +4571,7 @@ selector_fzf_menu() {
   local selector_controls selector_control_sep max_height
   local fzf_color_arg
   local palette_effective_w right_margin terminal_w primary_w week_w short_w palette_status_w status_gap metric_gap
+  local fzf_vertical_padding=0 fzf_header_line
 
   fzf_height=$((${#rows_ref[@]} + 8))
   (( fzf_height < 12 )) && fzf_height=12
@@ -4699,8 +4638,45 @@ selector_fzf_menu() {
   else
     fzf_border_args+=(--border=rounded --border-label=' auth profiles ' --border-label-pos=3)
   fi
-  selector_fzf_prepare_header rows_ref "$summary_text" "$selector_controls" "$total_w" "$role_w" "$profile_w" "$cell_w" "$status_w" "$mode" \
-    "$fzf_opencode_theme" "$term_lines" fzf_header fzf_height fzf_height_arg fzf_outer_top_padding fzf_header_line_count fzf_padding_args fzf_header_args
+  if (( fzf_opencode_theme )); then
+    fzf_header="$(
+      selector_palette_controls_line "$selector_controls" "$total_w"
+      printf '\n'
+      if [[ "${CODEX_AUTH_SELECTOR_CONTEXT:-0}" == "1" ]]; then
+        selector_palette_context_line "$summary_text" "$total_w"
+      fi
+      selector_palette_table_header "$total_w"
+    )"
+    fzf_header_line_count=0
+    while IFS= read -r fzf_header_line; do
+      fzf_header_line_count=$((fzf_header_line_count + 1))
+    done <<<"$fzf_header"
+    (( fzf_header_line_count < 1 )) && fzf_header_line_count=1
+    fzf_height=$((${#rows_ref[@]} + fzf_header_line_count + 1))
+    if [[ "$term_lines" =~ ^[0-9]+$ ]]; then
+      max_height=$((term_lines - 2))
+      max_height=$(( max_height < 6 ? 6 : max_height ))
+      if (( fzf_height + 2 <= max_height )); then
+        fzf_height=$((fzf_height + 2))
+        fzf_vertical_padding=1
+      fi
+      fzf_height=$(( fzf_height > max_height ? max_height : fzf_height ))
+    elif (( fzf_height < 22 )); then
+      fzf_height=$((fzf_height + 2))
+      fzf_vertical_padding=1
+    fi
+    if (( fzf_vertical_padding )); then
+      fzf_padding_args+=(--padding=1,0,1,0)
+    fi
+    if [[ "${CODEX_AUTH_SELECTOR_CENTER:-0}" == "1" && "$term_lines" =~ ^[0-9]+$ ]] && (( term_lines > fzf_height + 1 )); then
+      fzf_outer_top_padding=$(((term_lines - fzf_height) / 2))
+    fi
+    fzf_height_arg="~$fzf_height"
+    fzf_header_args+=(--header-lines="$fzf_header_line_count" --header-first)
+  else
+    fzf_header="$(selector_header_text "$summary_text" "$selector_controls" "$role_w" "$profile_w" "$cell_w" "$status_w" "$total_w" "$mode")"
+    fzf_header_args+=(--header="$fzf_header")
+  fi
 
   for ((fzf_pad_i = 0; fzf_pad_i < fzf_outer_top_padding; fzf_pad_i++)); do
     printf '\n'
