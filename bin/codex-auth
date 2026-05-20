@@ -7184,23 +7184,6 @@ usage_best_selection_into() {
   fi
 }
 
-usage_auto_switch_result() {
-  local rendered_output="$1"
-  local default_profile="$2"
-  local active_is_best="$3"
-
-  if (( rendered_output )); then
-    printf '\n'
-  fi
-  if [[ -n "$default_profile" ]]; then
-    cmd_use "$default_profile"
-  elif [[ "$active_is_best" == "1" && "$USAGE_QUIET" != "1" ]]; then
-    print_status_note ready "already on best profile"
-  elif [[ "$USAGE_QUIET" != "1" ]]; then
-    print_status_note blocked "no ready profile"
-  fi
-}
-
 usage_handle_menu_action() {
   case "$MENU_ACTION" in
     login)
@@ -7275,7 +7258,17 @@ cmd_usage() {
     fi
 
     case "$auto_switch:$USAGE_SELECT" in
-      1:*) usage_auto_switch_result "$rendered_output" "$default_profile" "$active_is_best"; return 0 ;;
+      1:*)
+        (( rendered_output )) && printf '\n'
+        if [[ -n "$default_profile" ]]; then
+          cmd_use "$default_profile"
+        elif [[ "$active_is_best" == "1" && "$USAGE_QUIET" != "1" ]]; then
+          print_status_note ready "already on best profile"
+        elif [[ "$USAGE_QUIET" != "1" ]]; then
+          print_status_note blocked "no ready profile"
+        fi
+        return 0
+        ;;
       0:1)
         arrow_action_menu "$default_profile" "${SORTED_USAGE_RECORDS[@]}"
         usage_handle_menu_action && return 0
