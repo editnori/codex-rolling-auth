@@ -4752,20 +4752,6 @@ print_selector_palette_context_line() {
   printf '\n'
 }
 
-selector_palette_context_compact_best() {
-  local best_value="$1"
-  local best_parts=()
-
-  if [[ "$best_value" == best\ * ]]; then
-    read -r -a best_parts <<<"${best_value#best }"
-    if (( ${#best_parts[@]} > 0 )); then
-      printf 'best %s' "${best_parts[0]}"
-      return 0
-    fi
-  fi
-  printf '%s' "$best_value"
-}
-
 selector_palette_context_add_active() {
   local -n line_ref="$1"
   local active_part="$2"
@@ -4828,6 +4814,7 @@ selector_palette_context_line() {
   local summary="$1"
   local total_w="$2"
   local sep first rest active_part="" stats_part line best_value compact_best_value
+  local best_parts=()
 
   sep="$(usage_separator)"
   IFS=$'\t' read -r first rest <<<"$(usage_summary_split_once "$summary" "$sep")"
@@ -4837,7 +4824,13 @@ selector_palette_context_line() {
   usage_summary_take_active_part active_part stats_part "$sep"
   best_value="$first"
   [[ "$best_value" == best\ * ]] && best_value="best $(selector_palette_take_short_limit "${best_value#best }")"
-  compact_best_value="$(selector_palette_context_compact_best "$best_value")"
+  compact_best_value="$best_value"
+  if [[ "$best_value" == best\ * ]]; then
+    read -r -a best_parts <<<"${best_value#best }"
+    if (( ${#best_parts[@]} > 0 )); then
+      compact_best_value="best ${best_parts[0]}"
+    fi
+  fi
   line="$best_value"
   selector_palette_context_add_active line "$active_part" "$best_value" "$compact_best_value" "$total_w"
   selector_palette_context_add_stats line "$stats_part" "$sep" "$total_w"
