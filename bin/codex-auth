@@ -7619,40 +7619,6 @@ PATCH
   sed -i 's/^__PATCH_BLANK__$/ /' "$patch_file"
 }
 
-patch_codex_prepare_source() {
-  local source_dir="$1"
-  local ref="$2"
-  local no_fetch="$3"
-  local repo_url="${CODEX_AUTH_PATCH_REPO_URL:-https://github.com/openai/codex.git}"
-  local clone_tmp
-
-  if [[ -d "$source_dir/.git" ]] \
-    && ! git -C "$source_dir" rev-parse --verify HEAD >/dev/null 2>&1 \
-    && [[ ! -f "$source_dir/codex-rs/login/src/auth/manager.rs" ]]; then
-    rm -rf "$source_dir"
-  fi
-  if [[ ! -d "$source_dir/.git" ]]; then
-    if [[ -e "$source_dir" ]]; then
-      die "source exists but is not a git repo: $source_dir"
-    fi
-    mkdir -p "$(dirname "$source_dir")"
-    clone_tmp="$(mktemp -d "$(dirname "$source_dir")/.clone.XXXXXX")"
-    git clone "$repo_url" "$clone_tmp"
-    mv "$clone_tmp" "$source_dir"
-  fi
-
-  if [[ -f "$source_dir/codex-rs/login/src/auth/manager.rs" ]] \
-    && grep -Fq 'CODEX_AUTH_ROLLING_ENV_VAR' "$source_dir/codex-rs/login/src/auth/manager.rs"; then
-    return 0
-  fi
-
-  if [[ "$no_fetch" != "1" ]]; then
-    git -C "$source_dir" fetch origin
-  fi
-
-  git -C "$source_dir" checkout --detach "$ref"
-}
-
 patch_codex_status() {
   local stock_bin="$1"
   local stock_version="$2"
@@ -7789,7 +7755,7 @@ cmd_patch_codex() {
   command -v git >/dev/null 2>&1 || die "git is required for patch-codex"
   command -v cargo >/dev/null 2>&1 || die "cargo is required for patch-codex"
 
-  local lock_wait lock_fd source_commit package_base package_version package_suffix manager_file patch_file cargo_toml built_bin target_dir target_bin tmp_bin marker tmp
+  local lock_wait lock_fd source_commit package_base package_version package_suffix repo_url clone_tmp manager_file patch_file cargo_toml built_bin target_dir target_bin tmp_bin marker tmp
   local build_args=()
   lock_wait="${CODEX_AUTH_PATCH_LOCK_WAIT:-0}"
   [[ "$lock_wait" =~ ^[0-9]+$ ]] || lock_wait=0
@@ -7819,7 +7785,28 @@ cmd_patch_codex() {
   fi
 
   [[ "$quiet" == "1" ]] || print_status_note patch "source $ref"
-  patch_codex_prepare_source "$source_dir" "$ref" "$no_fetch"
+  repo_url="${CODEX_AUTH_PATCH_REPO_URL:-https://github.com/openai/codex.git}"
+  if [[ -d "$source_dir/.git" ]] \
+    && ! git -C "$source_dir" rev-parse --verify HEAD >/dev/null 2>&1 \
+    && [[ ! -f "$source_dir/codex-rs/login/src/auth/manager.rs" ]]; then
+    rm -rf "$source_dir"
+  fi
+  if [[ ! -d "$source_dir/.git" ]]; then
+    if [[ -e "$source_dir" ]]; then
+      die "source exists but is not a git repo: $source_dir"
+    fi
+    mkdir -p "$(dirname "$source_dir")"
+    clone_tmp="$(mktemp -d "$(dirname "$source_dir")/.clone.XXXXXX")"
+    git clone "$repo_url" "$clone_tmp"
+    mv "$clone_tmp" "$source_dir"
+  fi
+  if [[ ! -f "$source_dir/codex-rs/login/src/auth/manager.rs" ]] \
+    || ! grep -Fq 'CODEX_AUTH_ROLLING_ENV_VAR' "$source_dir/codex-rs/login/src/auth/manager.rs"; then
+    if [[ "$no_fetch" != "1" ]]; then
+      git -C "$source_dir" fetch origin
+    fi
+    git -C "$source_dir" checkout --detach "$ref"
+  fi
   source_commit="$(git -C "$source_dir" rev-parse HEAD)"
   manager_file="$source_dir/codex-rs/login/src/auth/manager.rs"
   [[ -f "$manager_file" ]] || die "missing $manager_file"
