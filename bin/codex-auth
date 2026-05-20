@@ -6521,27 +6521,20 @@ arrow_action_menu() {
   selector_numbered_menu rows "$summary_text" "$total_w" "$role_w" "$profile_w" "$cell_w" "$status_w" "$mode" "$selector_palette_mode"
 }
 
-usage_refresh_job_count() {
-  local profile_count="$1"
-  local max_jobs="${CODEX_AUTH_REFRESH_JOBS:-2}"
-  local max_jobs_cap="${CODEX_AUTH_REFRESH_JOBS_MAX:-4}"
-
-  [[ "$max_jobs" =~ ^[0-9]+$ && "$max_jobs" -gt 0 ]] || max_jobs=2
-  [[ "$max_jobs_cap" =~ ^[0-9]+$ && "$max_jobs_cap" -gt 0 ]] || max_jobs_cap=4
-  (( max_jobs > max_jobs_cap )) && max_jobs="$max_jobs_cap"
-  (( max_jobs > profile_count )) && max_jobs="$profile_count"
-  (( max_jobs < 1 )) && max_jobs=1
-  printf '%s' "$max_jobs"
-}
-
 collect_usage_records() {
   local active_fp="$1"
   shift
   local profile_files=("$@")
   local records_dir profile_file i
-  local max_jobs active_jobs=0
+  local max_jobs="${CODEX_AUTH_REFRESH_JOBS:-2}"
+  local max_jobs_cap="${CODEX_AUTH_REFRESH_JOBS_MAX:-4}"
+  local active_jobs=0
 
-  max_jobs="$(usage_refresh_job_count "${#profile_files[@]}")"
+  [[ "$max_jobs" =~ ^[0-9]+$ && "$max_jobs" -gt 0 ]] || max_jobs=2
+  [[ "$max_jobs_cap" =~ ^[0-9]+$ && "$max_jobs_cap" -gt 0 ]] || max_jobs_cap=4
+  (( max_jobs > max_jobs_cap )) && max_jobs="$max_jobs_cap"
+  (( max_jobs > ${#profile_files[@]} )) && max_jobs="${#profile_files[@]}"
+  (( max_jobs < 1 )) && max_jobs=1
   records_dir="$(mktemp -d "$CODEX_HOME/.tmp/auth-records.XXXXXX")"
 
   for i in "${!profile_files[@]}"; do
