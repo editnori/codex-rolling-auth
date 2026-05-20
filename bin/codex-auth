@@ -1155,8 +1155,8 @@ cmd_list() {
     fi
   fi
   print_palette_summary_header "Saved profiles" "$summary" "$total_w"
-  if (( role_w < 2 )); then role_header=""; else role_header="act"; fi
-  if (( profile_w < 7 )); then profile_header="prof"; else profile_header="profile"; fi
+  role_header="act"; (( role_w < 2 )) && role_header=""
+  profile_header="profile"; (( profile_w < 7 )) && profile_header="prof"
   print_profile_list_line "$role_header" "$profile_header" "auth" "account" "$role_w" "$profile_w" "$mode_w" "$account_w"
   for path in "${profiles[@]}"; do
     name="$(basename "$path" .json)"
