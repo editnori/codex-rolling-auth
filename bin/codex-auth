@@ -5042,17 +5042,15 @@ cmd_usage() {
     local default_profile active_is_best
     usage_best_selection_into "$records" default_profile active_is_best
 
-    local rendered_output=0
     if [[ "$USAGE_SELECT" == "1" ]]; then
       prepare_usage_records "$records" "$default_profile"
     elif [[ "$USAGE_QUIET" != "1" ]]; then
       render_usage_records "$records" "$default_profile"
-      rendered_output=1
     fi
 
     case "$auto_switch:$USAGE_SELECT" in
       1:*)
-        (( rendered_output )) && printf '\n'
+        [[ "$USAGE_SELECT" == "1" || "$USAGE_QUIET" == "1" ]] || printf '\n'
         if [[ -n "$default_profile" ]]; then
           cmd_use "$default_profile"
         elif [[ "$active_is_best" == "1" && "$USAGE_QUIET" != "1" ]]; then
