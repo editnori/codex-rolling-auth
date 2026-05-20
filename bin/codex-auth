@@ -2375,23 +2375,6 @@ usage_max_profile_width() {
   printf '%s' "$(( cols - role_w - status_min - (2 * (cell_overhead + min_bar_w)) - gap_w ))"
 }
 
-usage_tight_width_fallback() {
-  local cols="$1"
-  local role_w="$2"
-  local status_min="$3"
-  local min_bar_w="$4"
-  local gap_w="$5"
-  local mode="tight"
-  local reset_w=5
-  local label_w=4
-  local reset_prefix_w cell_overhead max_profile_w
-
-  reset_prefix_w="$(usage_reset_prefix_width "$reset_w")"
-  cell_overhead="$(usage_cell_overhead "$mode" "$label_w" "$reset_w" "$reset_prefix_w")"
-  max_profile_w="$(usage_max_profile_width "$cols" "$role_w" "$status_min" "$cell_overhead" "$min_bar_w" "$gap_w")"
-  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$mode" "$reset_w" "$label_w" "$reset_prefix_w" "$cell_overhead" "$max_profile_w"
-}
-
 usage_fit_status_widths() {
   local -n profile_w_ref="$1"
   local -n cell_w_ref="$2"
@@ -2466,7 +2449,12 @@ usage_render_widths() {
 
   max_profile_w="$(usage_max_profile_width "$cols" "$role_w" "$status_min" "$cell_overhead" "$min_bar_w" "$gap_w")"
   if (( max_profile_w < 12 && reset_w > 5 )); then
-    IFS=$'\t' read -r mode reset_w label_w reset_prefix_w cell_overhead max_profile_w <<<"$(usage_tight_width_fallback "$cols" "$role_w" "$status_min" "$min_bar_w" "$gap_w")"
+    mode="tight"
+    reset_w=5
+    label_w=4
+    reset_prefix_w="$(usage_reset_prefix_width "$reset_w")"
+    cell_overhead="$(usage_cell_overhead "$mode" "$label_w" "$reset_w" "$reset_prefix_w")"
+    max_profile_w="$(usage_max_profile_width "$cols" "$role_w" "$status_min" "$cell_overhead" "$min_bar_w" "$gap_w")"
   fi
 
   profile_w="$(clamp_int_between "$wanted_profile_w" "$profile_min" "$max_profile_w")"
