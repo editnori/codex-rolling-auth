@@ -2687,89 +2687,6 @@ print_usage_summary_compact_line() {
   printf '\n'
 }
 
-print_usage_summary_colored_line() {
-  local sep="$1"
-  local old_summary="$2"
-  local has_active="$3"
-  local has_best="$4"
-  local ready="$5"
-  local active_profile="$6"
-  local active_label="$7"
-  local active_short="$8"
-  local show_week="$9"
-  local active_weekly="${10}"
-  local show_ready="${11}"
-  local show_caps="${12}"
-  local cap_label="${13}"
-  local caps="${14}"
-  local show_login="${15}"
-  local login="${16}"
-  local show_unavailable="${17}"
-  local unavailable="${18}"
-  local show_offline="${19}"
-  local offline="${20}"
-  local show_stale="${21}"
-  local stale="${22}"
-  local show_cache="${23}"
-  local cache_age_label="${24}"
-  local active_has_usage="${25}"
-
-  if (( old_summary )); then
-    usage_tone_color muted; printf 'old active '; usage_tone_reset
-    usage_tone_color active; printf '%s' "$active_profile"; usage_tone_reset
-  elif (( has_active )); then
-    usage_tone_color muted; printf 'active '; usage_tone_reset
-    usage_tone_color active; printf '%s' "$active_profile"; usage_tone_reset
-  elif (( has_best )); then
-    if (( ready > 0 )); then
-      usage_tone_color good; printf 'ready '; usage_tone_reset
-      usage_tone_color good; printf '%s' "$ready"; usage_tone_reset
-      usage_tone_color muted; printf '%sno active' "$sep"; usage_tone_reset
-    else
-      usage_tone_color muted; printf 'no active'; usage_tone_reset
-    fi
-  else
-    usage_tone_color muted; printf 'no fresh ready'; usage_tone_reset
-    usage_tone_color muted; printf '%sno active' "$sep"; usage_tone_reset
-  fi
-  if (( has_active * active_has_usage )); then
-    usage_tone_color muted; printf ' %s ' "$active_label"; usage_tone_reset
-    usage_tone_color "$(usage_limit_tone "$active_short")"; printf '%s' "$active_short"; usage_tone_reset
-  fi
-  if (( show_week )); then
-    usage_tone_color muted; printf ' wk '; usage_tone_reset
-    usage_tone_color "$(usage_limit_tone "$active_weekly")"; printf '%s' "$active_weekly"; usage_tone_reset
-  fi
-  if (( show_ready )); then
-    usage_tone_color muted; printf '%sready ' "$sep"; usage_tone_reset
-    usage_tone_color good; printf '%s' "$ready"; usage_tone_reset
-  fi
-  if (( show_caps )); then
-    usage_tone_color muted; printf '%s%s ' "$sep" "$cap_label"; usage_tone_reset
-    usage_tone_color bad; printf '%s' "$caps"; usage_tone_reset
-  fi
-  if (( show_login )); then
-    usage_tone_color muted; printf '%slogin ' "$sep"; usage_tone_reset
-    usage_tone_color muted; printf '%s' "$login"; usage_tone_reset
-  fi
-  if (( show_unavailable )); then
-    usage_tone_color muted; printf '%sno data ' "$sep"; usage_tone_reset
-    usage_tone_color muted; printf '%s' "$unavailable"; usage_tone_reset
-  fi
-  if (( show_offline )); then
-    usage_tone_color muted; printf '%soffline ' "$sep"; usage_tone_reset
-    usage_tone_color warn; printf '%s' "$offline"; usage_tone_reset
-  fi
-  if (( show_stale )); then
-    usage_tone_color muted; printf '%sstale ' "$sep"; usage_tone_reset
-    usage_tone_color warn; printf '%s' "$stale"; usage_tone_reset
-  fi
-  if (( show_cache )); then
-    usage_tone_color muted; printf '%s' "${sep}cache $cache_age_label"; usage_tone_reset
-  fi
-  printf '\n'
-}
-
 print_usage_summary_line() {
   local width="$1"
   local default_profile="${2:-}"
@@ -2944,10 +2861,60 @@ print_usage_summary_line() {
     fit_text_rtrim "$line" "$width"
     printf '\n'
   elif usage_color_active; then
-    print_usage_summary_colored_line \
-      "$sep" "$old_summary" "$has_active" "$has_best" "$ready" "$active_profile" "$active_label" "$active_short" \
-      "$show_week" "$active_weekly" "$show_ready" "$show_caps" "$cap_label" "$caps" "$show_login" "$login" \
-      "$show_unavailable" "$unavailable" "$show_offline" "$offline" "$show_stale" "$stale" "$show_cache" "$cache_age_label" "$active_has_usage"
+    if (( old_summary )); then
+      usage_tone_color muted; printf 'old active '; usage_tone_reset
+      usage_tone_color active; printf '%s' "$active_profile"; usage_tone_reset
+    elif (( has_active )); then
+      usage_tone_color muted; printf 'active '; usage_tone_reset
+      usage_tone_color active; printf '%s' "$active_profile"; usage_tone_reset
+    elif (( has_best )); then
+      if (( ready > 0 )); then
+        usage_tone_color good; printf 'ready '; usage_tone_reset
+        usage_tone_color good; printf '%s' "$ready"; usage_tone_reset
+        usage_tone_color muted; printf '%sno active' "$sep"; usage_tone_reset
+      else
+        usage_tone_color muted; printf 'no active'; usage_tone_reset
+      fi
+    else
+      usage_tone_color muted; printf 'no fresh ready'; usage_tone_reset
+      usage_tone_color muted; printf '%sno active' "$sep"; usage_tone_reset
+    fi
+    if (( has_active * active_has_usage )); then
+      usage_tone_color muted; printf ' %s ' "$active_label"; usage_tone_reset
+      usage_tone_color "$(usage_limit_tone "$active_short")"; printf '%s' "$active_short"; usage_tone_reset
+    fi
+    if (( show_week )); then
+      usage_tone_color muted; printf ' wk '; usage_tone_reset
+      usage_tone_color "$(usage_limit_tone "$active_weekly")"; printf '%s' "$active_weekly"; usage_tone_reset
+    fi
+    if (( show_ready )); then
+      usage_tone_color muted; printf '%sready ' "$sep"; usage_tone_reset
+      usage_tone_color good; printf '%s' "$ready"; usage_tone_reset
+    fi
+    if (( show_caps )); then
+      usage_tone_color muted; printf '%s%s ' "$sep" "$cap_label"; usage_tone_reset
+      usage_tone_color bad; printf '%s' "$caps"; usage_tone_reset
+    fi
+    if (( show_login )); then
+      usage_tone_color muted; printf '%slogin ' "$sep"; usage_tone_reset
+      usage_tone_color muted; printf '%s' "$login"; usage_tone_reset
+    fi
+    if (( show_unavailable )); then
+      usage_tone_color muted; printf '%sno data ' "$sep"; usage_tone_reset
+      usage_tone_color muted; printf '%s' "$unavailable"; usage_tone_reset
+    fi
+    if (( show_offline )); then
+      usage_tone_color muted; printf '%soffline ' "$sep"; usage_tone_reset
+      usage_tone_color warn; printf '%s' "$offline"; usage_tone_reset
+    fi
+    if (( show_stale )); then
+      usage_tone_color muted; printf '%sstale ' "$sep"; usage_tone_reset
+      usage_tone_color warn; printf '%s' "$stale"; usage_tone_reset
+    fi
+    if (( show_cache )); then
+      usage_tone_color muted; printf '%s' "${sep}cache $cache_age_label"; usage_tone_reset
+    fi
+    printf '\n'
   else
     printf '%s\n' "$line"
   fi
