@@ -2109,57 +2109,11 @@ usage_profile_width_hint() {
   done
 }
 
-usage_width_row_matches() {
-  local row="$1"
-  local cols="$2"
-  local verbose="$3"
-  local row_min row_max row_verbose
-
-  read -r row_min row_max row_verbose _ <<<"$row"
-  (( cols >= row_min && cols <= row_max )) || return 1
-  (( row_verbose < 0 || row_verbose == verbose ))
-}
-
-usage_width_apply_status_defaults() {
-  local cols="$1"
-  local verbose="$2"
-  local -n mode_ref="$3"
-  local -n role_w_ref="$4"
-  local -n status_min_ref="$5"
-  local -n label_w_ref="$6"
-  local -n max_bar_w_ref="$7"
-
-  if (( verbose && cols >= 68 )) && [[ "$mode_ref" == "tight" ]]; then
-    status_min_ref=12
-  fi
-  if (( ! verbose )); then
-    if (( cols >= 61 )); then
-      role_w_ref=5
-      status_min_ref=12
-    else
-      role_w_ref=1
-    fi
-    return 0
-  fi
-  case "$mode_ref" in
-    pico|nano|micro|tiny|tight)
-      return 0
-      ;;
-  esac
-  label_w_ref=6
-  max_bar_w_ref=12
-  if (( cols >= 112 )); then
-    max_bar_w_ref=20
-  elif (( cols >= 94 )); then
-    max_bar_w_ref=14
-  fi
-  return 0
-}
-
 usage_width_mode_defaults() {
   local cols="$1"
   local verbose="${2:-0}"
   local row
+  local row_min row_max row_verbose
   local mode role_w profile_min status_min reset_w label_w min_bar_w max_bar_w
   local rows=(
     "0 25 -1 pico 1 4 3 0 4 0 0"
@@ -2176,12 +2130,31 @@ usage_width_mode_defaults() {
   )
 
   for row in "${rows[@]}"; do
-    usage_width_row_matches "$row" "$cols" "$verbose" || continue
-    read -r _ _ _ mode role_w profile_min status_min reset_w label_w min_bar_w max_bar_w <<<"$row"
+    read -r row_min row_max row_verbose mode role_w profile_min status_min reset_w label_w min_bar_w max_bar_w <<<"$row"
+    (( cols >= row_min && cols <= row_max )) || continue
+    (( row_verbose < 0 || row_verbose == verbose )) || continue
     break
   done
 
-  usage_width_apply_status_defaults "$cols" "$verbose" mode role_w status_min label_w max_bar_w
+  if (( verbose && cols >= 68 )) && [[ "$mode" == "tight" ]]; then
+    status_min=12
+  fi
+  if (( ! verbose )); then
+    if (( cols >= 61 )); then
+      role_w=5
+      status_min=12
+    else
+      role_w=1
+    fi
+  elif [[ "$mode" != "pico" && "$mode" != "nano" && "$mode" != "micro" && "$mode" != "tiny" && "$mode" != "tight" ]]; then
+    label_w=6
+    max_bar_w=12
+    if (( cols >= 112 )); then
+      max_bar_w=20
+    elif (( cols >= 94 )); then
+      max_bar_w=14
+    fi
+  fi
 
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$mode" "$role_w" "$profile_min" "$status_min" "$reset_w" "$label_w" "$min_bar_w" "$max_bar_w"
 }
