@@ -3467,10 +3467,8 @@ print_selector_palette_primary() {
 selector_palette_profile_label() {
   local profile="$1"
   local total_w="${2:-0}"
-  local width="${3:-0}"
 
   [[ "$total_w" =~ ^[0-9]+$ ]] || total_w=0
-  [[ "$width" =~ ^[0-9]+$ ]] || width=0
 
   if (( total_w <= 30 )); then
     usage_display_profile_name "$profile" "" 6
@@ -4747,7 +4745,7 @@ selector_menu_row_for_record() {
 
   if [[ "$valid" != "0" && "$status" == "login" ]]; then
     if (( selector_palette_mode )); then
-      palette_profile="$(selector_palette_profile_label "$profile" "$total_w" "$selector_profile_w")"
+      palette_profile="$(selector_palette_profile_label "$profile" "$total_w")"
       display="$(print_selector_palette_table_row "login $palette_profile" "-" "-" "login needed" "$status" "$valid" "$total_w")"
     else
       detail="needed"
@@ -4757,7 +4755,7 @@ selector_menu_row_for_record() {
   elif [[ "$valid" == "0" ]]; then
     if (( selector_palette_mode )); then
       display_status="$(usage_display_status "$status" "normal")"
-      palette_profile="$(selector_palette_profile_label "$profile" "$total_w" "$selector_profile_w")"
+      palette_profile="$(selector_palette_profile_label "$profile" "$total_w")"
       if [[ "$mark" == "*" ]]; then
         action_role="stay"
       elif [[ "$mark" == "=" ]]; then
@@ -4799,7 +4797,7 @@ selector_menu_row_for_record() {
   else
     if (( selector_palette_mode )); then
       display_status="$(usage_display_status "$status" "normal")"
-      palette_profile="$(selector_palette_profile_label "$profile" "$total_w" "$selector_profile_w")"
+      palette_profile="$(selector_palette_profile_label "$profile" "$total_w")"
       case "$mark" in
         "*") action_role="stay" ;;
         "=") action_role="same" ;;
@@ -4889,7 +4887,7 @@ arrow_action_menu() {
   done
   if (( ! has_active_row )) && [[ -f "$AUTH_FILE" ]]; then
     if (( selector_palette_mode )); then
-      palette_profile="$(selector_palette_profile_label "current" "$total_w" "$selector_profile_w")"
+      palette_profile="$(selector_palette_profile_label "current" "$total_w")"
       display="$(print_selector_palette_table_row "stay $palette_profile" "-" "-" "same" "ok" "1" "$total_w")"
     else
       display="$(print_selector_row "stay" "current" "same" "$action_w" "$selector_profile_w" "$total_w")"
