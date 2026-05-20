@@ -4074,7 +4074,7 @@ selector_fzf_menu() {
   local status_w="$7"
   local mode="$8"
   local selector_palette_mode="$9"
-  local choice kind action profile_choice fzf_prompt fzf_pointer fzf_header term_lines
+  local choice kind action profile_choice fzf_prompt fzf_pointer fzf_header term_lines fzf_term
   local fzf_header_line_count=1
   local fzf_color_args=()
   local fzf_border_args=()
@@ -4188,6 +4188,8 @@ selector_fzf_menu() {
     )"
     fzf_header_args+=(--header="$fzf_header")
   fi
+  fzf_term="${TERM:-}"
+  [[ -n "$fzf_term" && "$fzf_term" != "dumb" ]] || fzf_term="xterm-256color"
 
   choice="$(
     {
@@ -4197,7 +4199,7 @@ selector_fzf_menu() {
         done <<<"$fzf_header"
       fi
       printf '%s\n' "${rows_ref[@]}"
-    } | fzf \
+    } | TERM="$fzf_term" fzf \
       --ansi \
       --no-sort \
       --layout=reverse \
