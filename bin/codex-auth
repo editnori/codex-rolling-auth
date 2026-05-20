@@ -3250,9 +3250,7 @@ selector_palette_table_widths() {
   local row
 
   primary_w=16
-  if (( total_w < 20 )); then
-    primary_w=11
-  elif (( total_w < 32 )); then
+  if (( total_w < 32 )); then
     primary_w=13
   elif (( total_w < 60 )); then
     primary_w=19
