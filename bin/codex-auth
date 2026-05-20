@@ -3439,53 +3439,51 @@ selector_palette_table_widths() {
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$primary_w" "$week_w" "$short_w" "$status_w" "$status_gap" "$metric_gap"
 }
 
-selector_compact_by_width() {
-  local width="$1"
-  local default="$2"
-  shift 2
-  local cutoff label
-
-  if (( width <= 0 )); then
-    printf '%s' "$default"
-    return 0
-  fi
-  while (( $# >= 2 )); do
-    cutoff="$1"
-    label="$2"
-    if (( width < cutoff )); then
-      printf '%s' "$label"
-      return 0
-    fi
-    shift 2
-  done
-  printf '%s' "$default"
-}
-
 selector_palette_status_compact() {
   local status="$1"
   local width="${2:-0}"
 
   case "$status" in
     "no data"|"no usage"|"n/a")
-      selector_compact_by_width "$width" "$status" 3 na
+      if (( width > 0 && width < 3 )); then printf 'na'; else printf '%s' "$status"; fi
       ;;
     "login needed")
-      selector_compact_by_width "$width" "$status" 4 log 6 auth 13 login
+      if (( width > 0 && width < 4 )); then
+        printf 'log'
+      elif (( width > 0 && width < 6 )); then
+        printf 'auth'
+      elif (( width > 0 && width < 13 )); then
+        printf 'login'
+      else
+        printf '%s' "$status"
+      fi
       ;;
     cap)
-      selector_compact_by_width "$width" "$status" 3 cp
+      if (( width > 0 && width < 3 )); then printf 'cp'; else printf '%s' "$status"; fi
       ;;
     "old cap"|"both cap")
-      selector_compact_by_width "$width" "$status" 3 cp 7 cap
+      if (( width > 0 && width < 3 )); then
+        printf 'cp'
+      elif (( width > 0 && width < 7 )); then
+        printf 'cap'
+      else
+        printf '%s' "$status"
+      fi
       ;;
     ready)
-      selector_compact_by_width "$width" "$status" 5 ok
+      if (( width > 0 && width < 5 )); then printf 'ok'; else printf '%s' "$status"; fi
       ;;
     offline)
-      selector_compact_by_width "$width" "$status" 3 of 7 off
+      if (( width > 0 && width < 3 )); then
+        printf 'of'
+      elif (( width > 0 && width < 7 )); then
+        printf 'off'
+      else
+        printf '%s' "$status"
+      fi
       ;;
     same)
-      selector_compact_by_width "$width" "$status" 4 =
+      if (( width > 0 && width < 4 )); then printf '='; else printf '%s' "$status"; fi
       ;;
     *)
       printf '%s' "$status"
