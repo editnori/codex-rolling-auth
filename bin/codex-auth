@@ -779,19 +779,6 @@ print_result_block() {
   done
 }
 
-compact_width_choice() {
-  local cols="$1"
-  local cutoff="$2"
-  local short="$3"
-  local wide="$4"
-
-  if (( cols < cutoff )); then
-    printf '%s' "$short"
-  else
-    printf '%s' "$wide"
-  fi
-}
-
 COMPACT_ERROR_STATIC_ROWS=(
   $'refusing to remove without --yes\t-\tremove needs --yes'
   $'usage: --ttl seconds\t-\tttl needs seconds'
@@ -846,8 +833,10 @@ print_error() {
       if [[ "$message" == "$source" ]]; then
         if [[ "$cutoff" == "-" ]]; then
           message="$short"
+        elif (( cols < cutoff )); then
+          message="$short"
         else
-          message="$(compact_width_choice "$cols" "$cutoff" "$short" "$wide")"
+          message="$wide"
         fi
         compacted=1
         break
@@ -1206,8 +1195,8 @@ cmd_list() {
     fi
   fi
   print_palette_summary_header "Saved profiles" "$summary" "$total_w"
-  role_header="$(compact_width_choice "$role_w" 2 "" "act")"
-  profile_header="$(compact_width_choice "$profile_w" 7 "prof" "profile")"
+  if (( role_w < 2 )); then role_header=""; else role_header="act"; fi
+  if (( profile_w < 7 )); then profile_header="prof"; else profile_header="profile"; fi
   print_profile_list_line "$role_header" "$profile_header" "auth" "account" "$role_w" "$profile_w" "$mode_w" "$account_w"
   for path in "${profiles[@]}"; do
     name="$(basename "$path" .json)"
