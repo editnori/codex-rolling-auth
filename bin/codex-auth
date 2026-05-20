@@ -288,17 +288,6 @@ compact_display_path() {
   printf '%s' "$rendered"
 }
 
-compact_codex_status() {
-  local status="$1"
-  local width="${2:-0}"
-
-  if [[ "$status" == "Logged in using "* ]]; then
-    printf '%s' "${status#Logged in using }"
-  else
-    printf '%s' "$status"
-  fi
-}
-
 die() {
   print_error "$*"
   exit 1
@@ -1497,7 +1486,7 @@ cmd_current() {
   if [[ -n "$codex_cli" ]] && codex_launcher_ready "$codex_cli"; then
     status_text="$(CODEX_AUTH_RUNNER=1 "$codex_cli" login status 2>&1 || true)"
     status_text="$(printf '%s\n' "$status_text" | sed '/^WARNING: proceeding, even though we could not update PATH:/d' | tr '\n\t' '  ' | sed 's/  */ /g; s/^ //; s/ $//')"
-    status_text="$(compact_codex_status "$status_text" "$value_w")"
+    [[ "$status_text" == "Logged in using "* ]] && status_text="${status_text#Logged in using }"
     [[ "$status_text" != "$mode_display" ]] || status_text=""
   fi
   if [[ -n "$status_text" ]]; then
@@ -2199,24 +2188,6 @@ usage_print_limit_cell_reset() {
   return 0
 }
 
-usage_print_limit_empty_cell() {
-  local percent_label="$1"
-  local reset_label="$2"
-  local label_w="$3"
-  local cell_w="$4"
-  local tone="$5"
-  local visible pad
-
-  usage_tone_color "$tone"
-  printf "%${label_w}s" "$percent_label"
-  usage_tone_reset
-  visible="$label_w"
-  usage_print_limit_cell_reset "$reset_label" "" visible
-  pad=$((cell_w - visible))
-  (( pad > 0 )) && printf '%*s' "$pad" ''
-  return 0
-}
-
 usage_print_limit_bar_cell() {
   local percent="$1"
   local percent_label="$2"
@@ -2273,6 +2244,7 @@ print_usage_limit_cell() {
   local reset_prefix=""
   local label_w=4
   local tone
+  local visible pad
 
   if [[ "$mode" == "micro" || "$mode" == "nano" ]]; then
     reset_label=""
@@ -2304,7 +2276,13 @@ print_usage_limit_cell() {
   fi
 
   if [[ "$percent" == "-" ]]; then
-    usage_print_limit_empty_cell "$percent_label" "$reset_label" "$label_w" "$cell_w" "$tone"
+    usage_tone_color "$tone"
+    printf "%${label_w}s" "$percent_label"
+    usage_tone_reset
+    visible="$label_w"
+    usage_print_limit_cell_reset "$reset_label" "" visible
+    pad=$((cell_w - visible))
+    (( pad > 0 )) && printf '%*s' "$pad" ''
     return 0
   fi
 
@@ -3308,23 +3286,6 @@ usage_summary_append_optional_parts() {
   return 0
 }
 
-print_usage_summary_rendered_line() {
-  local line="$1"
-  local width="$2"
-  shift 2
-
-  if (( ${#line} > width )); then
-    fit_text_rtrim "$line" "$width"
-    printf '\n'
-    return 0
-  fi
-  if usage_color_active; then
-    print_usage_summary_colored_line "$@"
-  else
-    printf '%s\n' "$line"
-  fi
-}
-
 print_usage_summary_line() {
   local width="$1"
   local default_profile="${2:-}"
@@ -3380,10 +3341,17 @@ print_usage_summary_line() {
     show_cache=0
   fi
 
-  print_usage_summary_rendered_line "$line" "$width" \
-    "$sep" "$old_summary" "$has_active" "$has_best" "$ready" "$active_profile" "$active_label" "$active_short" \
-    "$show_week" "$active_weekly" "$show_ready" "$show_caps" "$cap_label" "$caps" "$show_login" "$login" \
-    "$show_unavailable" "$unavailable" "$show_offline" "$offline" "$show_stale" "$stale" "$show_cache" "$cache_age_label" "$active_has_usage"
+  if (( ${#line} > width )); then
+    fit_text_rtrim "$line" "$width"
+    printf '\n'
+  elif usage_color_active; then
+    print_usage_summary_colored_line \
+      "$sep" "$old_summary" "$has_active" "$has_best" "$ready" "$active_profile" "$active_label" "$active_short" \
+      "$show_week" "$active_weekly" "$show_ready" "$show_caps" "$cap_label" "$caps" "$show_login" "$login" \
+      "$show_unavailable" "$unavailable" "$show_offline" "$offline" "$show_stale" "$stale" "$show_cache" "$cache_age_label" "$active_has_usage"
+  else
+    printf '%s\n' "$line"
+  fi
 }
 
 state_payload_for_profile() {
