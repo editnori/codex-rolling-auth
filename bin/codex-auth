@@ -6613,25 +6613,6 @@ collect_usage_records_synced() {
   printf '%s' "$records" | canonical_usage_active_marks
 }
 
-refresh_active_profile_state() {
-  local profile_name="$1"
-  local profile_file fingerprint payload
-
-  profile_file="$(profile_path "$profile_name")"
-  require_auth_file "$profile_file"
-  fingerprint="$(credential_fingerprint "$profile_file" || true)"
-  payload="$(usage_json_from_home "$CODEX_HOME")"
-
-  if [[ -n "$payload" && "$payload" != "null" && -n "$fingerprint" ]] \
-    && ! usage_payload_transient_error "$payload" \
-    && ! jq -e '.error? != null' >/dev/null 2>&1 <<<"$payload"; then
-    state_update_profile "$profile_name" "$fingerprint" "$payload"
-    return 0
-  fi
-
-  return 1
-}
-
 usage_limit_coverage_rank() {
   local weekly="$1"
   local short="$2"
@@ -6997,10 +6978,19 @@ cmd_usage() {
         case "$MENU_ACTION" in
           login)
             local refreshed_profile="$MENU_PROFILE"
+            local refreshed_profile_file refreshed_fingerprint refreshed_payload
             cmd_login "$refreshed_profile"
             printf '\n'
             print_status_note refresh "$refreshed_profile"
-            refresh_active_profile_state "$refreshed_profile" || true
+            refreshed_profile_file="$(profile_path "$refreshed_profile")"
+            require_auth_file "$refreshed_profile_file"
+            refreshed_fingerprint="$(credential_fingerprint "$refreshed_profile_file" || true)"
+            refreshed_payload="$(usage_json_from_home "$CODEX_HOME")"
+            if [[ -n "$refreshed_payload" && "$refreshed_payload" != "null" && -n "$refreshed_fingerprint" ]] \
+              && ! usage_payload_transient_error "$refreshed_payload" \
+              && ! jq -e '.error? != null' >/dev/null 2>&1 <<<"$refreshed_payload"; then
+              state_update_profile "$refreshed_profile" "$refreshed_fingerprint" "$refreshed_payload"
+            fi
             USAGE_REFRESH=0
             USAGE_CACHED=1
             ;;
