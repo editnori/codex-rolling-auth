@@ -595,20 +595,15 @@ print_path_line() {
   local tone="${7:-muted}" rendered role_label target_label base
 
   rendered="$(compact_display_path "$path" "$path_w")"
+  base=""
+  if [[ "$path" == */* ]]; then
+    base="${path##*/}"
+    (( ${#base} <= path_w )) || base=""
+  fi
   if (( target_w <= 0 )) && { { (( path_w < 24 )) && [[ "$target" != "auth" ]]; } || [[ "$rendered" == "…/"* || "$rendered" == "*/"* ]]; }; then
-    base=""
-    if [[ "$path" == */* ]]; then
-      base="${path##*/}"
-      (( ${#base} <= path_w )) || base=""
-    fi
     rendered="${base:-$rendered}"
   fi
   if (( ${#rendered} > path_w )); then
-    base=""
-    if [[ "$path" == */* ]]; then
-      base="${path##*/}"
-      (( ${#base} <= path_w )) || base=""
-    fi
     rendered="${base:-$rendered}"
   fi
   if (( target_w <= 0 )) && [[ "$target" == "usage" && "$path_w" -lt 15 ]]; then
