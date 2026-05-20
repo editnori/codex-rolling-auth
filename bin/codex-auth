@@ -7144,28 +7144,6 @@ active_auth_fingerprint() {
   printf '%s' "${active_meta[2]:-}"
 }
 
-usage_maybe_acquire_refresh_lock() {
-  local profile_count="$1"
-  local -n refresh_lock_held_ref="$2"
-  local refresh_lock_wait
-
-  if [[ "$USAGE_REFRESH" == "1" && "$USAGE_QUIET" != "1" && -t 2 ]]; then
-    print_status_note refresh "$profile_count profiles" >&2
-  fi
-  if [[ "$USAGE_REFRESH" == "1" ]]; then
-    exec 8>"$CODEX_HOME/.tmp/codex-auth-refresh.lock"
-    refresh_lock_wait="${CODEX_AUTH_REFRESH_LOCK_WAIT:-1}"
-    [[ "$refresh_lock_wait" =~ ^[0-9]+$ ]] || refresh_lock_wait=1
-    if ! flock -w "$refresh_lock_wait" 8; then
-      [[ "$USAGE_QUIET" == "1" ]] || print_status_note cache "refresh busy" >&2
-      USAGE_REFRESH=0
-      USAGE_CACHED=1
-    else
-      refresh_lock_held_ref=1
-    fi
-  fi
-}
-
 usage_best_selection_into() {
   local records="$1"
   local -n default_profile_ref="$2"
@@ -7200,8 +7178,23 @@ cmd_usage() {
   set -- "${args[@]}"
 
   local profile_files=()
+  local refresh_lock_wait
   usage_profile_files_for_args_into profile_files 0 "$@" || return 0
-  usage_maybe_acquire_refresh_lock "${#profile_files[@]}" refresh_lock_held
+  if [[ "$USAGE_REFRESH" == "1" && "$USAGE_QUIET" != "1" && -t 2 ]]; then
+    print_status_note refresh "${#profile_files[@]} profiles" >&2
+  fi
+  if [[ "$USAGE_REFRESH" == "1" ]]; then
+    exec 8>"$CODEX_HOME/.tmp/codex-auth-refresh.lock"
+    refresh_lock_wait="${CODEX_AUTH_REFRESH_LOCK_WAIT:-1}"
+    [[ "$refresh_lock_wait" =~ ^[0-9]+$ ]] || refresh_lock_wait=1
+    if ! flock -w "$refresh_lock_wait" 8; then
+      [[ "$USAGE_QUIET" == "1" ]] || print_status_note cache "refresh busy" >&2
+      USAGE_REFRESH=0
+      USAGE_CACHED=1
+    else
+      refresh_lock_held=1
+    fi
+  fi
 
   while true; do
     local active_fp
