@@ -3121,37 +3121,6 @@ usage_summary_scan_record() {
   fi
 }
 
-usage_summary_normalize_scan() {
-  local -n active_profile_ref="$1"
-  local -n active_short_ref="$2"
-  local -n active_weekly_ref="$3"
-  local -n best_profile_ref="$4"
-  local -n has_best_ref="$5"
-  local -n has_active_ref="$6"
-  local -n old_summary_ref="$7"
-  local cache_age_max="$8"
-  local stale="$9"
-  local ready="${10}"
-  local -n cache_age_label_ref="${11}"
-
-  if [[ -n "$best_profile_ref" ]]; then
-    has_best_ref=1
-  else
-    best_profile_ref="none"
-  fi
-  if [[ -n "$active_profile_ref" ]]; then
-    has_active_ref=1
-  else
-    active_profile_ref="none"
-  fi
-  [[ -n "$active_short_ref" && "$active_short_ref" != "-" ]] || active_short_ref="n/a"
-  [[ -n "$active_weekly_ref" && "$active_weekly_ref" != "-" ]] || active_weekly_ref="n/a"
-  if (( cache_age_max >= 0 )); then
-    cache_age_label_ref="$(format_cache_age "$cache_age_max")"
-  fi
-  (( stale > 0 && ready == 0 && has_active_ref )) && old_summary_ref=1
-}
-
 usage_summary_scan_records() {
   local default_profile="${1:-}"
   shift || true
@@ -3168,8 +3137,22 @@ usage_summary_scan_records() {
       caps login unavailable offline stale ready cache_age_max
   done
 
-  usage_summary_normalize_scan active_profile active_short active_weekly best_profile has_best has_active old_summary \
-    "$cache_age_max" "$stale" "$ready" cache_age_label
+  if [[ -n "$best_profile" ]]; then
+    has_best=1
+  else
+    best_profile="none"
+  fi
+  if [[ -n "$active_profile" ]]; then
+    has_active=1
+  else
+    active_profile="none"
+  fi
+  [[ -n "$active_short" && "$active_short" != "-" ]] || active_short="n/a"
+  [[ -n "$active_weekly" && "$active_weekly" != "-" ]] || active_weekly="n/a"
+  if (( cache_age_max >= 0 )); then
+    cache_age_label="$(format_cache_age "$cache_age_max")"
+  fi
+  (( stale > 0 && ready == 0 && has_active )) && old_summary=1
   cache_age_out="$cache_age_label"
   [[ -n "$cache_age_out" ]] || cache_age_out="__none__"
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
