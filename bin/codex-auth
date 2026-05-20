@@ -3695,28 +3695,6 @@ selector_palette_profile_label() {
   fi
 }
 
-selector_palette_primary_width() {
-  local total_w="$1"
-  local primary_w=16
-
-  if (( total_w < 20 )); then
-    primary_w=11
-  elif (( total_w < 32 )); then
-    primary_w=13
-  elif (( total_w < 60 )); then
-    primary_w=19
-  elif (( total_w < 68 )); then
-    primary_w=20
-  elif (( total_w >= 108 )); then
-    primary_w=28
-  elif (( total_w >= 88 )); then
-    primary_w=26
-  elif (( total_w >= 68 )); then
-    primary_w=22
-  fi
-  printf '%s' "$primary_w"
-}
-
 selector_palette_status_gap() {
   local total_w="$1"
   local row
@@ -3744,7 +3722,22 @@ selector_palette_table_widths() {
   local total_w="$1"
   local primary_w week_w short_w status_w metric_w status_gap metric_gap status_max=13
 
-  primary_w="$(selector_palette_primary_width "$total_w")"
+  primary_w=16
+  if (( total_w < 20 )); then
+    primary_w=11
+  elif (( total_w < 32 )); then
+    primary_w=13
+  elif (( total_w < 60 )); then
+    primary_w=19
+  elif (( total_w < 68 )); then
+    primary_w=20
+  elif (( total_w >= 108 )); then
+    primary_w=28
+  elif (( total_w >= 88 )); then
+    primary_w=26
+  elif (( total_w >= 68 )); then
+    primary_w=22
+  fi
   status_gap="$(selector_palette_status_gap "$total_w")"
   metric_gap="$(selector_palette_metric_gap "$total_w")"
   if (( total_w < 58 )); then
