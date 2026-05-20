@@ -3855,7 +3855,6 @@ selector_header_meta_line() {
   local total_w="$3"
   local label_w="$4"
   local frame="${5:-0}"
-  local outer_w="${6:-$total_w}"
   local value_w value label_tone="muted" tl tr bl br vl vr glyph
   local sep name detail name_w detail_w
 
@@ -3922,7 +3921,6 @@ selector_header_primary_line() {
   local total_w="$2"
   local label_w="$3"
   local frame="${4:-0}"
-  local outer_w="${5:-$total_w}"
   local label="status"
   local value="$text"
 
@@ -3937,7 +3935,7 @@ selector_header_primary_line() {
     value="${text#old }"
   fi
 
-  selector_header_meta_line "$label" "$value" "$total_w" "$label_w" "$frame" "$outer_w"
+  selector_header_meta_line "$label" "$value" "$total_w" "$label_w" "$frame"
 }
 
 usage_frame_chars() {
@@ -4069,7 +4067,7 @@ print_usage_summary_block() {
     selector_header_primary_line "$active_part" "$body_w" "$label_w" "$frame" "$total_w"
   fi
   if (( show_pool )) && [[ -n "$pool_part" ]]; then
-    selector_header_meta_line "stats" "$pool_part" "$body_w" "$label_w" "$frame" "$total_w"
+    selector_header_meta_line "stats" "$pool_part" "$body_w" "$label_w" "$frame"
   fi
   if (( frame )); then
     IFS=$'\t' read -r tl tr bl br vl vr glyph <<<"$(usage_frame_chars)"
@@ -5146,7 +5144,6 @@ prepare_usage_records() {
 render_usage_records() {
   local records="$1"
   local default_profile="$2"
-  local active_is_best="$3"
 
   prepare_usage_records "$records" "$default_profile"
 
@@ -5407,7 +5404,7 @@ cmd_usage() {
     if [[ "$USAGE_SELECT" == "1" ]]; then
       prepare_usage_records "$records" "$default_profile"
     elif [[ "$USAGE_QUIET" != "1" ]]; then
-      render_usage_records "$records" "$default_profile" "$active_is_best"
+      render_usage_records "$records" "$default_profile"
       rendered_output=1
     fi
 
@@ -5535,7 +5532,7 @@ cmd_refresh() {
   fi
   usage_best_selection_into "$records" default_profile active_is_best
 
-  [[ "$USAGE_QUIET" == "1" ]] || render_usage_records "$records" "$default_profile" "$active_is_best"
+  [[ "$USAGE_QUIET" == "1" ]] || render_usage_records "$records" "$default_profile"
 }
 
 cmd_auto() {
@@ -5590,7 +5587,7 @@ cmd_auto() {
 
   local rendered_output=0
   if [[ "$USAGE_QUIET" != "1" ]]; then
-    render_usage_records "$records" "$default_profile" "$active_is_best"
+    render_usage_records "$records" "$default_profile"
     rendered_output=1
   fi
 
