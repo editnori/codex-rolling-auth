@@ -2728,58 +2728,11 @@ usage_display_status() {
   usage_display_normal_status "$status"
 }
 
-usage_display_layth_number_profile() {
-  local profile="$1"
-  local width="$2"
-  local suffix compact
-
-  [[ "$profile" =~ ^Layth([0-9]+)$ ]] || return 1
-  suffix="${BASH_REMATCH[1]}"
-  compact="L$suffix"
-  if (( ${#compact} <= width )); then
-    printf '%s' "$compact"
-  else
-    printf '%s' "${suffix:0:width}"
-  fi
-}
-
-usage_display_layth_suffix_profile() {
-  local profile="$1"
-  local width="$2"
-  local suffix
-
-  [[ "$profile" == Layth.* ]] || return 1
-  suffix="${profile#Layth.}"
-  if (( ${#suffix} <= width )); then
-    printf '%s' "$suffix"
-  elif (( width <= 5 )); then
-    printf '%s' "${suffix:0:width}"
-  else
-    printf '%s' "$profile"
-  fi
-}
-
-usage_display_compact_profile_name() {
-  local profile="$1"
-  local width="$2"
-
-  if usage_display_layth_number_profile "$profile" "$width"; then
-    return 0
-  fi
-  if usage_display_layth_suffix_profile "$profile" "$width"; then
-    return 0
-  fi
-  if (( width <= 5 )); then
-    fit_profile_text "$profile" "$width"
-  else
-    printf '%s' "$profile"
-  fi
-}
-
 usage_display_profile_name() {
   local profile="$1"
   local role="${2:-}"
   local width="${3:-0}"
+  local suffix compact
 
   if [[ "$profile" == "current" && "$role" != "active" && "$role" != "●" && "$role" != "*" ]]; then
     if [[ "$width" =~ ^[0-9]+$ && "$width" -gt 0 && "$width" -lt 7 ]]; then
@@ -2790,7 +2743,28 @@ usage_display_profile_name() {
   elif [[ "$profile" == "Layth" && "$width" =~ ^[0-9]+$ && "$width" -gt 0 && "$width" -lt 5 ]]; then
     printf 'Lay'
   elif [[ "$width" =~ ^[0-9]+$ && "$width" -gt 0 && ${#profile} -gt width ]]; then
-    usage_display_compact_profile_name "$profile" "$width"
+    if [[ "$profile" =~ ^Layth([0-9]+)$ ]]; then
+      suffix="${BASH_REMATCH[1]}"
+      compact="L$suffix"
+      if (( ${#compact} <= width )); then
+        printf '%s' "$compact"
+      else
+        printf '%s' "${suffix:0:width}"
+      fi
+    elif [[ "$profile" == Layth.* ]]; then
+      suffix="${profile#Layth.}"
+      if (( ${#suffix} <= width )); then
+        printf '%s' "$suffix"
+      elif (( width <= 5 )); then
+        printf '%s' "${suffix:0:width}"
+      else
+        printf '%s' "$profile"
+      fi
+    elif (( width <= 5 )); then
+      fit_profile_text "$profile" "$width"
+    else
+      printf '%s' "$profile"
+    fi
   else
     printf '%s' "$profile"
   fi
