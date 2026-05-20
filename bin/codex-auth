@@ -130,9 +130,39 @@ print_help_item() {
   local cmd="$1"
   local desc="$2"
   local width="$3"
-  local action action_w command_w desc_w line gap
+  local action action_w command_w desc_w line gap row pattern
+  local action_rows=(
+    "usage --refresh --select"$'\t'"select"
+    "usage --cached"$'\t'"cache"
+    "usage --refresh -v"$'\t'"wide"
+    "add <name>"$'\t'"new"
+    "current"$'\t'"view"
+    "list*"$'\t'"view"
+    "paths"$'\t'"view"
+    "use <name>"$'\t'"use"
+    "add <name> --current"$'\t'"save"
+    "save*"$'\t'"copy"
+    "add <name> --file <file>"$'\t'"import"
+    "import*"$'\t'"load"
+    "login <name>"$'\t'"auth"
+    "refresh"$'\t'"sync"
+    "auto"$'\t'"best"
+    "patch-codex"$'\t'"patch"
+    "recover*"$'\t'"resume"
+    "run -- <args>"$'\t'"roll"
+    "remove*"$'\t'"delete"
+    "doctor"$'\t'"audit"
+    "export*"$'\t'"write"
+  )
 
-  action="$(help_item_action "$cmd" "$desc")"
+  action="${desc%% *}"
+  for row in "${action_rows[@]}"; do
+    IFS=$'\t' read -r pattern action <<<"$row"
+    if [[ "$cmd" == $pattern ]]; then
+      break
+    fi
+    action="${desc%% *}"
+  done
   action_w=7
   (( width < 56 )) && action_w=6
 
@@ -203,44 +233,6 @@ print_help_compact_line() {
   printf ' '
   print_toned_fit_rtrim "$cmd" "$command_w" accent
   printf '\n'
-}
-
-help_item_action() {
-  local cmd="$1"
-  local desc="$2"
-  local row pattern action
-  local rows=(
-    "usage --refresh --select"$'\t'"select"
-    "usage --cached"$'\t'"cache"
-    "usage --refresh -v"$'\t'"wide"
-    "add <name>"$'\t'"new"
-    "current"$'\t'"view"
-    "list*"$'\t'"view"
-    "paths"$'\t'"view"
-    "use <name>"$'\t'"use"
-    "add <name> --current"$'\t'"save"
-    "save*"$'\t'"copy"
-    "add <name> --file <file>"$'\t'"import"
-    "import*"$'\t'"load"
-    "login <name>"$'\t'"auth"
-    "refresh"$'\t'"sync"
-    "auto"$'\t'"best"
-    "patch-codex"$'\t'"patch"
-    "recover*"$'\t'"resume"
-    "run -- <args>"$'\t'"roll"
-    "remove*"$'\t'"delete"
-    "doctor"$'\t'"audit"
-    "export*"$'\t'"write"
-  )
-
-  for row in "${rows[@]}"; do
-    IFS=$'\t' read -r pattern action <<<"$row"
-    if [[ "$cmd" == $pattern ]]; then
-      printf '%s' "$action"
-      return 0
-    fi
-  done
-  printf '%s' "${desc%% *}"
 }
 
 help_action_tone() {
