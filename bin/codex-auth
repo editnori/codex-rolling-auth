@@ -4062,9 +4062,9 @@ print_usage_summary_block() {
     blank_after=1
   fi
 
-  selector_header_primary_line "$first" "$body_w" "$label_w" "$frame" "$total_w"
+  selector_header_primary_line "$first" "$body_w" "$label_w" "$frame"
   if (( show_active )) && [[ -n "$active_part" ]]; then
-    selector_header_primary_line "$active_part" "$body_w" "$label_w" "$frame" "$total_w"
+    selector_header_primary_line "$active_part" "$body_w" "$label_w" "$frame"
   fi
   if (( show_pool )) && [[ -n "$pool_part" ]]; then
     selector_header_meta_line "stats" "$pool_part" "$body_w" "$label_w" "$frame"
