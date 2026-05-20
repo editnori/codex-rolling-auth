@@ -1476,45 +1476,6 @@ profile_list_row_action() {
   fi
 }
 
-profile_list_scan_profiles() {
-  local active_fp="$1"
-  local account_count_var="$6"
-  local account_primary_var="$7"
-  local alias_count_var="${10}"
-  local -n profiles_ref="$2"
-  local -n profile_mode_ref="$3"
-  local -n profile_hint_ref="$4"
-  local -n profile_fp_ref="$5"
-  local -n account_count_ref="$account_count_var"
-  local -n account_primary_ref="$account_primary_var"
-  local -n active_name_ref="$8"
-  local -n count_ref="$9"
-  local -n alias_count_ref="$alias_count_var"
-  local path name mode hint fp
-
-  PROFILE_LIST_WIDTH_HINT=12
-  for path in "${profiles_ref[@]}"; do
-    name="$(basename "$path" .json)"
-    (( ${#name} > PROFILE_LIST_WIDTH_HINT )) && PROFILE_LIST_WIDTH_HINT="${#name}"
-    mode="${profile_mode_ref["$name"]:-unknown}"
-    hint="${profile_hint_ref["$name"]:-}"
-    fp="${profile_fp_ref["$name"]:-}"
-    if [[ -z "$active_name_ref" && -n "$active_fp" && "$fp" == "$active_fp" ]]; then
-      active_name_ref="$name"
-    fi
-    if [[ -n "$hint" ]]; then
-      account_count_ref["$hint"]=$(( ${account_count_ref["$hint"]:-0} + 1 ))
-      if (( account_count_ref["$hint"] > 1 )); then
-        alias_count_ref=$((alias_count_ref + 1))
-      fi
-      if [[ -z "${account_primary_ref["$hint"]:-}" || ( "${account_primary_ref["$hint"]:-}" == "current" && "$name" != "current" ) ]]; then
-        account_primary_ref["$hint"]="$name"
-      fi
-    fi
-    count_ref=$((count_ref + 1))
-  done
-}
-
 print_profile_list_header() {
   local count="$1"
   local active_name="$2"
@@ -1626,7 +1587,7 @@ cmd_list() {
   local -A profile_mode=()
   local -A profile_hint=()
   local -A profile_fp=()
-  local fp meta_path mode hint secret name
+  local fp meta_path mode hint secret name path
 
   [[ -f "$AUTH_FILE" ]] && meta_files+=("$AUTH_FILE")
   meta_files+=("${profiles[@]}")
@@ -1642,7 +1603,26 @@ cmd_list() {
       profile_fp["$name"]="$fp"
     fi
   done < <(auth_metadata_records "${meta_files[@]}")
-  profile_list_scan_profiles "$active_fp" profiles profile_mode profile_hint profile_fp account_count account_primary active_name count alias_count
+  PROFILE_LIST_WIDTH_HINT=12
+  for path in "${profiles[@]}"; do
+    name="$(basename "$path" .json)"
+    (( ${#name} > PROFILE_LIST_WIDTH_HINT )) && PROFILE_LIST_WIDTH_HINT="${#name}"
+    hint="${profile_hint["$name"]:-}"
+    fp="${profile_fp["$name"]:-}"
+    if [[ -z "$active_name" && -n "$active_fp" && "$fp" == "$active_fp" ]]; then
+      active_name="$name"
+    fi
+    if [[ -n "$hint" ]]; then
+      account_count["$hint"]=$(( ${account_count["$hint"]:-0} + 1 ))
+      if (( account_count["$hint"] > 1 )); then
+        alias_count=$((alias_count + 1))
+      fi
+      if [[ -z "${account_primary["$hint"]:-}" || ( "${account_primary["$hint"]:-}" == "current" && "$name" != "current" ) ]]; then
+        account_primary["$hint"]="$name"
+      fi
+    fi
+    count=$((count + 1))
+  done
 
   local cols role_w profile_w mode_w account_w
   cols="$(terminal_width)"
