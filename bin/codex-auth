@@ -1744,9 +1744,7 @@ usage_limit_tone() {
   fi
 
   value="$percent"
-  if (( value <= 0 )); then
-    printf 'bad'
-  elif (( value < 25 )); then
+  if (( value < 25 )); then
     printf 'bad'
   elif (( value < 50 )); then
     printf 'warn'
