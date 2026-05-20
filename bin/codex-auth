@@ -2803,7 +2803,7 @@ state_payload_for_profile() {
           else ($now - ($profile.updated_at | tonumber))
         end)
       })
-  ' "$STATE_FILE" 2>/dev/null | tail -n 1
+  ' "$STATE_FILE" 2>/dev/null
 }
 
 state_update_profile() {
