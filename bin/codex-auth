@@ -2235,21 +2235,6 @@ print_usage_limit_cell() {
   return 0
 }
 
-usage_cell_overhead() {
-  local mode="$1"
-  local label_w="$2"
-  local reset_w="$3"
-  local reset_prefix_w="$4"
-
-  if [[ "$mode" == "pico" ]]; then
-    printf '%s' "$label_w"
-  elif (( reset_w > 0 )); then
-    printf '%s' "$((label_w + 2 + reset_w + reset_prefix_w))"
-  else
-    printf '%s' "$((label_w + 1))"
-  fi
-}
-
 usage_render_widths() {
   local cols="$1"
   local mode role_w
@@ -2279,7 +2264,13 @@ usage_render_widths() {
   else
     reset_prefix_w=0
   fi
-  cell_overhead="$(usage_cell_overhead "$mode" "$label_w" "$reset_w" "$reset_prefix_w")"
+  if [[ "$mode" == "pico" ]]; then
+    cell_overhead="$label_w"
+  elif (( reset_w > 0 )); then
+    cell_overhead=$((label_w + 2 + reset_w + reset_prefix_w))
+  else
+    cell_overhead=$((label_w + 1))
+  fi
 
   max_profile_w=$(( cols - role_w - status_min - (2 * (cell_overhead + min_bar_w)) - gap_w ))
   if (( max_profile_w < 12 && reset_w > 5 )); then
@@ -2291,7 +2282,7 @@ usage_render_widths() {
     else
       reset_prefix_w=0
     fi
-    cell_overhead="$(usage_cell_overhead "$mode" "$label_w" "$reset_w" "$reset_prefix_w")"
+    cell_overhead=$((label_w + 2 + reset_w + reset_prefix_w))
     max_profile_w=$(( cols - role_w - status_min - (2 * (cell_overhead + min_bar_w)) - gap_w ))
   fi
 
