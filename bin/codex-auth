@@ -3575,10 +3575,6 @@ selector_palette_table_widths() {
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$primary_w" "$week_w" "$short_w" "$status_w" "$status_gap" "$metric_gap"
 }
 
-selector_palette_fzf_colors() {
-  printf '%s' 'dark,fg:#eeeeee,fg+:#f4f0e8,bg:#141414,bg+:#262626,hl:#fab283,hl+:#ffd0a0,border:#323232,label:#fab283,prompt:#fab283,pointer:#fab283,header:#9a9a9a,info:#808080,gutter:#141414'
-}
-
 selector_compact_by_width() {
   local width="$1"
   local default="$2"
@@ -4510,6 +4506,7 @@ selector_fzf_menu() {
   local fzf_opencode_theme=0
   local selector_controls selector_control_sep max_height
   local fzf_color_arg
+  local fzf_codex_colors='dark,fg:#eeeeee,fg+:#f4f0e8,bg:#141414,bg+:#262626,hl:#fab283,hl+:#ffd0a0,border:#323232,label:#fab283,prompt:#fab283,pointer:#fab283,header:#9a9a9a,info:#808080,gutter:#141414'
   local palette_effective_w right_margin terminal_w primary_w week_w short_w palette_status_w status_gap metric_gap
   local fzf_vertical_padding=0 fzf_header_line
 
@@ -4528,14 +4525,14 @@ selector_fzf_menu() {
   fzf_color_arg=""
   if [[ -n "${CODEX_AUTH_FZF_THEME:-}" ]]; then
     if [[ "$CODEX_AUTH_FZF_THEME" == "codex" || "$CODEX_AUTH_FZF_THEME" == "1" ]]; then
-      fzf_color_arg="$(selector_palette_fzf_colors)"
+      fzf_color_arg="$fzf_codex_colors"
       fzf_opencode_theme=1
     else
       fzf_color_arg="$CODEX_AUTH_FZF_THEME"
     fi
   elif (( selector_palette_mode )); then
     if usage_color_active; then
-      fzf_color_arg="$(selector_palette_fzf_colors)"
+      fzf_color_arg="$fzf_codex_colors"
     else
       fzf_color_arg="bw"
     fi
