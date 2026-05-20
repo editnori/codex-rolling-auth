@@ -6559,50 +6559,44 @@ collect_usage_records_cached() {
   return 0
 }
 
-usage_refresh_payload_or_cache() {
-  local profile_name="$1"
-  local profile_file="$2"
-  local fingerprint="$3"
-  local payload fallback_payload
-
-  if [[ "${CODEX_AUTH_REFRESH_BLOCKED:-0}" == "1" && -n "$fingerprint" ]]; then
-    payload="$(state_payload_for_profile "$profile_name" "$fingerprint" || true)"
-    if [[ -n "$payload" ]] && usage_payload_still_blocked "$payload"; then
-      printf '%s' "$payload"
-      return 0
-    fi
-  fi
-
-  payload="$(usage_json_for_profile "$profile_file")"
-  if [[ -n "$payload" && "$payload" != "null" ]] && usage_payload_transient_error "$payload"; then
-    payload=""
-  fi
-  if [[ -z "$payload" || "$payload" == "null" ]]; then
-    fallback_payload=""
-    [[ -n "$fingerprint" ]] && fallback_payload="$(state_payload_for_profile "$profile_name" "$fingerprint" || true)"
-    if [[ -n "$fallback_payload" && "${CODEX_AUTH_REFRESH_FALLBACK_CACHE:-1}" == "1" ]]; then
-      payload="$(mark_stale_payload "$fallback_payload")"
-    else
-      payload='{"error":{"message":"no response"}}'
-    fi
-  elif [[ -n "$fingerprint" ]]; then
-    state_update_profile "$profile_name" "$fingerprint" "$payload"
-  fi
-  printf '%s' "$payload"
-}
-
 collect_usage_records_synced() {
   local active_fp="$1"
   shift
   local profile_files=("$@")
   local records=""
-  local profile_file profile_name fingerprint payload
+  local profile_file profile_name fingerprint payload fallback_payload
 
   for profile_file in "${profile_files[@]}"; do
     require_auth_file "$profile_file"
     profile_name="$(basename "$profile_file" .json)"
     fingerprint="$(credential_fingerprint "$profile_file" || true)"
-    payload="$(usage_refresh_payload_or_cache "$profile_name" "$profile_file" "$fingerprint")"
+
+    payload=""
+    if [[ "${CODEX_AUTH_REFRESH_BLOCKED:-0}" == "1" && -n "$fingerprint" ]]; then
+      payload="$(state_payload_for_profile "$profile_name" "$fingerprint" || true)"
+      if [[ -z "$payload" ]] || ! usage_payload_still_blocked "$payload"; then
+        payload=""
+      fi
+    fi
+
+    if [[ -z "$payload" ]]; then
+      payload="$(usage_json_for_profile "$profile_file")"
+      if [[ -n "$payload" && "$payload" != "null" ]] && usage_payload_transient_error "$payload"; then
+        payload=""
+      fi
+      if [[ -z "$payload" || "$payload" == "null" ]]; then
+        fallback_payload=""
+        [[ -n "$fingerprint" ]] && fallback_payload="$(state_payload_for_profile "$profile_name" "$fingerprint" || true)"
+        if [[ -n "$fallback_payload" && "${CODEX_AUTH_REFRESH_FALLBACK_CACHE:-1}" == "1" ]]; then
+          payload="$(mark_stale_payload "$fallback_payload")"
+        else
+          payload='{"error":{"message":"no response"}}'
+        fi
+      elif [[ -n "$fingerprint" ]]; then
+        state_update_profile "$profile_name" "$fingerprint" "$payload"
+      fi
+    fi
+
     records+="$(usage_record_for_profile "$profile_name" "$profile_file" "$payload" "$active_fp" "$fingerprint")"$'\n'
   done
 
