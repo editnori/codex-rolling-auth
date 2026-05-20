@@ -3271,48 +3271,6 @@ print_selector_row() {
   fit_text_rtrim "$detail" "$detail_w"
 }
 
-print_selector_palette_primary() {
-  local primary="$1"
-  local width="$2"
-  local action display_action profile action_w profile_w profile_render gap action_tone
-
-  if (( width <= 0 )); then
-    return 0
-  fi
-  action="${primary%% *}"
-  if [[ "$primary" == "$action" ]]; then
-    fit_profile_text "$primary" "$width"
-    return 0
-  fi
-  profile="${primary#* }"
-  case "$action" in
-    best|stay|use|same|cap|login|warn)
-      display_action="$action"
-      [[ "$action" == "best" ]] && display_action="use"
-      action_tone="$(usage_role_tone "$action")"
-      [[ "$action" == "warn" ]] && action_tone="warn"
-      action_w=5
-      gap=2
-      if (( action_w + gap >= width )); then
-        usage_tone_color "$action_tone"
-        fit_text "$display_action" "$width"
-        usage_tone_reset
-        return 0
-      fi
-      usage_tone_color "$action_tone"
-      fit_text "$display_action" "$action_w"
-      usage_tone_reset
-      printf '%*s' "$gap" ''
-      profile_w=$((width - action_w - gap))
-      profile_render="$(usage_display_profile_name "$profile" "$action" "$profile_w")"
-      fit_profile_text "$profile_render" "$profile_w"
-      ;;
-    *)
-      fit_profile_text "$primary" "$width"
-      ;;
-  esac
-}
-
 selector_palette_table_widths() {
   local total_w="$1"
   local primary_w week_w short_w status_w metric_w status_gap=1 metric_gap=1 status_max=13
@@ -3570,9 +3528,43 @@ print_selector_palette_table_row() {
   local valid="$6"
   local total_w="$7"
   local primary_w week_w short_w status_w compact_status status_gap metric_gap
+  local primary_action primary_display_action primary_profile primary_action_w primary_profile_w primary_render primary_gap primary_tone
 
   IFS=$'\t' read -r primary_w week_w short_w status_w status_gap metric_gap <<<"$(selector_palette_table_widths "$total_w")"
-  print_selector_palette_primary "$primary" "$primary_w"
+  if (( primary_w > 0 )); then
+    primary_action="${primary%% *}"
+    if [[ "$primary" == "$primary_action" ]]; then
+      fit_profile_text "$primary" "$primary_w"
+    else
+      primary_profile="${primary#* }"
+      case "$primary_action" in
+        best|stay|use|same|cap|login|warn)
+          primary_display_action="$primary_action"
+          [[ "$primary_action" == "best" ]] && primary_display_action="use"
+          primary_tone="$(usage_role_tone "$primary_action")"
+          [[ "$primary_action" == "warn" ]] && primary_tone="warn"
+          primary_action_w=5
+          primary_gap=2
+          if (( primary_action_w + primary_gap >= primary_w )); then
+            usage_tone_color "$primary_tone"
+            fit_text "$primary_display_action" "$primary_w"
+            usage_tone_reset
+          else
+            usage_tone_color "$primary_tone"
+            fit_text "$primary_display_action" "$primary_action_w"
+            usage_tone_reset
+            printf '%*s' "$primary_gap" ''
+            primary_profile_w=$((primary_w - primary_action_w - primary_gap))
+            primary_render="$(usage_display_profile_name "$primary_profile" "$primary_action" "$primary_profile_w")"
+            fit_profile_text "$primary_render" "$primary_profile_w"
+          fi
+          ;;
+        *)
+          fit_profile_text "$primary" "$primary_w"
+          ;;
+      esac
+    fi
+  fi
   printf ' '
 
   if (( week_w == 0 )); then
