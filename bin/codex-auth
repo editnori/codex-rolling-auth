@@ -69,16 +69,16 @@ usage() {
   color_enabled && USAGE_COLOR_ENABLED=1
   if (( width < 32 )); then
     if (( width < 22 )); then
-      print_palette_title_line "Auth" "Commands" "" "$width"
+      print_palette_title_line "Commands" "" "$width"
     else
-      print_palette_title_line "Auth" "Commands" "" "$width"
+      print_palette_title_line "Commands" "" "$width"
       print_flat_context_line "profiles auth-profiles" "$width"
     fi
   else
     path_w=$((width - 9))
     (( path_w < 1 )) && path_w=1
     path="$(compact_display_path "$PROFILE_DIR" "$path_w")"
-    print_palette_title_line "Auth" "Commands" "" "$width"
+    print_palette_title_line "Commands" "" "$width"
     print_flat_context_line "profiles $path" "$width"
   fi
   print_help_section "daily" "$width"
@@ -714,7 +714,7 @@ print_result_block() {
   else
     display_summary="$summary"
   fi
-  print_palette_summary_header "Auth" "$title" "$display_summary" "$total_w"
+  print_palette_summary_header "$title" "$display_summary" "$total_w"
   for row in "$@"; do
     IFS=$'\t' read -r label value tone <<<"$row"
     [[ -n "$tone" ]] || tone="muted"
@@ -960,7 +960,7 @@ print_empty_profiles() {
   USAGE_COLOR_ENABLED=0
   color_enabled && USAGE_COLOR_ENABLED=1
 
-  print_palette_summary_header "Auth" "Profiles" "no saved profiles" "$total_w"
+  print_palette_summary_header "Profiles" "no saved profiles" "$total_w"
   if [[ -f "$AUTH_FILE" ]]; then
     if (( total_w < 32 )); then
       command="current"
@@ -1205,7 +1205,7 @@ cmd_list() {
       summary="$alias_summary"
     fi
   fi
-  print_palette_summary_header "Auth" "Saved profiles" "$summary" "$total_w"
+  print_palette_summary_header "Saved profiles" "$summary" "$total_w"
   role_header="$(compact_width_choice "$role_w" 2 "" "act")"
   profile_header="$(compact_width_choice "$profile_w" 7 "prof" "profile")"
   print_profile_list_line "$role_header" "$profile_header" "auth" "account" "$role_w" "$profile_w" "$mode_w" "$account_w"
@@ -1325,7 +1325,7 @@ cmd_current() {
     current_profiles=("$PROFILE_DIR"/*.json)
     shopt -u nullglob
 
-    print_palette_summary_header "Auth" "Active profile" "$current_status" "$total_w"
+    print_palette_summary_header "Active profile" "$current_status" "$total_w"
     [[ "$current_status" == "bad active auth" ]] && print_detail_line "live" "$(compact_display_path "$AUTH_FILE" "$value_w")" "$label_w" "$value_w" bad
     if (( ${#current_profiles[@]} > 0 )); then
       first_profile="$(basename "${current_profiles[0]}" .json)"
@@ -1414,7 +1414,7 @@ cmd_current() {
     summary+="$(usage_separator)account $account_display"
   fi
 
-  print_palette_summary_header "Auth" "Active profile" "$summary" "$total_w" flat 0
+  print_palette_summary_header "Active profile" "$summary" "$total_w" flat 0
   if [[ -n "$hint" && "$summary" != *"account "* ]]; then
     print_detail_line "account" "$account_display" "$label_w" "$value_w"
   fi
@@ -4264,10 +4264,10 @@ selector_palette_controls_line() {
 }
 
 print_palette_title_line() {
-  local namespace="$1"
-  local label="$2"
-  local right="$3"
-  local total_w="$4"
+  local label="$1"
+  local right="$2"
+  local total_w="$3"
+  local namespace="Auth"
   local sep left compact_label compact_left gap
 
   sep="$(usage_separator)"
@@ -4329,12 +4329,11 @@ print_flat_context_line() {
 }
 
 print_palette_summary_header() {
-  local namespace="$1"
-  local label="$2"
-  local summary="$3"
-  local total_w="$4"
-  local mode="${5:-flat}"
-  local gap="${6:-1}"
+  local label="$1"
+  local summary="$2"
+  local total_w="$3"
+  local mode="${4:-flat}"
+  local gap="${5:-1}"
   local right="" sep token rest
 
   sep="$(usage_separator)"
@@ -4347,7 +4346,7 @@ print_palette_summary_header() {
       break
     fi
   done
-  print_palette_title_line "$namespace" "$label" "$right" "$total_w"
+  print_palette_title_line "$label" "$right" "$total_w"
   if [[ "$mode" == "usage" && "${CODEX_AUTH_USAGE_CONTEXT:-0}" == "1" ]]; then
     selector_palette_context_line "$summary" "$total_w"
   elif [[ "$mode" == "usage" ]]; then
@@ -5085,7 +5084,7 @@ render_usage_records() {
   total_w=$((role_w + 1 + (role_w > 1) + profile_w + 1 + cell_w + 1 + cell_w))
   (( status_w > 0 )) && total_w=$((total_w + 1 + (role_w > 1) + status_w))
 
-  print_palette_summary_header "Auth" "Codex profiles" "$(usage_metadata_summary_line "$total_w" "$default_profile" "${SORTED_USAGE_RECORDS[@]}")" "$total_w" usage 0
+  print_palette_summary_header "Codex profiles" "$(usage_metadata_summary_line "$total_w" "$default_profile" "${SORTED_USAGE_RECORDS[@]}")" "$total_w" usage 0
   if [[ "${CODEX_AUTH_USAGE_HEADER:-0}" == "1" ]]; then
     header_role="act"
     (( role_w <= 1 )) && header_role=""
@@ -6453,7 +6452,7 @@ cmd_paths() {
   color_enabled && USAGE_COLOR_ENABLED=1
 
   home_label="home $(compact_display_path "$CODEX_HOME" "$path_w")"
-  print_palette_summary_header "Auth" "Paths" "$home_label" "$total_w"
+  print_palette_summary_header "Paths" "$home_label" "$total_w"
   print_path_line "live" "auth" "$AUTH_FILE" "$role_w" "$target_w" "$path_w" active
   print_path_line "saved" "profiles" "$PROFILE_DIR" "$role_w" "$target_w" "$path_w" good
   print_path_line "undo" "backups" "$BACKUP_DIR" "$role_w" "$target_w" "$path_w" warn
