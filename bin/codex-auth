@@ -3335,30 +3335,6 @@ usage_summary_append_optional_parts() {
   return 0
 }
 
-usage_summary_apply_fallback() {
-  local -n line_out="$1"
-  local -n show_ready_out="$2"
-  local -n show_caps_out="$3"
-  local -n cap_label_out="$4"
-  local -n fallback_used_out="$5"
-  local width="$6"
-  local old_summary="$7"
-  local has_active="$8"
-  local active_has_usage="$9"
-  local has_best="${10}"
-  local ready="${11}"
-  local caps="${12}"
-  local sep="${13}"
-  local active_profile="${14}"
-  local active_label="${15}"
-  local active_short="${16}"
-
-  (( ${#line_out} > width )) || return 0
-  IFS=$'\t' read -r line_out show_ready_out show_caps_out cap_label_out \
-    <<<"$(usage_summary_fallback_line "$width" "$old_summary" "$has_active" "$active_has_usage" "$has_best" "$ready" "$caps" "$sep" "$active_profile" "$active_label" "$active_short")"
-  fallback_used_out=1
-}
-
 print_usage_summary_rendered_line() {
   local line="$1"
   local width="$2"
@@ -3417,8 +3393,11 @@ print_usage_summary_line() {
   usage_summary_append_optional_parts line show_week show_ready show_caps show_login show_unavailable show_offline show_stale show_cache \
     "$width" "$sep" "$active_weekly" "$ready" "$cap_label" "$caps" "$login" "$unavailable" "$offline" "$stale" "$cache_age_label"
 
-  usage_summary_apply_fallback line show_ready show_caps cap_label fallback_used \
-    "$width" "$old_summary" "$has_active" "$active_has_usage" "$has_best" "$ready" "$caps" "$sep" "$active_profile" "$active_label" "$active_short"
+  if (( ${#line} > width )); then
+    IFS=$'\t' read -r line show_ready show_caps cap_label \
+      <<<"$(usage_summary_fallback_line "$width" "$old_summary" "$has_active" "$active_has_usage" "$has_best" "$ready" "$caps" "$sep" "$active_profile" "$active_label" "$active_short")"
+    fallback_used=1
+  fi
   if (( fallback_used )); then
     show_week=0
     show_login=0
