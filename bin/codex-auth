@@ -4729,8 +4729,8 @@ prepare_usage_records() {
 
   mapfile -t sorted_records < <(
     printf '%s\n' "$records" \
-      | sed '/^[[:space:]]*$/d' \
       | while IFS= read -r record; do
+          [[ "$record" =~ [^[:space:]] ]] || continue
           IFS=$'\t' read -r valid weekly_used short_used mark profile plan weekly short status record_short_label weekly_reset short_reset cache_age <<<"$record"
           case "$status" in
             offline) rank=7 ;;
