@@ -1479,22 +1479,19 @@ cmd_add() {
   require_name "$name"
 
   local source=""
-  local source_seen=0
   local login_args=()
 
   while (( $# > 0 )); do
     case "$1" in
       --current)
-        (( source_seen == 0 )) || die "add accepts one source: --current or --file"
+        [[ -z "$source" ]] || die "add accepts one source: --current or --file"
         source="$AUTH_FILE"
-        source_seen=1
         shift
         ;;
       --file|--from)
         [[ -n "${2:-}" ]] || die "usage: codex-auth add <name> --file <file>"
-        (( source_seen == 0 )) || die "add accepts one source: --current or --file"
+        [[ -z "$source" ]] || die "add accepts one source: --current or --file"
         source="$2"
-        source_seen=1
         shift 2
         ;;
       --)
@@ -1505,7 +1502,6 @@ cmd_add() {
       *)
         if [[ -f "$1" && -z "$source" ]]; then
           source="$1"
-          source_seen=1
         else
           login_args+=("$1")
         fi
@@ -3227,7 +3223,6 @@ selector_palette_table_widths() {
   local primary_w week_w short_w status_w metric_w status_gap=1 metric_gap=1 status_max=13
   local row
 
-  primary_w=16
   if (( total_w < 32 )); then
     primary_w=13
   elif (( total_w < 60 )); then
