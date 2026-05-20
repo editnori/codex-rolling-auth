@@ -7547,14 +7547,6 @@ patch_codex_log_path() {
   printf '%s/build.log\n' "$(patch_codex_root)"
 }
 
-patch_codex_stock_bin() {
-  if [[ -n "${CODEX_AUTH_STOCK_CODEX_BIN:-}" && -x "${CODEX_AUTH_STOCK_CODEX_BIN:-}" ]]; then
-    printf '%s\n' "$CODEX_AUTH_STOCK_CODEX_BIN"
-    return 0
-  fi
-  codex_bin
-}
-
 patch_codex_stock_info() {
   local stock_bin="$1"
   local version hash key
@@ -7965,63 +7957,56 @@ patch_codex_background() {
   [[ "$quiet" == "1" ]] || print_status_note patch "background build started"
 }
 
-patch_codex_parse_args() {
-  local -n background_ref="$1"
-  local -n quiet_ref="$2"
-  local -n status_ref="$3"
-  local -n print_bin_ref="$4"
-  local -n print_key_ref="$5"
-  local -n force_ref="$6"
-  local -n no_fetch_ref="$7"
-  local -n check_login_ref="$8"
-  local -n profile_ref="$9"
-  local -n ref_ref="${10}"
-  local -n source_dir_ref="${11}"
-  shift 11
+cmd_patch_codex() {
+  ensure_dirs
 
+  local background=0 quiet=0 status=0 print_bin=0 print_key=0 force=0 no_fetch=0 check_login=0
+  local profile="${CODEX_AUTH_PATCH_PROFILE:-release}"
+  local ref="${CODEX_AUTH_PATCH_REF:-origin/main}"
+  local source_dir=""
   while (( $# > 0 )); do
     case "$1" in
       --background)
-        background_ref=1
+        background=1
         ;;
       --foreground)
-        background_ref=0
+        background=0
         ;;
       --quiet|-q)
-        quiet_ref=1
+        quiet=1
         ;;
       --status)
-        status_ref=1
+        status=1
         ;;
       --print-bin)
-        print_bin_ref=1
+        print_bin=1
         ;;
       --print-key)
-        print_key_ref=1
+        print_key=1
         ;;
       --force)
-        force_ref=1
+        force=1
         ;;
       --no-fetch)
-        no_fetch_ref=1
+        no_fetch=1
         ;;
       --check-login)
-        check_login_ref=1
+        check_login=1
         ;;
       --debug)
-        profile_ref=debug
+        profile=debug
         ;;
       --release)
-        profile_ref=release
+        profile=release
         ;;
       --ref)
         [[ -n "${2:-}" ]] || die "usage: codex-auth patch-codex --ref <git-ref>"
-        ref_ref="$2"
+        ref="$2"
         shift
         ;;
       --source-dir)
         [[ -n "${2:-}" ]] || die "usage: codex-auth patch-codex --source-dir <dir>"
-        source_dir_ref="$2"
+        source_dir="$2"
         shift
         ;;
       *)
@@ -8030,20 +8015,14 @@ patch_codex_parse_args() {
     esac
     shift
   done
-}
-
-cmd_patch_codex() {
-  ensure_dirs
-
-  local background=0 quiet=0 status=0 print_bin=0 print_key=0 force=0 no_fetch=0 check_login=0
-  local profile="${CODEX_AUTH_PATCH_PROFILE:-release}"
-  local ref="${CODEX_AUTH_PATCH_REF:-origin/main}"
-  local source_dir=""
-  patch_codex_parse_args background quiet status print_bin print_key force no_fetch check_login profile ref source_dir "$@"
   [[ "$profile" == "release" || "$profile" == "debug" ]] || profile=release
 
   local stock_bin stock_version stock_hash stock_key
-  stock_bin="$(patch_codex_stock_bin)" || die "codex command not found"
+  if [[ -n "${CODEX_AUTH_STOCK_CODEX_BIN:-}" && -x "${CODEX_AUTH_STOCK_CODEX_BIN:-}" ]]; then
+    stock_bin="$CODEX_AUTH_STOCK_CODEX_BIN"
+  else
+    stock_bin="$(codex_bin)" || die "codex command not found"
+  fi
   require_codex_launcher "$stock_bin"
   IFS=$'\t' read -r stock_version stock_hash stock_key <<<"$(patch_codex_stock_info "$stock_bin")"
 
