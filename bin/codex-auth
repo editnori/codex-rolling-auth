@@ -7472,61 +7472,6 @@ cmd_refresh() {
   [[ "$USAGE_QUIET" == "1" ]] || render_usage_records "$records" "$default_profile" "$active_is_best"
 }
 
-parse_auto_args() {
-  local -n args_ref="$1"
-  shift
-
-  while (( $# > 0 )); do
-    case "$1" in
-      --quiet|-q)
-        USAGE_QUIET=1
-        shift
-        ;;
-      --ttl)
-        [[ "${2:-}" =~ ^[0-9]+$ ]] || return 1
-        CACHE_TTL="$2"
-        USAGE_CACHED=0
-        shift 2
-        ;;
-      --no-background)
-        USAGE_BACKGROUND=0
-        shift
-        ;;
-      --)
-        shift
-        args_ref+=("$@")
-        break
-        ;;
-      *)
-        args_ref+=("$1")
-        shift
-        ;;
-    esac
-  done
-}
-
-auto_apply_selection() {
-  local rendered_output="$1"
-  local default_profile="$2"
-  local active_is_best="$3"
-
-  if [[ -n "$default_profile" ]]; then
-    (( rendered_output )) && printf '\n'
-    if [[ "$USAGE_QUIET" == "1" ]]; then
-      cmd_use "$default_profile" >/dev/null
-    else
-      cmd_use "$default_profile"
-    fi
-  elif [[ "$USAGE_QUIET" != "1" ]]; then
-    (( rendered_output )) && printf '\n'
-    if [[ "$active_is_best" == "1" ]]; then
-      print_status_note ready "already on best profile"
-    else
-      print_status_note blocked "no ready profile"
-    fi
-  fi
-}
-
 cmd_auto() {
   ensure_dirs
   command -v jq >/dev/null 2>&1 || return 0
@@ -7537,7 +7482,33 @@ cmd_auto() {
   USAGE_BACKGROUND=1
 
   local args=()
-  parse_auto_args args "$@" || return 0
+  while (( $# > 0 )); do
+    case "$1" in
+      --quiet|-q)
+        USAGE_QUIET=1
+        shift
+        ;;
+      --ttl)
+        [[ "${2:-}" =~ ^[0-9]+$ ]] || return 0
+        CACHE_TTL="$2"
+        USAGE_CACHED=0
+        shift 2
+        ;;
+      --no-background)
+        USAGE_BACKGROUND=0
+        shift
+        ;;
+      --)
+        shift
+        args+=("$@")
+        break
+        ;;
+      *)
+        args+=("$1")
+        shift
+        ;;
+    esac
+  done
   set -- "${args[@]}"
 
   local profile_files=()
@@ -7556,7 +7527,21 @@ cmd_auto() {
     rendered_output=1
   fi
 
-  auto_apply_selection "$rendered_output" "$default_profile" "$active_is_best"
+  if [[ -n "$default_profile" ]]; then
+    (( rendered_output )) && printf '\n'
+    if [[ "$USAGE_QUIET" == "1" ]]; then
+      cmd_use "$default_profile" >/dev/null
+    else
+      cmd_use "$default_profile"
+    fi
+  elif [[ "$USAGE_QUIET" != "1" ]]; then
+    (( rendered_output )) && printf '\n'
+    if [[ "$active_is_best" == "1" ]]; then
+      print_status_note ready "already on best profile"
+    else
+      print_status_note blocked "no ready profile"
+    fi
+  fi
 
   local stale_names=()
   mapfile -t stale_names < <(cache_stale_profile_names "${profile_files[@]}")
