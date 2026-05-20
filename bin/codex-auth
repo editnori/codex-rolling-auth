@@ -2208,45 +2208,6 @@ usage_mode_shows_used_percent_label() {
   esac
 }
 
-usage_limit_cell_reset_label() {
-  local mode="$1"
-  local reset_label="$2"
-
-  if [[ "$mode" == "micro" || "$mode" == "nano" ]]; then
-    reset_label=""
-  elif [[ ( "$mode" == "compact" || "$mode" == "tight" || "$mode" == "tiny" ) && "$reset_label" == *" "* ]]; then
-    reset_label="${reset_label##* }"
-  fi
-  (( USAGE_VERBOSE )) || reset_label=""
-
-  printf '%s' "$reset_label"
-}
-
-usage_limit_cell_set_labels() {
-  local percent="$1"
-  local mode="$2"
-  local used_percent="${3:-}"
-  local -n percent_label_ref="$4"
-  local -n reset_label_ref="$5"
-  local -n reset_prefix_ref="$6"
-  local -n label_w_ref="$7"
-
-  if [[ "$percent" == "-" ]]; then
-    percent_label_ref="$(usage_meta_glyph)"
-    [[ "$mode" == "micro" || "$mode" == "nano" ]] || reset_label_ref="$(usage_meta_glyph)"
-  elif (( USAGE_VERBOSE )) && usage_mode_shows_used_percent_label "$mode" && [[ "$used_percent" =~ ^[0-9]+$ ]]; then
-    percent_label_ref="${percent%\%}/${used_percent}%"
-    label_w_ref=6
-  elif (( ! USAGE_VERBOSE )); then
-    percent_label_ref="${percent%\%}"
-  elif [[ -n "$reset_label_ref" ]]; then
-    reset_prefix_ref="$(usage_reset_glyph)"
-  fi
-  if [[ -n "$reset_label_ref" && -z "$reset_prefix_ref" && "$percent" != "-" ]]; then
-    reset_prefix_ref="$(usage_reset_glyph)"
-  fi
-}
-
 usage_print_limit_cell_reset() {
   local reset_label="$1"
   local reset_prefix="$2"
@@ -2340,8 +2301,26 @@ print_usage_limit_cell() {
   local label_w=4
   local tone
 
-  reset_label="$(usage_limit_cell_reset_label "$mode" "$reset_label")"
-  usage_limit_cell_set_labels "$percent" "$mode" "$used_percent" percent_label reset_label reset_prefix label_w
+  if [[ "$mode" == "micro" || "$mode" == "nano" ]]; then
+    reset_label=""
+  elif [[ ( "$mode" == "compact" || "$mode" == "tight" || "$mode" == "tiny" ) && "$reset_label" == *" "* ]]; then
+    reset_label="${reset_label##* }"
+  fi
+  (( USAGE_VERBOSE )) || reset_label=""
+  if [[ "$percent" == "-" ]]; then
+    percent_label="$(usage_meta_glyph)"
+    [[ "$mode" == "micro" || "$mode" == "nano" ]] || reset_label="$(usage_meta_glyph)"
+  elif (( USAGE_VERBOSE )) && usage_mode_shows_used_percent_label "$mode" && [[ "$used_percent" =~ ^[0-9]+$ ]]; then
+    percent_label="${percent%\%}/${used_percent}%"
+    label_w=6
+  elif (( ! USAGE_VERBOSE )); then
+    percent_label="${percent%\%}"
+  elif [[ -n "$reset_label" ]]; then
+    reset_prefix="$(usage_reset_glyph)"
+  fi
+  if [[ -n "$reset_label" && -z "$reset_prefix" && "$percent" != "-" ]]; then
+    reset_prefix="$(usage_reset_glyph)"
+  fi
   tone="$(usage_limit_tone "$percent")"
   if usage_mode_is_pico_or_nano "$mode"; then
     [[ "$percent" == "-" ]] && percent_label="$(usage_meta_glyph)"
