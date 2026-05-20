@@ -2897,22 +2897,6 @@ EOF
   printf '\n'
 }
 
-usage_summary_try_append() {
-  local -n line_ref="$1"
-  local -n show_ref="$2"
-  local part="$3"
-  local width="$4"
-
-  if (( ! show_ref )); then
-    return 0
-  fi
-  if (( ${#line_ref} + ${#part} <= width )); then
-    line_ref+="$part"
-  else
-    show_ref=0
-  fi
-}
-
 usage_summary_scan_record() {
   local record="$1"
   local -n best_profile_out="$2"
@@ -3145,45 +3129,6 @@ print_usage_summary_colored_line() {
   printf '\n'
 }
 
-usage_summary_append_optional_parts() {
-  local -n line_out="$1"
-  local -n show_week_out="$2"
-  local -n show_ready_out="$3"
-  local -n show_caps_out="$4"
-  local -n show_login_out="$5"
-  local -n show_unavailable_out="$6"
-  local -n show_offline_out="$7"
-  local -n show_stale_out="$8"
-  local -n show_cache_out="$9"
-  local width="${10}"
-  local sep="${11}"
-  local active_weekly="${12}"
-  local ready="${13}"
-  local cap_label="${14}"
-  local caps="${15}"
-  local login="${16}"
-  local unavailable="${17}"
-  local offline="${18}"
-  local stale="${19}"
-  local cache_age_label="${20}"
-
-  usage_summary_try_append line_out show_week_out " wk $active_weekly" "$width"
-  usage_summary_try_append line_out show_ready_out "${sep}ready $ready" "$width"
-  usage_summary_try_append line_out show_caps_out "${sep}$cap_label $caps" "$width"
-  usage_summary_try_append line_out show_login_out "${sep}login $login" "$width"
-  usage_summary_try_append line_out show_unavailable_out "${sep}no data $unavailable" "$width"
-  usage_summary_try_append line_out show_offline_out "${sep}offline $offline" "$width"
-  if (( stale > 0 )); then
-    show_stale_out=1
-    usage_summary_try_append line_out show_stale_out "${sep}stale $stale" "$width"
-  fi
-  if [[ -n "$cache_age_label" ]]; then
-    show_cache_out=1
-    usage_summary_try_append line_out show_cache_out "${sep}cache $cache_age_label" "$width"
-  fi
-  return 0
-}
-
 print_usage_summary_line() {
   local width="$1"
   local default_profile="${2:-}"
@@ -3192,6 +3137,7 @@ print_usage_summary_line() {
   local has_best has_active active_has_usage caps login unavailable offline stale ready cache_age_label old_summary
   local show_cache=0
   local line show_week=0 show_login=0 show_unavailable=0 show_offline=0 show_ready=0 show_caps=0 show_stale=0
+  local part
   local cap_label="capped"
   local fallback_used=0
   local sep
@@ -3232,8 +3178,40 @@ print_usage_summary_line() {
   if (( ! has_active && has_best )); then
     show_ready=0
   fi
-  usage_summary_append_optional_parts line show_week show_ready show_caps show_login show_unavailable show_offline show_stale show_cache \
-    "$width" "$sep" "$active_weekly" "$ready" "$cap_label" "$caps" "$login" "$unavailable" "$offline" "$stale" "$cache_age_label"
+  part=" wk $active_weekly"
+  if (( show_week )); then
+    if (( ${#line} + ${#part} <= width )); then line+="$part"; else show_week=0; fi
+  fi
+  part="${sep}ready $ready"
+  if (( show_ready )); then
+    if (( ${#line} + ${#part} <= width )); then line+="$part"; else show_ready=0; fi
+  fi
+  part="${sep}$cap_label $caps"
+  if (( show_caps )); then
+    if (( ${#line} + ${#part} <= width )); then line+="$part"; else show_caps=0; fi
+  fi
+  part="${sep}login $login"
+  if (( show_login )); then
+    if (( ${#line} + ${#part} <= width )); then line+="$part"; else show_login=0; fi
+  fi
+  part="${sep}no data $unavailable"
+  if (( show_unavailable )); then
+    if (( ${#line} + ${#part} <= width )); then line+="$part"; else show_unavailable=0; fi
+  fi
+  part="${sep}offline $offline"
+  if (( show_offline )); then
+    if (( ${#line} + ${#part} <= width )); then line+="$part"; else show_offline=0; fi
+  fi
+  if (( stale > 0 )); then
+    show_stale=1
+    part="${sep}stale $stale"
+    if (( ${#line} + ${#part} <= width )); then line+="$part"; else show_stale=0; fi
+  fi
+  if [[ -n "$cache_age_label" ]]; then
+    show_cache=1
+    part="${sep}cache $cache_age_label"
+    if (( ${#line} + ${#part} <= width )); then line+="$part"; else show_cache=0; fi
+  fi
 
   if (( ${#line} > width )); then
     show_ready=0
