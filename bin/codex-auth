@@ -7984,20 +7984,6 @@ codex_run_limit_monitor_loop() {
   done
 }
 
-codex_run_start_limit_monitor() {
-  local log_file="$1"
-  local target_pid="$2"
-  local parent_pid="${3:-}"
-  local run_file="${4:-}"
-
-  CODEX_RUN_LIMIT_MONITOR_PID=""
-  if [[ "${CODEX_AUTH_ROLL_LIVE_MONITOR:-1}" == "0" || -z "$log_file" ]]; then
-    return 0
-  fi
-  codex_run_limit_monitor_loop "$log_file" "$target_pid" "$parent_pid" "$run_file" &
-  CODEX_RUN_LIMIT_MONITOR_PID=$!
-}
-
 codex_run_cleanup() {
   local watch_pid="${1:-}"
   local monitor_pid="${2:-}"
@@ -8053,16 +8039,20 @@ codex_run_execute_attempt() {
     } > "$run_file_ref"
     chmod 700 "$run_file_ref"
     set +e
-    codex_run_start_limit_monitor "$log_file_ref" "" "$$" "$run_file_ref"
-    monitor_pid_ref="$CODEX_RUN_LIMIT_MONITOR_PID"
+    if [[ "${CODEX_AUTH_ROLL_LIVE_MONITOR:-1}" != "0" && -n "$log_file_ref" ]]; then
+      codex_run_limit_monitor_loop "$log_file_ref" "" "$$" "$run_file_ref" &
+      monitor_pid_ref=$!
+    fi
     script -qefc "$run_file_ref" "$log_file_ref"
     status_ref=$?
   elif [[ "$log_enabled" != "0" && -n "$log_file_ref" && ! -t 1 ]]; then
     set +e
     CODEX_AUTH_RUNNER=1 "$codex_cli" "${run_args_ref[@]}" > >(tee "$log_file_ref") 2> >(tee -a "$log_file_ref" >&2) &
     target_pid_ref=$!
-    codex_run_start_limit_monitor "$log_file_ref" "$target_pid_ref"
-    monitor_pid_ref="$CODEX_RUN_LIMIT_MONITOR_PID"
+    if [[ "${CODEX_AUTH_ROLL_LIVE_MONITOR:-1}" != "0" && -n "$log_file_ref" ]]; then
+      codex_run_limit_monitor_loop "$log_file_ref" "$target_pid_ref" &
+      monitor_pid_ref=$!
+    fi
     wait "$target_pid_ref"
     status_ref=$?
   else
