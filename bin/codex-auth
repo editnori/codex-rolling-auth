@@ -4591,28 +4591,6 @@ selector_fzf_apply_frame() {
   fi
 }
 
-selector_fzf_palette_height() {
-  local row_count="$1"
-  local header_count="$2"
-  local term_lines="$3"
-  local height max_height vertical_padding=0
-
-  height=$((row_count + header_count + 1))
-  if [[ "$term_lines" =~ ^[0-9]+$ ]]; then
-    max_height=$((term_lines - 2))
-    max_height=$(( max_height < 6 ? 6 : max_height ))
-    if (( height + 2 <= max_height )); then
-      height=$((height + 2))
-      vertical_padding=1
-    fi
-    height=$(( height > max_height ? max_height : height ))
-  elif (( height < 22 )); then
-    height=$((height + 2))
-    vertical_padding=1
-  fi
-  printf '%s\t%s\n' "$height" "$vertical_padding"
-}
-
 selector_fzf_prepare_header() {
   local -n header_rows_ref="$1"
   local summary_text="$2"
@@ -4632,7 +4610,7 @@ selector_fzf_prepare_header() {
   local -n fzf_header_line_count_ref="${16}"
   local -n fzf_padding_args_ref="${17}"
   local -n fzf_header_args_ref="${18}"
-  local fzf_vertical_padding=0 fzf_header_line
+  local fzf_vertical_padding=0 fzf_header_line max_height
 
   if (( fzf_opencode_theme )); then
     fzf_header_ref="$(selector_palette_header_text "$summary_text" "$selector_controls" "$total_w")"
@@ -4641,7 +4619,19 @@ selector_fzf_prepare_header() {
       fzf_header_line_count_ref=$((fzf_header_line_count_ref + 1))
     done <<<"$fzf_header_ref"
     (( fzf_header_line_count_ref < 1 )) && fzf_header_line_count_ref=1
-    IFS=$'\t' read -r fzf_height_ref fzf_vertical_padding <<<"$(selector_fzf_palette_height "${#header_rows_ref[@]}" "$fzf_header_line_count_ref" "$term_lines")"
+    fzf_height_ref=$((${#header_rows_ref[@]} + fzf_header_line_count_ref + 1))
+    if [[ "$term_lines" =~ ^[0-9]+$ ]]; then
+      max_height=$((term_lines - 2))
+      max_height=$(( max_height < 6 ? 6 : max_height ))
+      if (( fzf_height_ref + 2 <= max_height )); then
+        fzf_height_ref=$((fzf_height_ref + 2))
+        fzf_vertical_padding=1
+      fi
+      fzf_height_ref=$(( fzf_height_ref > max_height ? max_height : fzf_height_ref ))
+    elif (( fzf_height_ref < 22 )); then
+      fzf_height_ref=$((fzf_height_ref + 2))
+      fzf_vertical_padding=1
+    fi
     if (( fzf_vertical_padding )); then
       fzf_padding_args_ref+=(--padding=1,0,1,0)
     fi
