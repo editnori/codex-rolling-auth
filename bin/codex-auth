@@ -394,15 +394,6 @@ credential_fingerprint() {
   fi
 }
 
-fingerprint_secret() {
-  local secret="${1:-}"
-  if [[ -n "$secret" ]]; then
-    printf '%s\n' "$secret" | sha256sum | awk '{print $1}'
-  else
-    printf '' | sha256sum | awk '{print $1}'
-  fi
-}
-
 auth_metadata_records() {
   if (( $# == 0 )); then
     return 0
@@ -442,11 +433,11 @@ auth_record_fingerprint() {
   local secret="$1"
 
   if [[ -n "$secret" && ! "$secret" =~ ^[0-9a-f]{64}$ ]]; then
-    fingerprint_secret "$secret"
+    printf '%s\n' "$secret" | sha256sum | awk '{print $1}'
   elif [[ -n "$secret" ]]; then
     printf '%s' "$secret"
   else
-    fingerprint_secret ""
+    printf '' | sha256sum | awk '{print $1}'
   fi
 }
 
