@@ -7369,33 +7369,6 @@ cmd_usage() {
   done
 }
 
-cache_stale_profile_names() {
-  local profile_file profile_name fingerprint payload age
-
-  for profile_file in "$@"; do
-    profile_name="$(basename "$profile_file" .json)"
-    fingerprint="$(credential_fingerprint "$profile_file" || true)"
-    payload=""
-    [[ -n "$fingerprint" ]] && payload="$(state_payload_for_profile "$profile_name" "$fingerprint" || true)"
-    age="999999999"
-    [[ -n "$fingerprint" ]] && age="$(state_age_for_profile "$profile_name" "$fingerprint")"
-    if [[ -z "$payload" || ! "$age" =~ ^[0-9]+$ || "$age" -gt "$CACHE_TTL" ]]; then
-      printf '%s\n' "$profile_name"
-    fi
-  done
-}
-
-background_refresh_profiles() {
-  local script="${BASH_SOURCE[0]}"
-  local background_jobs="${CODEX_AUTH_BACKGROUND_REFRESH_JOBS:-1}"
-  (( USAGE_BACKGROUND )) || return 0
-  [[ "${CODEX_AUTH_NO_BACKGROUND:-}" == "1" ]] && return 0
-  (( $# > 0 )) || return 0
-  [[ "$background_jobs" =~ ^[0-9]+$ && "$background_jobs" -gt 0 ]] || background_jobs=1
-
-  nohup env CODEX_AUTH_REFRESH_LOCK=try CODEX_AUTH_NO_BACKGROUND=1 CODEX_AUTH_REFRESH_BLOCKED=1 CODEX_AUTH_REFRESH_FALLBACK_CACHE=1 CODEX_AUTH_REFRESH_JOBS="$background_jobs" "$script" refresh --quiet --fast "$@" >/dev/null 2>&1 &
-}
-
 cmd_refresh() {
   ensure_dirs
   command -v jq >/dev/null 2>&1 || die "jq is required for usage refresh"
@@ -7544,9 +7517,23 @@ cmd_auto() {
   fi
 
   local stale_names=()
-  mapfile -t stale_names < <(cache_stale_profile_names "${profile_files[@]}")
-  if (( ${#stale_names[@]} > 0 )); then
-    background_refresh_profiles "${stale_names[@]}"
+  local profile_file profile_name fingerprint payload age
+  for profile_file in "${profile_files[@]}"; do
+    profile_name="$(basename "$profile_file" .json)"
+    fingerprint="$(credential_fingerprint "$profile_file" || true)"
+    payload=""
+    [[ -n "$fingerprint" ]] && payload="$(state_payload_for_profile "$profile_name" "$fingerprint" || true)"
+    age="999999999"
+    [[ -n "$fingerprint" ]] && age="$(state_age_for_profile "$profile_name" "$fingerprint")"
+    if [[ -z "$payload" || ! "$age" =~ ^[0-9]+$ || "$age" -gt "$CACHE_TTL" ]]; then
+      stale_names+=("$profile_name")
+    fi
+  done
+  if (( USAGE_BACKGROUND && ${#stale_names[@]} > 0 )) && [[ "${CODEX_AUTH_NO_BACKGROUND:-}" != "1" ]]; then
+    local script="${BASH_SOURCE[0]}"
+    local background_jobs="${CODEX_AUTH_BACKGROUND_REFRESH_JOBS:-1}"
+    [[ "$background_jobs" =~ ^[0-9]+$ && "$background_jobs" -gt 0 ]] || background_jobs=1
+    nohup env CODEX_AUTH_REFRESH_LOCK=try CODEX_AUTH_NO_BACKGROUND=1 CODEX_AUTH_REFRESH_BLOCKED=1 CODEX_AUTH_REFRESH_FALLBACK_CACHE=1 CODEX_AUTH_REFRESH_JOBS="$background_jobs" "$script" refresh --quiet --fast "${stale_names[@]}" >/dev/null 2>&1 &
   fi
 }
 
