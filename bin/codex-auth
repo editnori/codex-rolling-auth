@@ -7396,10 +7396,17 @@ background_refresh_profiles() {
   nohup env CODEX_AUTH_REFRESH_LOCK=try CODEX_AUTH_NO_BACKGROUND=1 CODEX_AUTH_REFRESH_BLOCKED=1 CODEX_AUTH_REFRESH_FALLBACK_CACHE=1 CODEX_AUTH_REFRESH_JOBS="$background_jobs" "$script" refresh --quiet --fast "$@" >/dev/null 2>&1 &
 }
 
-parse_refresh_args() {
-  local -n args_ref="$1"
-  shift
+cmd_refresh() {
+  ensure_dirs
+  command -v jq >/dev/null 2>&1 || die "jq is required for usage refresh"
 
+  USAGE_QUIET=0
+  USAGE_CACHED=0
+  USAGE_REFRESH=1
+  USAGE_BACKGROUND=0
+  USAGE_FAST_REFRESH=1
+
+  local args=()
   while (( $# > 0 )); do
     case "$1" in
       --quiet|-q)
@@ -7416,49 +7423,29 @@ parse_refresh_args() {
         ;;
       --)
         shift
-        args_ref+=("$@")
+        args+=("$@")
         break
         ;;
       *)
-        args_ref+=("$1")
+        args+=("$1")
         shift
         ;;
     esac
   done
-}
-
-acquire_refresh_command_lock() {
-  if [[ "${CODEX_AUTH_REFRESH_LOCK:-}" == "try" ]]; then
-    exec 9>"$CODEX_HOME/.tmp/codex-auth-refresh.lock"
-    flock -n 9 || return 1
-    return 0
-  fi
-
-  exec 9>"$CODEX_HOME/.tmp/codex-auth-refresh.lock"
-  local refresh_lock_wait
-  refresh_lock_wait="${CODEX_AUTH_REFRESH_LOCK_WAIT:-1}"
-  [[ "$refresh_lock_wait" =~ ^[0-9]+$ ]] || refresh_lock_wait=1
-  if ! flock -w "$refresh_lock_wait" 9; then
-    [[ "$USAGE_QUIET" == "1" ]] || print_status_note cache "refresh busy" >&2
-    return 1
-  fi
-}
-
-cmd_refresh() {
-  ensure_dirs
-  command -v jq >/dev/null 2>&1 || die "jq is required for usage refresh"
-
-  USAGE_QUIET=0
-  USAGE_CACHED=0
-  USAGE_REFRESH=1
-  USAGE_BACKGROUND=0
-  USAGE_FAST_REFRESH=1
-
-  local args=()
-  parse_refresh_args args "$@"
   set -- "${args[@]}"
 
-  acquire_refresh_command_lock || return 0
+  exec 9>"$CODEX_HOME/.tmp/codex-auth-refresh.lock"
+  if [[ "${CODEX_AUTH_REFRESH_LOCK:-}" == "try" ]]; then
+    flock -n 9 || return 0
+  else
+    local refresh_lock_wait
+    refresh_lock_wait="${CODEX_AUTH_REFRESH_LOCK_WAIT:-1}"
+    [[ "$refresh_lock_wait" =~ ^[0-9]+$ ]] || refresh_lock_wait=1
+    if ! flock -w "$refresh_lock_wait" 9; then
+      [[ "$USAGE_QUIET" == "1" ]] || print_status_note cache "refresh busy" >&2
+      return 0
+    fi
+  fi
 
   local profile_files=()
   profile_files_for_args_into profile_files 0 "$@"
