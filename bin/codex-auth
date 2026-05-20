@@ -299,15 +299,6 @@ codex_launcher_needs_node() {
   [[ "$first_line" == "#!"*"env node"* ]]
 }
 
-codex_launcher_ready() {
-  local codex_cli="$1"
-
-  if codex_launcher_needs_node "$codex_cli"; then
-    command -v node >/dev/null 2>&1 || return 1
-  fi
-  return 0
-}
-
 require_codex_launcher() {
   local codex_cli="$1"
 
@@ -1409,7 +1400,7 @@ cmd_current() {
   fi
   status_text=""
   codex_cli="$(codex_bin || true)"
-  if [[ -n "$codex_cli" ]] && codex_launcher_ready "$codex_cli"; then
+  if [[ -n "$codex_cli" ]] && { ! codex_launcher_needs_node "$codex_cli" || command -v node >/dev/null 2>&1; }; then
     status_text="$(CODEX_AUTH_RUNNER=1 "$codex_cli" login status 2>&1 || true)"
     status_text="$(printf '%s\n' "$status_text" | sed '/^WARNING: proceeding, even though we could not update PATH:/d' | tr '\n\t' '  ' | sed 's/  */ /g; s/^ //; s/ $//')"
     [[ "$status_text" == "Logged in using "* ]] && status_text="${status_text#Logged in using }"
@@ -3148,7 +3139,9 @@ usage_json_from_home() {
   local start timeout_sec
 
   codex_cli="$(codex_bin)" || return 0
-  codex_launcher_ready "$codex_cli" || return 0
+  if codex_launcher_needs_node "$codex_cli" && ! command -v node >/dev/null 2>&1; then
+    return 0
+  fi
   timeout_sec="${CODEX_AUTH_USAGE_TIMEOUT:-4}"
   [[ "$timeout_sec" =~ ^[0-9]+$ && "$timeout_sec" -gt 0 ]] || timeout_sec=4
 
