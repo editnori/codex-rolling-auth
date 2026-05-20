@@ -6635,45 +6635,6 @@ usage_limit_sort_score() {
   fi
 }
 
-find_best_ok_profile() {
-  local records="$1"
-  local include_active="${2:-0}"
-  local best_week=101
-  local best_short=101
-  local best_coverage=99
-  local best_profile=""
-  local best_mark=""
-  local valid weekly_used short_used mark profile plan weekly short status short_label
-  local coverage_rank short_score week_score
-
-  while IFS=$'\t' read -r valid weekly_used short_used mark profile plan weekly short status short_label; do
-    [[ -n "$profile" ]] || continue
-    [[ "$valid" == "0" && "$status" == "ok" ]] || continue
-    (( weekly_used < 100 && short_used < 100 )) || continue
-    [[ "$include_active" != "1" && ( "$mark" == "*" || "$mark" == "=" ) ]] && continue
-    coverage_rank="$(usage_limit_coverage_rank "$weekly" "$short")"
-    (( coverage_rank < 9 )) || continue
-    short_score="$(usage_limit_sort_score "$short_used" "$short")"
-    week_score="$(usage_limit_sort_score "$weekly_used" "$weekly")"
-    if (( coverage_rank < best_coverage )) \
-      || (( coverage_rank == best_coverage && short_score < best_short )) \
-      || (( coverage_rank == best_coverage && short_score == best_short && week_score < best_week )) \
-      || [[ "$include_active" == "1" && "$mark" == "*" && "$best_mark" != "*" && "$coverage_rank" == "$best_coverage" && "$short_score" == "$best_short" && "$week_score" == "$best_week" ]]; then
-      best_profile="$profile"
-      best_mark="$mark"
-      best_coverage="$coverage_rank"
-      best_week="$week_score"
-      best_short="$short_score"
-    fi
-  done < <(printf '%s\n' "$records" | sed '/^[[:space:]]*$/d')
-
-  if [[ -n "$best_profile" ]]; then
-    printf '%s\t%s\t%s\t%s\n' "$best_profile" "$best_mark" "$best_week" "$best_short"
-  else
-    printf '\n'
-  fi
-}
-
 usage_record_sort_line() {
   local default_profile="$1"
   local record="$2"
@@ -6825,11 +6786,36 @@ usage_best_selection_into() {
   local records="$1"
   local -n default_profile_ref="$2"
   local -n active_is_best_ref="$3"
-  local best_profile best_mark best_week best_short
+  local best_week=101
+  local best_short=101
+  local best_coverage=99
+  local best_profile=""
+  local best_mark=""
+  local valid weekly_used short_used mark profile plan weekly short status short_label
+  local coverage_rank short_score week_score
 
-  IFS=$'\t' read -r best_profile best_mark best_week best_short <<<"$(find_best_ok_profile "$records" 1)"
   default_profile_ref=""
   active_is_best_ref=0
+  while IFS=$'\t' read -r valid weekly_used short_used mark profile plan weekly short status short_label; do
+    [[ -n "$profile" ]] || continue
+    [[ "$valid" == "0" && "$status" == "ok" ]] || continue
+    (( weekly_used < 100 && short_used < 100 )) || continue
+    coverage_rank="$(usage_limit_coverage_rank "$weekly" "$short")"
+    (( coverage_rank < 9 )) || continue
+    short_score="$(usage_limit_sort_score "$short_used" "$short")"
+    week_score="$(usage_limit_sort_score "$weekly_used" "$weekly")"
+    if (( coverage_rank < best_coverage )) \
+      || (( coverage_rank == best_coverage && short_score < best_short )) \
+      || (( coverage_rank == best_coverage && short_score == best_short && week_score < best_week )) \
+      || [[ "$mark" == "*" && "$best_mark" != "*" && "$coverage_rank" == "$best_coverage" && "$short_score" == "$best_short" && "$week_score" == "$best_week" ]]; then
+      best_profile="$profile"
+      best_mark="$mark"
+      best_coverage="$coverage_rank"
+      best_week="$week_score"
+      best_short="$short_score"
+    fi
+  done < <(printf '%s\n' "$records" | sed '/^[[:space:]]*$/d')
+
   if [[ -n "$best_profile" ]]; then
     if [[ "$best_mark" == "*" ]]; then
       active_is_best_ref=1
