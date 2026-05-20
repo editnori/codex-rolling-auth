@@ -903,49 +903,11 @@ compact_command_display() {
   printf '%s' "$command"
 }
 
-result_detail_value() {
-  local label="$1"
-  local value="$2"
-  local value_w="$3"
-  local base
-
-  case "$label" in
-    backup)
-      if [[ "$value" == */* ]]; then
-        if [[ "${CODEX_AUTH_SHOW_BACKUP_PATH:-0}" != "1" ]]; then
-          printf 'created'
-        elif (( value_w < 46 )); then
-          printf 'created'
-        else
-          compact_display_path "$value" "$value_w"
-        fi
-      else
-        printf '%s' "$value"
-      fi
-      ;;
-    active|profile|source|dest|dir|auth|profiles|backups|state)
-      if [[ "$value" == */* ]]; then
-        if (( value_w < 18 )); then
-          base="${value##*/}"
-          fit_profile_text_rtrim "$base" "$value_w"
-        else
-          compact_display_path "$value" "$value_w"
-        fi
-      else
-        printf '%s' "$value"
-      fi
-      ;;
-    *)
-      printf '%s' "$value"
-      ;;
-  esac
-}
-
 print_result_block() {
   local summary="$1"
   shift
   local cols label_w value_w total_w row title display_summary
-  local label value tone display_label
+  local label value tone display_label base
 
   cols="$(terminal_width)"
   IFS=$'\t' read -r label_w value_w <<<"$(detail_widths "$cols")"
@@ -979,7 +941,29 @@ print_result_block() {
   for row in "$@"; do
     IFS=$'\t' read -r label value tone <<<"$row"
     [[ -n "$tone" ]] || tone="muted"
-    value="$(result_detail_value "$label" "$value" "$value_w")"
+    case "$label" in
+      backup)
+        if [[ "$value" == */* ]]; then
+          if [[ "${CODEX_AUTH_SHOW_BACKUP_PATH:-0}" != "1" ]]; then
+            value="created"
+          elif (( value_w < 46 )); then
+            value="created"
+          else
+            value="$(compact_display_path "$value" "$value_w")"
+          fi
+        fi
+        ;;
+      active|profile|source|dest|dir|auth|profiles|backups|state)
+        if [[ "$value" == */* ]]; then
+          if (( value_w < 18 )); then
+            base="${value##*/}"
+            value="$(fit_profile_text_rtrim "$base" "$value_w")"
+          else
+            value="$(compact_display_path "$value" "$value_w")"
+          fi
+        fi
+        ;;
+    esac
     if [[ "$label" == "active" && "$value" == "unsaved auth" && "$value_w" -lt 12 ]]; then
       value="unsaved"
     elif [[ "$label" == "active" && "$value" == "already active" && "$value_w" -lt 14 ]]; then
