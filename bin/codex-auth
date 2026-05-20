@@ -19,49 +19,14 @@ USAGE_FAST_REFRESH=0
 MUTATION_LOCK_HELD=0
 MUTATION_LOCK_FD=""
 
-USAGE_RECORD_EXTRACT_JQ='
-  def blanks: "", "", "", "", "", "", "", "", "";
-  def no_usage($age; $stale): ["no_usage", "", $age, $stale, blanks];
-  def empty_limit: {used: 0, window: "-", window_num: 0, reset: "-"};
-  def limit_row: {used: ((.usedPercent // 0) | tonumber? // 0 | floor), window: (.windowDurationMins // "-"), window_num: ((.windowDurationMins // 0) | tonumber? // 0), reset: (.resetsAt // "-")};
-  def credit_label: if . == null then "-" elif .unlimited then "unlimited" elif .hasCredits then (.balance // "yes") else "0" end;
-  def error_label: ((.error.message // .error.data.message // .error.data.error.message // .error // "error") | tostring | gsub("[\n\t]+"; " ") | gsub("  +"; " ") | gsub("^ "; "") | gsub(" $"; ""));
-  (._codexAuthAgeSec // "") as $age
-  | (._codexAuthStale // false | tostring) as $stale
-  | if .error? != null then
-      ["error", error_label, $age, $stale, blanks]
-    else
-      (.rateLimitsByLimitId.codex // .rateLimits // null) as $r
-      | if $r == null then
-          no_usage($age; $stale)
-        else
-          [($r.primary // empty), ($r.secondary // empty)]
-          | map(select(type == "object") | limit_row)
-          | map(select(.window_num > 0))
-          | sort_by(if .window_num == 0 then 999999999 else .window_num end) as $limits
-          | if ($limits | length) == 0 then
-              no_usage($age; $stale)
-            else
-              (if ($limits | length) == 1 and ($limits[0].window_num >= 1440)
-               then empty_limit
-               else $limits[0]
-               end) as $shortLimit
-              | (if ($limits | length) == 1 and ($limits[0].window_num < 1440)
-               then empty_limit
-               else $limits[-1]
-               end) as $weeklyLimit
-              | ["usage", "", $age, $stale, ($r.planType // "-"),
-                 $shortLimit.used, $shortLimit.window, $shortLimit.reset,
-                 $weeklyLimit.used, $weeklyLimit.window, $weeklyLimit.reset,
-                 ($r.credits | credit_label), ($r.rateLimitReachedType // "")]
-            end
-        end
-    end
-  | map(tostring)
-  | join("\u001f")
-'
-CODEX_AUTH_SELF="$(realpath "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s\n' "${BASH_SOURCE[0]}")"
-CODEX_AUTH_SCRIPT_DIR="$(cd "$(dirname "$CODEX_AUTH_SELF")" && pwd -P)"
+CODEX_AUTH_SELF="${BASH_SOURCE[0]}"
+case "$CODEX_AUTH_SELF" in
+  /*) ;;
+  */*) CODEX_AUTH_SELF="$PWD/${CODEX_AUTH_SELF#./}" ;;
+  *) CODEX_AUTH_SELF="$(command -v "$CODEX_AUTH_SELF" 2>/dev/null || printf '%s\n' "$CODEX_AUTH_SELF")" ;;
+esac
+CODEX_AUTH_SCRIPT_DIR="${CODEX_AUTH_SELF%/*}"
+[[ "$CODEX_AUTH_SCRIPT_DIR" == "$CODEX_AUTH_SELF" ]] && CODEX_AUTH_SCRIPT_DIR="."
 CODEX_AUTH_LIB_DIR="${CODEX_AUTH_LIB_DIR:-$CODEX_AUTH_SCRIPT_DIR/../lib/codex-auth}"
 
 CODEX_AUTH_BASE_LIB_FILES=(
@@ -70,7 +35,7 @@ CODEX_AUTH_BASE_LIB_FILES=(
 
 CODEX_AUTH_UI_LIB_FILES=(render.sh output.sh)
 CODEX_AUTH_PROFILE_LIB_FILES=(render.sh output.sh profiles.sh)
-CODEX_AUTH_USAGE_LIB_FILES=(render.sh output.sh profiles.sh usage.sh)
+CODEX_AUTH_USAGE_LIB_FILES=(render.sh output.sh usage.sh)
 
 source_codex_auth_libs() {
   local lib_file lib_path
@@ -85,9 +50,138 @@ source_codex_auth_libs() {
   done
 }
 
+fast_display_path() {
+  local path="$1"
+  local home_prefix="${HOME%/}/"
+
+  if [[ -n "${HOME:-}" && "$path" == "$HOME" ]]; then
+    printf '~'
+  elif [[ -n "${HOME:-}" && "$path" == "$home_prefix"* ]]; then
+    printf '~/%s' "${path#$home_prefix}"
+  else
+    printf '%s' "$path"
+  fi
+}
+
+fast_paths() {
+  local home_display auth_display profiles_display backups_display state_display
+
+  mkdir -p "$CODEX_HOME" "$PROFILE_DIR" "$BACKUP_DIR" "$CODEX_HOME/.tmp"
+  chmod 700 "$CODEX_HOME" "$PROFILE_DIR" "$BACKUP_DIR" "$CODEX_HOME/.tmp" 2>/dev/null || true
+
+  home_display="$(fast_display_path "$CODEX_HOME")"
+  auth_display="$(fast_display_path "$AUTH_FILE")"
+  profiles_display="$(fast_display_path "$PROFILE_DIR")"
+  backups_display="$(fast_display_path "$BACKUP_DIR")"
+  state_display="$(fast_display_path "$STATE_FILE")"
+
+  printf 'Auth · Paths\n'
+  printf 'home %s\n\n' "$home_display"
+  printf 'live   auth      %s\n' "$auth_display"
+  printf 'saved  profiles  %s\n' "$profiles_display"
+  printf 'undo   backups   %s\n' "$backups_display"
+  printf 'cache  usage     %s\n' "$state_display"
+}
+
+fast_patch_codex_bin() {
+  if [[ -n "${CODEX_AUTH_STOCK_CODEX_BIN:-}" && -x "${CODEX_AUTH_STOCK_CODEX_BIN:-}" ]]; then
+    printf '%s\n' "$CODEX_AUTH_STOCK_CODEX_BIN"
+  elif [[ -n "$CODEX_BIN" && -x "$CODEX_BIN" ]]; then
+    printf '%s\n' "$CODEX_BIN"
+  elif [[ -x "$HOME/.bun/bin/codex-real" ]]; then
+    printf '%s\n' "$HOME/.bun/bin/codex-real"
+  elif [[ -x "$HOME/.bun/bin/codex" ]]; then
+    printf '%s\n' "$HOME/.bun/bin/codex"
+  else
+    command -v codex 2>/dev/null || return 1
+  fi
+}
+
+fast_patch_canonical_codex_bin() {
+  local codex_cli="$1"
+  local line target
+
+  [[ -r "$codex_cli" ]] || { printf '%s\n' "$codex_cli"; return 0; }
+  while IFS= read -r line; do
+    [[ "$line" == exec\ * ]] || [[ "$line" == "  exec "* ]] || continue
+    target="${line#*exec }"
+    target="${target%% \"\$@\"*}"
+    target="${target#\"}"
+    target="${target%\"}"
+    [[ -n "$target" ]] || continue
+    if [[ "$target" != /* ]]; then
+      target="${codex_cli%/*}/$target"
+    fi
+    [[ -x "$target" ]] && { printf '%s\n' "$target"; return 0; }
+  done < "$codex_cli"
+  printf '%s\n' "$codex_cli"
+}
+
+fast_patch_marker_value() {
+  local marker="$1"
+  local key="$2"
+  local line
+
+  [[ -f "$marker" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" == "$key="* ]] || continue
+    printf '%s\n' "${line#*=}"
+    return 0
+  done < "$marker"
+}
+
+fast_patch_codex() {
+  local print_key=0 print_bin=0 quiet=0 arg stock_bin stock_version hash_line stock_hash checksum size stock_key marker root marker_key marker_patch_version
+
+  for arg in "$@"; do
+    case "$arg" in
+      --print-key) print_key=1 ;;
+      --print-bin) print_bin=1 ;;
+      --quiet|-q) quiet=1 ;;
+      *) return 2 ;;
+    esac
+  done
+  (( print_key || print_bin )) || return 2
+  stock_bin="$(fast_patch_codex_bin)" || {
+    (( quiet )) || printf 'codex command not found\n' >&2
+    return 1
+  }
+  stock_bin="$(fast_patch_canonical_codex_bin "$stock_bin")"
+  stock_version="$("$stock_bin" --version 2>/dev/null || true)"
+  stock_version="${stock_version%%$'\n'*}"
+  stock_version="${stock_version%"${stock_version##*[![:space:]]}"}"
+  [[ -n "$stock_version" ]] || stock_version="unknown"
+  if command -v sha256sum >/dev/null 2>&1 && [[ -f "$stock_bin" ]]; then
+    hash_line="$(sha256sum "$stock_bin")"; stock_hash="${hash_line%% *}"
+    hash_line="$(printf '%s\037%s\n' "$stock_version" "$stock_hash" | sha256sum)"; stock_key="${hash_line%% *}"
+  else
+    read -r checksum size _ <<<"$(printf '%s' "$stock_bin" | cksum)"; stock_hash="$checksum-$size"
+    read -r checksum size _ <<<"$(printf '%s\037%s\n' "$stock_version" "$stock_hash" | cksum)"; stock_key="$checksum-$size"
+  fi
+  if (( print_key )); then
+    printf '%s\n' "$stock_key"
+    return 0
+  fi
+  root="${CODEX_AUTH_PATCH_CODEX_DIR:-$CODEX_HOME/patched-codex}"
+  marker="$root/current.env"
+  marker_key="$(fast_patch_marker_value "$marker" stock_key)"
+  marker_patch_version="$(fast_patch_marker_value "$marker" patch_version)"
+  [[ "$marker_key" == "$stock_key" && "$marker_patch_version" == "1" && -x "$root/bin/codex" ]] || return 1
+  printf '%s/bin/codex\n' "$root"
+}
+
 main() {
   local command="${1:-}"
   shift || true
+
+  if [[ "$command" == "paths" && "$#" == 0 && "${CODEX_AUTH_FAST_PATHS:-1}" != "0" ]]; then
+    fast_paths
+    return 0
+  fi
+  if [[ "$command" == "patch-codex" && "${CODEX_AUTH_FAST_PATCH:-1}" != "0" ]]; then
+    fast_patch_codex "$@" && return 0
+    [[ "$?" == "2" ]] || return $?
+  fi
 
   source_codex_auth_libs "${CODEX_AUTH_BASE_LIB_FILES[@]}"
   case "$command" in
@@ -99,10 +193,20 @@ main() {
     import) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; require_arg_count_between "$#" 2 2 "usage: codex-auth import <name> <file>"; cmd_save "$1" "$2" "imported $1" ;;
     use|switch) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; require_arg_count_between "$#" 1 1 "usage: codex-auth use <name>"; cmd_use "$1" ;;
     login) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; require_arg_count_between "$#" 1 999999 "usage: codex-auth login <name> [codex login args...]"; cmd_login "$@" ;;
-    auto) source_codex_auth_libs "${CODEX_AUTH_USAGE_LIB_FILES[@]}"; cmd_auto "$@" ;;
-    patch-codex) source_codex_auth_libs "${CODEX_AUTH_UI_LIB_FILES[@]}" patch.sh; cmd_patch_codex "$@" ;;
-    run|wrap) source_codex_auth_libs "${CODEX_AUTH_USAGE_LIB_FILES[@]}" run.sh; cmd_run "$@" ;;
-    recover) source_codex_auth_libs "${CODEX_AUTH_USAGE_LIB_FILES[@]}" run.sh; cmd_recover "$@" ;;
+    auto) source_codex_auth_libs "${CODEX_AUTH_USAGE_LIB_FILES[@]}" profiles.sh; cmd_auto "$@" ;;
+    patch-codex)
+      case " $* " in
+        *" --print-key "*|*" --print-bin "*|*" --status "*)
+          source_codex_auth_libs patch.sh
+          ;;
+        *)
+          source_codex_auth_libs "${CODEX_AUTH_UI_LIB_FILES[@]}" patch.sh
+          ;;
+      esac
+      cmd_patch_codex "$@"
+      ;;
+    run|wrap) source_codex_auth_libs "${CODEX_AUTH_USAGE_LIB_FILES[@]}" profiles.sh run.sh; cmd_run "$@" ;;
+    recover) source_codex_auth_libs "${CODEX_AUTH_USAGE_LIB_FILES[@]}" profiles.sh run.sh; cmd_recover "$@" ;;
     refresh) source_codex_auth_libs "${CODEX_AUTH_USAGE_LIB_FILES[@]}"; cmd_refresh "$@" ;;
     doctor) source_codex_auth_libs doctor.sh; cmd_doctor "$@" ;;
     export) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; require_arg_count_between "$#" 2 2 "usage: codex-auth export <name> <file>"; cmd_export "$@" ;;

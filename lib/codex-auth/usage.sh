@@ -1,5 +1,47 @@
 # shellcheck shell=bash
 
+USAGE_RECORD_EXTRACT_JQ='
+  def blanks: "", "", "", "", "", "", "", "", "";
+  def no_usage($age; $stale): ["no_usage", "", $age, $stale, blanks];
+  def empty_limit: {used: 0, window: "-", window_num: 0, reset: "-"};
+  def limit_row: {used: ((.usedPercent // 0) | tonumber? // 0 | floor), window: (.windowDurationMins // "-"), window_num: ((.windowDurationMins // 0) | tonumber? // 0), reset: (.resetsAt // "-")};
+  def credit_label: if . == null then "-" elif .unlimited then "unlimited" elif .hasCredits then (.balance // "yes") else "0" end;
+  def error_label: ((.error.message // .error.data.message // .error.data.error.message // .error // "error") | tostring | gsub("[\n\t]+"; " ") | gsub("  +"; " ") | gsub("^ "; "") | gsub(" $"; ""));
+  (._codexAuthAgeSec // "") as $age
+  | (._codexAuthStale // false | tostring) as $stale
+  | if .error? != null then
+      ["error", error_label, $age, $stale, blanks]
+    else
+      (.rateLimitsByLimitId.codex // .rateLimits // null) as $r
+      | if $r == null then
+          no_usage($age; $stale)
+        else
+          [($r.primary // empty), ($r.secondary // empty)]
+          | map(select(type == "object") | limit_row)
+          | map(select(.window_num > 0))
+          | sort_by(if .window_num == 0 then 999999999 else .window_num end) as $limits
+          | if ($limits | length) == 0 then
+              no_usage($age; $stale)
+            else
+              (if ($limits | length) == 1 and ($limits[0].window_num >= 1440)
+               then empty_limit
+               else $limits[0]
+               end) as $shortLimit
+              | (if ($limits | length) == 1 and ($limits[0].window_num < 1440)
+               then empty_limit
+               else $limits[-1]
+               end) as $weeklyLimit
+              | ["usage", "", $age, $stale, ($r.planType // "-"),
+                 $shortLimit.used, $shortLimit.window, $shortLimit.reset,
+                 $weeklyLimit.used, $weeklyLimit.window, $weeklyLimit.reset,
+                 ($r.credits | credit_label), ($r.rateLimitReachedType // "")]
+            end
+        end
+    end
+  | map(tostring)
+  | join("\u001f")
+'
+
 state_payload_for_profile() {
   local profile_name="$1"
   local fingerprint="$2"
@@ -496,6 +538,15 @@ collect_usage_records_cached() {
   local -A profile_fp=()
   local -A payload_by_path=()
 
+  if [[ -z "$active_fp" && ! -f "$STATE_FILE" ]]; then
+    for profile_file in "${profile_files[@]}"; do
+      profile_name="${profile_file##*/}"
+      profile_name="${profile_name%.json}"
+      usage_record_for_profile "$profile_name" "$profile_file" "null" "" ""
+    done | canonical_usage_active_marks
+    return 0
+  fi
+
   map_file="$(mktemp "$CODEX_HOME/.tmp/auth-cache-map.XXXXXX")"
 
   while IFS=$'\037' read -r meta_path mode hint secret; do
@@ -989,6 +1040,7 @@ cmd_usage() {
       1:*)
         [[ "$USAGE_SELECT" == "1" || "$USAGE_QUIET" == "1" ]] || printf '\n'
         if [[ -n "$default_profile" ]]; then
+          source_codex_auth_libs profiles.sh
           cmd_use "$default_profile"
         elif [[ "$active_is_best" == "1" && "$USAGE_QUIET" != "1" ]]; then
           print_status_note ready "already on best profile"
@@ -1004,6 +1056,7 @@ cmd_usage() {
           login)
             local refreshed_profile="$MENU_PROFILE"
             local refreshed_profile_file refreshed_fingerprint refreshed_payload
+            source_codex_auth_libs profiles.sh
             cmd_login "$refreshed_profile"
             printf '\n'
             print_status_note refresh "$refreshed_profile"
@@ -1024,6 +1077,7 @@ cmd_usage() {
             return 0
             ;;
           switch)
+            source_codex_auth_libs profiles.sh
             cmd_use "$MENU_PROFILE"
             return 0
             ;;
