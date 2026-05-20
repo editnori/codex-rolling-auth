@@ -4547,7 +4547,7 @@ selector_menu_row_for_record() {
   local bar_width="$8"
   local total_w="$9"
   local record="${10}"
-  local valid weekly_used short_used mark profile plan weekly short status short_label weekly_reset short_reset cache_age
+  local valid weekly_used short_used mark profile _plan weekly short status short_label weekly_reset short_reset _cache_age
   local display display_status palette_profile detail action_role row_action row_profile_field active_row=0
   local selector_profile_w="$profile_w" action_w=5
   (( selector_profile_w < 10 )) && selector_profile_w=10
@@ -5064,12 +5064,12 @@ usage_best_selection_into() {
   local best_coverage=99
   local best_profile=""
   local best_mark=""
-  local valid weekly_used short_used mark profile plan weekly short status short_label
+  local valid weekly_used short_used mark profile _plan weekly short status _rest
   local coverage_rank short_score week_score
 
   default_profile_ref=""
   active_is_best_ref=0
-  while IFS=$'\t' read -r valid weekly_used short_used mark profile plan weekly short status short_label; do
+  while IFS=$'\t' read -r valid weekly_used short_used mark profile _plan weekly short status _rest; do
     [[ -n "$profile" ]] || continue
     [[ "$valid" == "0" && "$status" == "ok" ]] || continue
     (( weekly_used < 100 && short_used < 100 )) || continue
