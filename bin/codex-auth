@@ -1987,12 +1987,6 @@ cmd_save() {
     "source"$'\t'"$(display_path "$source")"$'\t'"muted"
 }
 
-cmd_import() {
-  local name="$1"
-  local source="$2"
-  cmd_save "$name" "$source" "imported $name"
-}
-
 cmd_use() {
   local name="$1"
   require_name "$name"
@@ -8495,7 +8489,7 @@ main() {
     list|ls) cmd_list "$@" ;;
     current|status) cmd_current "$@" ;;
     save) require_arg_count_between "$#" 1 2 "usage: codex-auth save <name> [file]"; cmd_save "$@" ;;
-    import) require_arg_count_between "$#" 2 2 "usage: codex-auth import <name> <file>"; cmd_import "$1" "$2" ;;
+    import) require_arg_count_between "$#" 2 2 "usage: codex-auth import <name> <file>"; cmd_save "$1" "$2" "imported $1" ;;
     use|switch) require_arg_count_between "$#" 1 1 "usage: codex-auth use <name>"; cmd_use "$1" ;;
     login) require_arg_count_between "$#" 1 999999 "usage: codex-auth login <name> [codex login args...]"; cmd_login "$@" ;;
     auto) cmd_auto "$@" ;;
