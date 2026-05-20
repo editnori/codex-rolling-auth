@@ -1191,12 +1191,7 @@ cmd_list() {
       action="use"
     fi
     if (( role_w <= 1 )); then
-      case "$action" in
-        stay) action_label="s" ;;
-        alias) action_label="a" ;;
-        use) action_label="u" ;;
-        *) action_label="" ;;
-      esac
+      action_label="${action:0:1}"
     else
       action_label="$action"
     fi
@@ -4900,13 +4895,8 @@ render_usage_records() {
       display_role="use"
     fi
     if (( role_w <= 1 )); then
-      case "$display_role" in
-        stay) display_role="s" ;;
-        same) display_role="a" ;;
-        use) display_role="u" ;;
-        cap) display_role="c" ;;
-        login) display_role="l" ;;
-      esac
+      [[ "$display_role" == "same" ]] && display_role="alias"
+      display_role="${display_role:0:1}"
     fi
     display_status="$(usage_display_status "$status" "$mode")"
     print_usage_render_data_line "$display_role" "$profile" "$weekly" "$weekly_reset" "$short" "$short_reset" \
