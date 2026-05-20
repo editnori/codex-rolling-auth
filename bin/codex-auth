@@ -5492,7 +5492,7 @@ cmd_patch_codex() {
   done
   [[ "$profile" == "release" || "$profile" == "debug" ]] || profile=release
 
-  local stock_bin stock_version stock_hash stock_key
+  local stock_bin stock_version stock_hash stock_key hash_line checksum size
   local self log
   if [[ -n "${CODEX_AUTH_STOCK_CODEX_BIN:-}" && -x "${CODEX_AUTH_STOCK_CODEX_BIN:-}" ]]; then
     stock_bin="$CODEX_AUTH_STOCK_CODEX_BIN"
@@ -5503,14 +5503,14 @@ cmd_patch_codex() {
   stock_version="$("$stock_bin" --version 2>/dev/null | sed -n '1s/[[:space:]]*$//p' || true)"
   [[ -n "$stock_version" ]] || stock_version="unknown"
   if command -v sha256sum >/dev/null 2>&1 && [[ -f "$stock_bin" ]]; then
-    stock_hash="$(sha256sum "$stock_bin" | awk '{print $1}')"
+    hash_line="$(sha256sum "$stock_bin")"; stock_hash="${hash_line%% *}"
   else
-    stock_hash="$(printf '%s' "$stock_bin" | cksum | awk '{print $1 "-" $2}')"
+    read -r checksum size _ <<<"$(printf '%s' "$stock_bin" | cksum)"; stock_hash="$checksum-$size"
   fi
   if command -v sha256sum >/dev/null 2>&1; then
-    stock_key="$(printf '%s\037%s\n' "$stock_version" "$stock_hash" | sha256sum | awk '{print $1}')"
+    hash_line="$(printf '%s\037%s\n' "$stock_version" "$stock_hash" | sha256sum)"; stock_key="${hash_line%% *}"
   else
-    stock_key="$(printf '%s\037%s\n' "$stock_version" "$stock_hash" | cksum | awk '{print $1 "-" $2}')"
+    read -r checksum size _ <<<"$(printf '%s\037%s\n' "$stock_version" "$stock_hash" | cksum)"; stock_key="$checksum-$size"
   fi
 
   if (( print_key )); then
