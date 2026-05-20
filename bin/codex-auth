@@ -5566,6 +5566,7 @@ cmd_patch_codex() {
   command -v cargo >/dev/null 2>&1 || die "cargo is required for patch-codex"
 
   local lock_wait lock_fd source_commit package_base package_version package_suffix repo_url clone_tmp manager_file patch_file cargo_toml built_bin target_dir target_bin tmp_bin marker tmp
+  local cargo_line in_workspace_package package_version_written
   local build_args=()
   lock_wait="${CODEX_AUTH_PATCH_LOCK_WAIT:-0}"
   [[ "$lock_wait" =~ ^[0-9]+$ ]] || lock_wait=0
@@ -5629,21 +5630,25 @@ cmd_patch_codex() {
   cargo_toml="$source_dir/codex-rs/Cargo.toml"
   [[ -f "$cargo_toml" ]] || die "missing $cargo_toml"
   tmp="$(mktemp "$(patch_codex_root)/.tmp/Cargo.toml.XXXXXX")"
-  awk -v package_version="$package_version" '
-    BEGIN { in_workspace_package = 0; done = 0 }
-    /^\[workspace\.package\]$/ { in_workspace_package = 1 }
-    /^\[/ && $0 != "[workspace.package]" { in_workspace_package = 0 }
-    in_workspace_package && !done && /^version = "/ {
-      print "version = \"" package_version "\""
-      done = 1
-      next
-    }
-    { print }
-    END { if (!done) exit 1 }
-  ' "$cargo_toml" > "$tmp" || {
+  in_workspace_package=0
+  package_version_written=0
+  while IFS= read -r cargo_line || [[ -n "$cargo_line" ]]; do
+    if [[ "$cargo_line" == "[workspace.package]" ]]; then
+      in_workspace_package=1
+    elif [[ "$cargo_line" == "["* ]]; then
+      in_workspace_package=0
+    fi
+    if (( in_workspace_package && ! package_version_written )) && [[ "$cargo_line" == 'version = "'* ]]; then
+      printf 'version = "%s"\n' "$package_version"
+      package_version_written=1
+      continue
+    fi
+    printf '%s\n' "$cargo_line"
+  done < "$cargo_toml" > "$tmp"
+  if (( ! package_version_written )); then
     rm -f "$tmp"
     die "could not set Codex package version"
-  }
+  fi
   mv "$tmp" "$cargo_toml"
 
   [[ "$quiet" == "1" ]] || print_status_note patch "build $profile"
