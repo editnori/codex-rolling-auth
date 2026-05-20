@@ -936,48 +936,34 @@ result_detail_label() {
   esac
 }
 
-result_value_path() {
-  local path="$1"
-  local width="$2"
-  local base
-
-  if [[ "$path" == */* ]] && (( width < 18 )); then
-    base="${path##*/}"
-    fit_profile_text_rtrim "$base" "$width"
-    return 0
-  fi
-  compact_display_path "$path" "$width"
-}
-
-result_backup_value() {
-  local value="$1"
-  local value_w="$2"
-
-  if [[ "$value" == */* ]]; then
-    if [[ "${CODEX_AUTH_SHOW_BACKUP_PATH:-0}" != "1" ]]; then
-      printf 'created'
-    elif (( value_w < 46 )); then
-      printf 'created'
-    else
-      compact_display_path "$value" "$value_w"
-    fi
-  else
-    printf '%s' "$value"
-  fi
-}
-
 result_detail_value() {
   local label="$1"
   local value="$2"
   local value_w="$3"
+  local base
 
   case "$label" in
     backup)
-      result_backup_value "$value" "$value_w"
+      if [[ "$value" == */* ]]; then
+        if [[ "${CODEX_AUTH_SHOW_BACKUP_PATH:-0}" != "1" ]]; then
+          printf 'created'
+        elif (( value_w < 46 )); then
+          printf 'created'
+        else
+          compact_display_path "$value" "$value_w"
+        fi
+      else
+        printf '%s' "$value"
+      fi
       ;;
     active|profile|source|dest|dir|auth|profiles|backups|state)
       if [[ "$value" == */* ]]; then
-        result_value_path "$value" "$value_w"
+        if (( value_w < 18 )); then
+          base="${value##*/}"
+          fit_profile_text_rtrim "$base" "$value_w"
+        else
+          compact_display_path "$value" "$value_w"
+        fi
       else
         printf '%s' "$value"
       fi
