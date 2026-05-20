@@ -1230,62 +1230,6 @@ print_empty_profiles() {
   print_detail_line "saved" "$saved_path" "$label_w" "$value_w" good
 }
 
-print_no_active_auth() {
-  local cols label_w value_w total_w first_profile next_command action
-
-  cols="$(terminal_width)"
-  IFS=$'\t' read -r label_w value_w <<<"$(detail_widths "$cols")"
-  total_w=$((label_w + 1 + value_w))
-  USAGE_COLOR_ENABLED=0
-  color_enabled && USAGE_COLOR_ENABLED=1
-
-  shopt -s nullglob
-  local profiles=("$PROFILE_DIR"/*.json)
-  shopt -u nullglob
-
-  print_palette_summary_header "Auth" "Active profile" "no active auth" "$total_w"
-  if (( ${#profiles[@]} > 0 )); then
-    first_profile="$(basename "${profiles[0]}" .json)"
-    next_command="$first_profile"
-    action="use"
-  else
-    next_command="codex-auth add <name>"
-    action="login"
-  fi
-  print_detail_text_line "$action" "$(compact_command_display "$next_command" "$value_w")" "$label_w" "$value_w" active
-  print_detail_line "live" "$(compact_display_path "$AUTH_FILE" "$value_w")" "$label_w" "$value_w" bad
-}
-
-print_bad_active_auth() {
-  local cols label_w value_w total_w first_profile next_command action
-
-  cols="$(terminal_width)"
-  IFS=$'\t' read -r label_w value_w <<<"$(detail_widths "$cols")"
-  total_w=$((label_w + 1 + value_w))
-  USAGE_COLOR_ENABLED=0
-  color_enabled && USAGE_COLOR_ENABLED=1
-
-  shopt -s nullglob
-  local profiles=("$PROFILE_DIR"/*.json)
-  shopt -u nullglob
-
-  print_palette_summary_header "Auth" "Active profile" "bad active auth" "$total_w"
-  print_detail_line "live" "$(compact_display_path "$AUTH_FILE" "$value_w")" "$label_w" "$value_w" bad
-  if (( ${#profiles[@]} > 0 )); then
-    first_profile="$(basename "${profiles[0]}" .json)"
-    next_command="$first_profile"
-    action="use"
-  else
-    if (( total_w < 24 )); then
-      next_command="login"
-    else
-      next_command="codex-auth login <name>"
-    fi
-    action="fix"
-  fi
-  print_detail_text_line "$action" "$(compact_command_display "$next_command" "$value_w")" "$label_w" "$value_w" active
-}
-
 status_note_base() {
   local kind="$1"
   local -n line_ref="$2"
@@ -1640,22 +1584,49 @@ cmd_current() {
   local cols label_w value_w total_w status_text
   cols="$(terminal_width)"
   IFS=$'\t' read -r label_w value_w <<<"$(detail_widths "$cols")"
-  if (( cols < 68 )); then
-    label_w=7
-    value_w=$((cols - label_w - 1))
-    (( value_w < 10 )) && value_w=10
-  fi
   total_w=$((label_w + 1 + value_w))
   USAGE_COLOR_ENABLED=0
   color_enabled && USAGE_COLOR_ENABLED=1
 
-  if [[ ! -f "$AUTH_FILE" ]]; then
-    print_no_active_auth
+  if [[ ! -f "$AUTH_FILE" ]] || ! auth_file_is_valid "$AUTH_FILE"; then
+    local current_profiles=() current_status first_profile next_command action
+    if [[ -f "$AUTH_FILE" ]]; then
+      current_status="bad active auth"
+    else
+      current_status="no active auth"
+    fi
+
+    shopt -s nullglob
+    current_profiles=("$PROFILE_DIR"/*.json)
+    shopt -u nullglob
+
+    print_palette_summary_header "Auth" "Active profile" "$current_status" "$total_w"
+    [[ "$current_status" == "bad active auth" ]] && print_detail_line "live" "$(compact_display_path "$AUTH_FILE" "$value_w")" "$label_w" "$value_w" bad
+    if (( ${#current_profiles[@]} > 0 )); then
+      first_profile="$(basename "${current_profiles[0]}" .json)"
+      next_command="$first_profile"
+      action="use"
+    elif [[ "$current_status" == "no active auth" ]]; then
+      next_command="codex-auth add <name>"
+      action="login"
+    else
+      if (( total_w < 24 )); then
+        next_command="login"
+      else
+        next_command="codex-auth login <name>"
+      fi
+      action="fix"
+    fi
+    print_detail_text_line "$action" "$(compact_command_display "$next_command" "$value_w")" "$label_w" "$value_w" active
+    [[ "$current_status" == "no active auth" ]] && print_detail_line "live" "$(compact_display_path "$AUTH_FILE" "$value_w")" "$label_w" "$value_w" bad
     return 0
   fi
-  if ! auth_file_is_valid "$AUTH_FILE"; then
-    print_bad_active_auth
-    return 0
+
+  if (( cols < 68 )); then
+    label_w=7
+    value_w=$((cols - label_w - 1))
+    (( value_w < 10 )) && value_w=10
+    total_w=$((label_w + 1 + value_w))
   fi
 
   local active_fp="" mode mode_display mode_summary_display matched matched_display hint account_display summary
