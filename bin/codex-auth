@@ -2331,54 +2331,6 @@ usage_render_widths() {
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$mode" "$role_w" "$profile_w" "$cell_w" "$status_w" "$bar_width"
 }
 
-usage_role_label() {
-  local mark="$1"
-  local profile="$2"
-  local default_profile="$3"
-  local mode="${4:-normal}"
-  local valid="${5:-0}"
-  local status="${6:-}"
-  local role_w="${7:-1}"
-  local action=""
-
-  if [[ "$mark" == "*" ]]; then
-    action="stay"
-  elif [[ "$mark" == "=" ]]; then
-    action="same"
-  elif [[ -n "$default_profile" && "$profile" == "$default_profile" ]]; then
-    action="use"
-  elif [[ "$status" == *cap* ]]; then
-    action="cap"
-  elif [[ "$status" == "login" ]]; then
-    action="login"
-  elif [[ "$valid" == "0" && "$status" == "ok" ]]; then
-    action="use"
-  fi
-
-  if (( role_w > 1 )); then
-    printf '%s' "$action"
-    return 0
-  fi
-
-  case "$action" in
-    stay)
-      printf 's'
-      ;;
-    same)
-      printf 'a'
-      ;;
-    use)
-      printf 'u'
-      ;;
-    cap)
-      printf 'c'
-      ;;
-    login)
-      printf 'l'
-      ;;
-  esac
-}
-
 usage_status_is_exact_cap() {
   case "$1" in
     "week+5h cap"|"week cap"|"5h cap")
@@ -5595,7 +5547,29 @@ render_usage_records() {
     fi
     previous_group="$group"
 
-    display_role="$(usage_role_label "$mark" "$profile" "$default_profile" "$mode" "$valid" "$status" "$role_w")"
+    display_role=""
+    if [[ "$mark" == "*" ]]; then
+      display_role="stay"
+    elif [[ "$mark" == "=" ]]; then
+      display_role="same"
+    elif [[ -n "$default_profile" && "$profile" == "$default_profile" ]]; then
+      display_role="use"
+    elif [[ "$status" == *cap* ]]; then
+      display_role="cap"
+    elif [[ "$status" == "login" ]]; then
+      display_role="login"
+    elif [[ "$valid" == "0" && "$status" == "ok" ]]; then
+      display_role="use"
+    fi
+    if (( role_w <= 1 )); then
+      case "$display_role" in
+        stay) display_role="s" ;;
+        same) display_role="a" ;;
+        use) display_role="u" ;;
+        cap) display_role="c" ;;
+        login) display_role="l" ;;
+      esac
+    fi
     display_status="$(usage_display_status "$status" "$mode")"
     print_usage_render_data_line "$display_role" "$profile" "$weekly" "$weekly_reset" "$short" "$short_reset" \
       "$display_status" "$status" "$valid" "$weekly_used" "$short_used" "$role_w" "$profile_w" "$cell_w" "$status_w" "$bar_width" "$mode"
