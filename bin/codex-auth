@@ -2897,56 +2897,6 @@ EOF
   printf '\n'
 }
 
-usage_summary_scan_record() {
-  local record="$1"
-  local -n best_profile_out="$2"
-  local -n active_profile_out="$3"
-  local -n active_short_out="$4"
-  local -n active_weekly_out="$5"
-  local -n active_label_out="$6"
-  local -n active_has_usage_out="$7"
-  local -n caps_out="$8"
-  local -n login_out="$9"
-  local -n unavailable_out="${10}"
-  local -n offline_out="${11}"
-  local -n stale_out="${12}"
-  local -n ready_out="${13}"
-  local -n cache_age_max_out="${14}"
-  local valid weekly_used short_used mark profile plan weekly short status short_label weekly_reset short_reset cache_age
-
-  IFS=$'\t' read -r valid weekly_used short_used mark profile plan weekly short status short_label weekly_reset short_reset cache_age <<<"$record"
-  [[ -n "$profile" ]] || return 0
-  if [[ "$cache_age" =~ ^[0-9]+$ ]] && (( cache_age > cache_age_max_out )); then
-    cache_age_max_out="$cache_age"
-  fi
-  if [[ "$mark" == "*" ]]; then
-    active_profile_out="$profile"
-    active_short_out="$short"
-    active_weekly_out="$weekly"
-    if [[ "$valid" == "0" && -n "$short" && "$short" != "-" ]]; then
-      [[ -n "$short_label" ]] && active_label_out="$short_label"
-      active_has_usage_out=1
-    elif [[ "$valid" == "0" && -n "$weekly" && "$weekly" != "-" ]]; then
-      active_short_out="$weekly"
-      active_label_out="wk"
-      active_has_usage_out=1
-    fi
-  fi
-  [[ -z "$best_profile_out" && "$status" == "ok" ]] && best_profile_out="$profile"
-  [[ "$status" == stale* ]] && stale_out=$((stale_out + 1))
-  if [[ "$status" == "offline" ]]; then
-    offline_out=$((offline_out + 1))
-  elif [[ "$status" == "login" ]]; then
-    login_out=$((login_out + 1))
-  elif [[ "$valid" != "0" || "$status" == "no data" || "$status" == "no usage" ]]; then
-    unavailable_out=$((unavailable_out + 1))
-  elif [[ "$status" == *cap* ]]; then
-    caps_out=$((caps_out + 1))
-  elif [[ "$status" == "ok" ]]; then
-    ready_out=$((ready_out + 1))
-  fi
-}
-
 usage_summary_scan_records() {
   local default_profile="${1:-}"
   shift || true
@@ -2957,10 +2907,40 @@ usage_summary_scan_records() {
   local cache_age_max=-1 cache_age_label=""
   local cache_age_out
   local has_best=0 has_active=0 active_has_usage=0 old_summary=0
+  local valid weekly_used short_used mark profile plan weekly short status short_label weekly_reset short_reset cache_age
 
   for record in "$@"; do
-    usage_summary_scan_record "$record" best_profile active_profile active_short active_weekly active_label active_has_usage \
-      caps login unavailable offline stale ready cache_age_max
+    IFS=$'\t' read -r valid weekly_used short_used mark profile plan weekly short status short_label weekly_reset short_reset cache_age <<<"$record"
+    [[ -n "$profile" ]] || continue
+    if [[ "$cache_age" =~ ^[0-9]+$ ]] && (( cache_age > cache_age_max )); then
+      cache_age_max="$cache_age"
+    fi
+    if [[ "$mark" == "*" ]]; then
+      active_profile="$profile"
+      active_short="$short"
+      active_weekly="$weekly"
+      if [[ "$valid" == "0" && -n "$short" && "$short" != "-" ]]; then
+        [[ -n "$short_label" ]] && active_label="$short_label"
+        active_has_usage=1
+      elif [[ "$valid" == "0" && -n "$weekly" && "$weekly" != "-" ]]; then
+        active_short="$weekly"
+        active_label="wk"
+        active_has_usage=1
+      fi
+    fi
+    [[ -z "$best_profile" && "$status" == "ok" ]] && best_profile="$profile"
+    [[ "$status" == stale* ]] && stale=$((stale + 1))
+    if [[ "$status" == "offline" ]]; then
+      offline=$((offline + 1))
+    elif [[ "$status" == "login" ]]; then
+      login=$((login + 1))
+    elif [[ "$valid" != "0" || "$status" == "no data" || "$status" == "no usage" ]]; then
+      unavailable=$((unavailable + 1))
+    elif [[ "$status" == *cap* ]]; then
+      caps=$((caps + 1))
+    elif [[ "$status" == "ok" ]]; then
+      ready=$((ready + 1))
+    fi
   done
 
   if [[ -n "$best_profile" ]]; then
