@@ -4808,30 +4808,23 @@ collect_usage_records_synced() {
   printf '%s' "$records" | canonical_usage_active_marks
 }
 
-usage_limit_coverage_rank() {
+usage_limit_sort_fields() {
   local weekly="$1"
   local short="$2"
+  local weekly_used="$3"
+  local short_used="$4"
+  local coverage_rank=9 short_score=101 week_score=101
 
   if [[ -n "$weekly" && "$weekly" != "-" && -n "$short" && "$short" != "-" ]]; then
-    printf '0'
+    coverage_rank=0
   elif [[ -n "$short" && "$short" != "-" ]]; then
-    printf '1'
+    coverage_rank=1
   elif [[ -n "$weekly" && "$weekly" != "-" ]]; then
-    printf '2'
-  else
-    printf '9'
+    coverage_rank=2
   fi
-}
-
-usage_limit_sort_score() {
-  local used="$1"
-  local display="$2"
-
-  if [[ -n "$display" && "$display" != "-" && "$used" =~ ^[0-9]+$ ]]; then
-    printf '%s' "$used"
-  else
-    printf '101'
-  fi
+  [[ -n "$short" && "$short" != "-" && "$short_used" =~ ^[0-9]+$ ]] && short_score="$short_used"
+  [[ -n "$weekly" && "$weekly" != "-" && "$weekly_used" =~ ^[0-9]+$ ]] && week_score="$weekly_used"
+  printf '%s\t%s\t%s\n' "$coverage_rank" "$short_score" "$week_score"
 }
 
 prepare_usage_records() {
@@ -4872,9 +4865,7 @@ prepare_usage_records() {
               fi
               ;;
           esac
-          coverage_rank="$(usage_limit_coverage_rank "$weekly" "$short")"
-          short_score="$(usage_limit_sort_score "$short_used" "$short")"
-          week_score="$(usage_limit_sort_score "$weekly_used" "$weekly")"
+          IFS=$'\t' read -r coverage_rank short_score week_score <<<"$(usage_limit_sort_fields "$weekly" "$short" "$weekly_used" "$short_used")"
           printf '%s\t%s\t%03d\t%03d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
             "$rank" "$coverage_rank" "$short_score" "$week_score" "$profile" \
             "$valid" "$weekly_used" "$short_used" "$mark" "$profile" "$plan" "$weekly" "$short" "$status" "$record_short_label" "$weekly_reset" "$short_reset" "$cache_age"
@@ -5021,10 +5012,8 @@ usage_best_selection_into() {
     [[ -n "$profile" ]] || continue
     [[ "$valid" == "0" && "$status" == "ok" ]] || continue
     (( weekly_used < 100 && short_used < 100 )) || continue
-    coverage_rank="$(usage_limit_coverage_rank "$weekly" "$short")"
+    IFS=$'\t' read -r coverage_rank short_score week_score <<<"$(usage_limit_sort_fields "$weekly" "$short" "$weekly_used" "$short_used")"
     (( coverage_rank < 9 )) || continue
-    short_score="$(usage_limit_sort_score "$short_used" "$short")"
-    week_score="$(usage_limit_sort_score "$weekly_used" "$weekly")"
     if (( coverage_rank < best_coverage )) \
       || (( coverage_rank == best_coverage && short_score < best_short )) \
       || (( coverage_rank == best_coverage && short_score == best_short && week_score < best_week )) \
