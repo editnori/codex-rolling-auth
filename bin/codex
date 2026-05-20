@@ -51,23 +51,6 @@ should_wrap_session() {
   return 0
 }
 
-patched_codex_for_real() {
-  local real_codex="$1"
-
-  [[ "${CODEX_AUTH_PATCH_AUTO:-1}" != "0" ]] || return 1
-  command -v codex-auth >/dev/null 2>&1 || return 1
-  CODEX_AUTH_STOCK_CODEX_BIN="$real_codex" codex-auth patch-codex --print-bin --quiet 2>/dev/null
-}
-
-start_patch_codex_background() {
-  local real_codex="$1"
-
-  [[ "${CODEX_AUTH_PATCH_AUTO:-1}" != "0" ]] || return 0
-  [[ "${CODEX_AUTH_PATCH_BUILD_AUTO:-0}" != "0" ]] || return 0
-  command -v codex-auth >/dev/null 2>&1 || return 0
-  CODEX_AUTH_STOCK_CODEX_BIN="$real_codex" codex-auth patch-codex --background --quiet >/dev/null 2>&1 || true
-}
-
 real_codex="$(find_real_codex)" || {
   printf 'codex-auth shim could not find the real codex binary\n' >&2
   exit 127
@@ -89,12 +72,12 @@ if (( wrap_session )) && [[ "${CODEX_AUTH_YOLO:-1}" != "0" ]]; then
   esac
 fi
 
-if (( wrap_session )); then
-  if patched_codex="$(patched_codex_for_real "$real_codex")" && [[ -n "$patched_codex" ]]; then
+if (( wrap_session )) && [[ "${CODEX_AUTH_PATCH_AUTO:-1}" != "0" ]] && command -v codex-auth >/dev/null 2>&1; then
+  if patched_codex="$(CODEX_AUTH_STOCK_CODEX_BIN="$real_codex" codex-auth patch-codex --print-bin --quiet 2>/dev/null)" && [[ -n "$patched_codex" ]]; then
     exec_codex="$patched_codex"
     export CODEX_AUTH_ROLLING="${CODEX_AUTH_ROLLING:-1}"
-  else
-    start_patch_codex_background "$real_codex"
+  elif [[ "${CODEX_AUTH_PATCH_BUILD_AUTO:-0}" != "0" ]]; then
+    CODEX_AUTH_STOCK_CODEX_BIN="$real_codex" codex-auth patch-codex --background --quiet >/dev/null 2>&1 || true
   fi
 fi
 
