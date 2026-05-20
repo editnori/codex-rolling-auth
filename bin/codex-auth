@@ -2401,26 +2401,6 @@ usage_fit_status_widths() {
   return 0
 }
 
-usage_status_max_width() {
-  local cols="$1"
-  local row row_verbose threshold max_w
-  local rows=(
-    "1 94 16"
-    "1 72 14"
-    "0 60 13"
-    "0 50 9"
-  )
-
-  for row in "${rows[@]}"; do
-    read -r row_verbose threshold max_w <<<"$row"
-    if (( USAGE_VERBOSE == row_verbose && cols >= threshold )); then
-      printf '%s' "$max_w"
-      return 0
-    fi
-  done
-  printf '0'
-}
-
 usage_render_widths() {
   local cols="$1"
   local mode role_w
@@ -2431,6 +2411,7 @@ usage_render_widths() {
   local cell_overhead reset_prefix_w=0
   local cell_w status_w status_max bar_width available max_profile_w
   local role_profile_gap=1 status_gap=1 gap_w=4
+  local row row_verbose threshold max_w
 
   wanted_profile_w="$(usage_profile_width_hint "$cols" "$wanted_profile_w" "$USAGE_VERBOSE")"
   IFS=$'\t' read -r mode role_w profile_min status_min reset_w label_w min_bar_w max_bar_w <<<"$(usage_width_mode_defaults "$cols" "$USAGE_VERBOSE")"
@@ -2468,7 +2449,14 @@ usage_render_widths() {
   if [[ "$show_status" != "1" ]]; then
     status_w=0
   else
-    status_max="$(usage_status_max_width "$cols")"
+    status_max=0
+    for row in "1 94 16" "1 72 14" "0 60 13" "0 50 9"; do
+      read -r row_verbose threshold max_w <<<"$row"
+      if (( USAGE_VERBOSE == row_verbose && cols >= threshold )); then
+        status_max="$max_w"
+        break
+      fi
+    done
     if (( status_max > 0 && status_w > status_max )); then
       status_w="$status_max"
     fi
