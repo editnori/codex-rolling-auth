@@ -455,50 +455,6 @@ fingerprint_secret() {
   fi
 }
 
-auth_metadata() {
-  local path="$1"
-  local mode="unknown"
-  local hint=""
-  local secret=""
-  local fp=""
-  local fields=()
-
-  [[ -f "$path" ]] || return 1
-  if command -v jq >/dev/null 2>&1; then
-    mapfile -t fields < <(
-      jq -r '
-        if .OPENAI_API_KEY then
-          "api_key",
-          "",
-          ("api:" + .OPENAI_API_KEY)
-        elif .tokens then
-          "chatgpt",
-          ((.tokens.account_id // "") | tostring | gsub("[[:space:]]"; "")),
-          (if .tokens.refresh_token then
-             "chatgpt:" + .tokens.refresh_token
-           elif .tokens.access_token then
-             "chatgpt-access:" + .tokens.access_token
-           else
-             ""
-           end)
-        else
-          "unknown",
-          "",
-          ""
-        end
-      ' "$path" 2>/dev/null || true
-    )
-    mode="${fields[0]:-unknown}"
-    hint="${fields[1]:-}"
-    secret="${fields[2]:-}"
-    fp="$(fingerprint_secret "$secret")"
-  else
-    fp="$(sha256sum "$path" | awk '{print $1}')"
-  fi
-
-  printf '%s\n%s\n%s\n' "$mode" "$hint" "$fp"
-}
-
 auth_metadata_records() {
   if (( $# == 0 )); then
     return 0
@@ -6761,11 +6717,8 @@ profile_files_for_args_into() {
 }
 
 active_auth_fingerprint() {
-  local active_meta=()
-
   [[ -f "$AUTH_FILE" ]] || return 0
-  mapfile -t active_meta < <(auth_metadata "$AUTH_FILE" || true)
-  printf '%s' "${active_meta[2]:-}"
+  credential_fingerprint "$AUTH_FILE" || true
 }
 
 usage_best_selection_into() {
