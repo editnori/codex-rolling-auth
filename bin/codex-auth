@@ -1087,43 +1087,6 @@ print_status_note() {
   printf '\n'
 }
 
-print_profile_list_header() {
-  local count="$1"
-  local active_name="$2"
-  local alias_count="$3"
-  local role_w="$4"
-  local profile_w="$5"
-  local mode_w="$6"
-  local account_w="$7"
-  local total_w summary role_header profile_header
-  local active_summary active_label active_short active_tiny alias_summary sep
-
-  total_w=$((role_w + 1 + profile_w + 1 + mode_w + 1 + account_w))
-  summary="profiles $count"
-  if [[ -n "$active_name" ]]; then
-    sep="$(usage_separator)"
-    active_short="$(usage_display_profile_name "$active_name" "" 6)"
-    active_tiny="$(usage_display_profile_name "$active_name" "" 3)"
-    for active_label in "active $active_name" "act $active_name" "act $active_short" "act $active_tiny"; do
-      active_summary="$summary$sep$active_label"
-      if (( ${#active_summary} <= total_w )); then
-        summary="$active_summary"
-        break
-      fi
-    done
-  fi
-  if (( alias_count > 0 )); then
-    alias_summary="$summary$(usage_separator)aliases $alias_count"
-    if (( ${#alias_summary} <= total_w )); then
-      summary="$alias_summary"
-    fi
-  fi
-  print_palette_summary_header "Auth" "Saved profiles" "$summary" "$total_w"
-  role_header="$(compact_width_choice "$role_w" 2 "" "act")"
-  profile_header="$(compact_width_choice "$profile_w" 7 "prof" "profile")"
-  print_profile_list_line "$role_header" "$profile_header" "auth" "account" "$role_w" "$profile_w" "$mode_w" "$account_w"
-}
-
 print_profile_list_rows() {
   local active_name="$1"
   local active_fp="$2"
@@ -1308,6 +1271,7 @@ cmd_list() {
   done
 
   local cols role_w=5 profile_w mode_w=7 account_w account_min=10 max_profile_w wanted_profile_w
+  local total_w summary role_header profile_header active_summary active_label active_short active_tiny alias_summary sep
   cols="$(terminal_width)"
   USAGE_COLOR_ENABLED=0
   color_enabled && USAGE_COLOR_ENABLED=1
@@ -1334,7 +1298,30 @@ cmd_list() {
   account_w=$((cols - role_w - profile_w - mode_w - 3))
   (( account_w < account_min )) && account_w="$account_min"
 
-  print_profile_list_header "$count" "$active_name" "$alias_count" "$role_w" "$profile_w" "$mode_w" "$account_w"
+  total_w=$((role_w + 1 + profile_w + 1 + mode_w + 1 + account_w))
+  summary="profiles $count"
+  if [[ -n "$active_name" ]]; then
+    sep="$(usage_separator)"
+    active_short="$(usage_display_profile_name "$active_name" "" 6)"
+    active_tiny="$(usage_display_profile_name "$active_name" "" 3)"
+    for active_label in "active $active_name" "act $active_name" "act $active_short" "act $active_tiny"; do
+      active_summary="$summary$sep$active_label"
+      if (( ${#active_summary} <= total_w )); then
+        summary="$active_summary"
+        break
+      fi
+    done
+  fi
+  if (( alias_count > 0 )); then
+    alias_summary="$summary$(usage_separator)aliases $alias_count"
+    if (( ${#alias_summary} <= total_w )); then
+      summary="$alias_summary"
+    fi
+  fi
+  print_palette_summary_header "Auth" "Saved profiles" "$summary" "$total_w"
+  role_header="$(compact_width_choice "$role_w" 2 "" "act")"
+  profile_header="$(compact_width_choice "$profile_w" 7 "prof" "profile")"
+  print_profile_list_line "$role_header" "$profile_header" "auth" "account" "$role_w" "$profile_w" "$mode_w" "$account_w"
   print_profile_list_rows "$active_name" "$active_fp" "$list_verbose" "$role_w" "$profile_w" "$mode_w" "$account_w" profiles profile_mode profile_hint profile_fp account_count account_primary
 }
 
