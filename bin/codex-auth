@@ -2597,99 +2597,6 @@ usage_status_is_exact_cap() {
   esac
 }
 
-usage_stale_ok_label() {
-  local stale_age="$1"
-  local aged_format="${2:-old}"
-
-  if [[ -n "$stale_age" && "$stale_age" != "now" ]]; then
-    printf "$aged_format" "$stale_age"
-  else
-    printf 'stale'
-  fi
-}
-
-usage_display_stale_status() {
-  local status="$1"
-  local mode="$2"
-  local stale_age="$3"
-
-  if usage_mode_is_pico_or_nano "$mode"; then
-    if [[ "$status" == *cap ]]; then
-      printf 'cap'
-    else
-      printf 'old'
-    fi
-  elif [[ "$mode" == "micro" || "$mode" == "tiny" ]]; then
-    if [[ "$status" == "ok" ]]; then
-      usage_stale_ok_label "$stale_age"
-    elif usage_status_is_exact_cap "$status"; then
-      printf 'cap'
-    else
-      printf 'stale'
-    fi
-  elif [[ "$status" == "ok" ]]; then
-    usage_stale_ok_label "$stale_age" 'old %s'
-  elif usage_status_is_exact_cap "$status"; then
-    printf 'old cap'
-  else
-    printf 'stale'
-  fi
-}
-
-usage_display_pico_status() {
-  case "$1" in
-    ok)
-      printf 'ok'
-      ;;
-    stale\ *\ cap)
-      printf 'old'
-      ;;
-    login)
-      printf 'auth'
-      ;;
-    no\ usage|no\ data)
-      printf 'n/a'
-      ;;
-    *)
-      printf '%s' "$1"
-      ;;
-  esac
-}
-
-usage_display_micro_status() {
-  case "$1" in
-    ok)
-      printf 'ready'
-      ;;
-    stale\ *\ cap)
-      printf 'stale'
-      ;;
-    login)
-      printf 'auth'
-      ;;
-    *)
-      printf '%s' "$1"
-      ;;
-  esac
-}
-
-usage_display_normal_status() {
-  case "$1" in
-    ok)
-      printf 'ready'
-      ;;
-    offline)
-      printf 'offline'
-      ;;
-    login)
-      printf 'login'
-      ;;
-    *)
-      printf '%s' "$1"
-      ;;
-  esac
-}
-
 usage_display_status() {
   local status="$1"
   local mode="${2:-normal}"
@@ -2706,7 +2613,35 @@ usage_display_status() {
   fi
 
   if (( stale_status )); then
-    usage_display_stale_status "$status" "$mode" "$stale_age"
+    if usage_mode_is_pico_or_nano "$mode"; then
+      if [[ "$status" == *cap ]]; then
+        printf 'cap'
+      else
+        printf 'old'
+      fi
+    elif [[ "$mode" == "micro" || "$mode" == "tiny" ]]; then
+      if [[ "$status" == "ok" ]]; then
+        if [[ -n "$stale_age" && "$stale_age" != "now" ]]; then
+          printf 'old'
+        else
+          printf 'stale'
+        fi
+      elif usage_status_is_exact_cap "$status"; then
+        printf 'cap'
+      else
+        printf 'stale'
+      fi
+    elif [[ "$status" == "ok" ]]; then
+      if [[ -n "$stale_age" && "$stale_age" != "now" ]]; then
+        printf 'old %s' "$stale_age"
+      else
+        printf 'stale'
+      fi
+    elif usage_status_is_exact_cap "$status"; then
+      printf 'old cap'
+    else
+      printf 'stale'
+    fi
     return 0
   fi
 
@@ -2716,16 +2651,58 @@ usage_display_status() {
   fi
 
   if usage_mode_is_pico_or_nano "$mode"; then
-    usage_display_pico_status "$status"
+    case "$status" in
+      ok)
+        printf 'ok'
+        ;;
+      stale\ *\ cap)
+        printf 'old'
+        ;;
+      login)
+        printf 'auth'
+        ;;
+      no\ usage|no\ data)
+        printf 'n/a'
+        ;;
+      *)
+        printf '%s' "$status"
+        ;;
+    esac
     return 0
   fi
 
   if [[ "$mode" == "micro" || "$mode" == "tiny" ]]; then
-    usage_display_micro_status "$status"
+    case "$status" in
+      ok)
+        printf 'ready'
+        ;;
+      stale\ *\ cap)
+        printf 'stale'
+        ;;
+      login)
+        printf 'auth'
+        ;;
+      *)
+        printf '%s' "$status"
+        ;;
+    esac
     return 0
   fi
 
-  usage_display_normal_status "$status"
+  case "$status" in
+    ok)
+      printf 'ready'
+      ;;
+    offline)
+      printf 'offline'
+      ;;
+    login)
+      printf 'login'
+      ;;
+    *)
+      printf '%s' "$status"
+      ;;
+  esac
 }
 
 usage_display_profile_name() {
