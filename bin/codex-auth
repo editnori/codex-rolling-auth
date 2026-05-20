@@ -2691,29 +2691,17 @@ print_usage_summary_line() {
     show_ready=0
   fi
   part=" wk $active_weekly"
-  if (( show_week )); then
-    if (( ${#line} + ${#part} <= width )); then line+="$part"; else show_week=0; fi
-  fi
+  if (( show_week && ${#line} + ${#part} <= width )); then line+="$part"; else show_week=0; fi
   part="${sep}ready $ready"
-  if (( show_ready )); then
-    if (( ${#line} + ${#part} <= width )); then line+="$part"; else show_ready=0; fi
-  fi
+  if (( show_ready && ${#line} + ${#part} <= width )); then line+="$part"; else show_ready=0; fi
   part="${sep}$cap_label $caps"
-  if (( show_caps )); then
-    if (( ${#line} + ${#part} <= width )); then line+="$part"; else show_caps=0; fi
-  fi
+  if (( show_caps && ${#line} + ${#part} <= width )); then line+="$part"; else show_caps=0; fi
   part="${sep}login $login"
-  if (( show_login )); then
-    if (( ${#line} + ${#part} <= width )); then line+="$part"; else show_login=0; fi
-  fi
+  if (( show_login && ${#line} + ${#part} <= width )); then line+="$part"; else show_login=0; fi
   part="${sep}no data $unavailable"
-  if (( show_unavailable )); then
-    if (( ${#line} + ${#part} <= width )); then line+="$part"; else show_unavailable=0; fi
-  fi
+  if (( show_unavailable && ${#line} + ${#part} <= width )); then line+="$part"; else show_unavailable=0; fi
   part="${sep}offline $offline"
-  if (( show_offline )); then
-    if (( ${#line} + ${#part} <= width )); then line+="$part"; else show_offline=0; fi
-  fi
+  if (( show_offline && ${#line} + ${#part} <= width )); then line+="$part"; else show_offline=0; fi
   if (( stale > 0 )); then
     show_stale=1
     part="${sep}stale $stale"
