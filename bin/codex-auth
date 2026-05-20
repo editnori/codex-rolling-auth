@@ -4557,11 +4557,11 @@ collect_usage_records() {
   shift
   local profile_files=("$@")
   local records_dir profile_file i
-  local max_jobs="${CODEX_AUTH_REFRESH_JOBS:-2}"
+  local max_jobs="${CODEX_AUTH_REFRESH_JOBS:-4}"
   local max_jobs_cap="${CODEX_AUTH_REFRESH_JOBS_MAX:-4}"
   local active_jobs=0
 
-  [[ "$max_jobs" =~ ^[0-9]+$ && "$max_jobs" -gt 0 ]] || max_jobs=2
+  [[ "$max_jobs" =~ ^[0-9]+$ && "$max_jobs" -gt 0 ]] || max_jobs=4
   [[ "$max_jobs_cap" =~ ^[0-9]+$ && "$max_jobs_cap" -gt 0 ]] || max_jobs_cap=4
   (( max_jobs > max_jobs_cap )) && max_jobs="$max_jobs_cap"
   (( max_jobs > ${#profile_files[@]} )) && max_jobs="${#profile_files[@]}"
