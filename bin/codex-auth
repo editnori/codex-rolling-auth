@@ -2056,29 +2056,6 @@ cmd_use() {
   fi
 }
 
-login_fail_with_restore() {
-  local hidden_auth="$1"
-  local restored_message="$2"
-  local plain_message="$3"
-  local message="$plain_message"
-
-  if restore_hidden_auth "$hidden_auth"; then
-    message="$restored_message"
-  fi
-  print_error "$message"
-  exit 1
-}
-
-hide_active_auth_for_login() {
-  local name="$1" hidden_auth=""
-
-  [[ -f "$AUTH_FILE" ]] || return 0
-  hidden_auth="$(reserve_unique_backup_path "hidden-for-login-$name")"
-  mv "$AUTH_FILE" "$hidden_auth" || { rm -f "$hidden_auth"; die "could not hide active auth for login"; }
-  chmod 600 "$hidden_auth"
-  printf '%s' "$hidden_auth"
-}
-
 cmd_login() {
   local name="$1"
   shift || true
@@ -2092,11 +2069,26 @@ cmd_login() {
 
   backup_current "pre-login-$name" >/dev/null || true
 
-  local hidden_auth="$(hide_active_auth_for_login "$name")"
+  local hidden_auth="" message
+  if [[ -f "$AUTH_FILE" ]]; then
+    hidden_auth="$(reserve_unique_backup_path "hidden-for-login-$name")"
+    mv "$AUTH_FILE" "$hidden_auth" || { rm -f "$hidden_auth"; die "could not hide active auth for login"; }
+    chmod 600 "$hidden_auth"
+  fi
 
-  CODEX_AUTH_RUNNER=1 "$codex_cli" login "$@" || login_fail_with_restore "$hidden_auth" "login failed; restored previous auth" "login failed"
+  if ! CODEX_AUTH_RUNNER=1 "$codex_cli" login "$@"; then
+    message="login failed"
+    restore_hidden_auth "$hidden_auth" && message="login failed; restored previous auth"
+    print_error "$message"
+    exit 1
+  fi
 
-  auth_file_is_valid "$AUTH_FILE" || login_fail_with_restore "$hidden_auth" "login did not produce valid auth; restored previous auth" "login did not produce valid auth"
+  if ! auth_file_is_valid "$AUTH_FILE"; then
+    message="login did not produce valid auth"
+    restore_hidden_auth "$hidden_auth" && message="login did not produce valid auth; restored previous auth"
+    print_error "$message"
+    exit 1
+  fi
 
   cmd_save "$name" "$AUTH_FILE" "login $name"
   rm -f "$hidden_auth"
