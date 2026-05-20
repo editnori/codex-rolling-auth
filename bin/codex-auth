@@ -876,84 +876,79 @@ COMPACT_ERROR_PREFIX_ROWS=(
   $'profile not found: \tprofile'
 )
 
-compact_error_message() {
-  local message="$1"
-  local cols="$2"
-  local row source cutoff short wide prefix kind suffix tail value
+print_error() {
+  local message="$*"
+  local cols prefix indent current word candidate rendered line_prefix line_width
+  local row source cutoff short wide table_prefix kind suffix tail value
+  local compacted=0 wrote_line=0
+  local words=()
+  local line_prefixes=()
 
+  cols="$(terminal_width)"
   if (( cols < 68 )); then
     for row in "${COMPACT_ERROR_STATIC_ROWS[@]}"; do
       IFS=$'\t' read -r source cutoff short wide <<<"$row"
       if [[ "$message" == "$source" ]]; then
         if [[ "$cutoff" == "-" ]]; then
-          printf '%s' "$short"
+          message="$short"
         else
-          compact_width_choice "$cols" "$cutoff" "$short" "$wide"
+          message="$(compact_width_choice "$cols" "$cutoff" "$short" "$wide")"
         fi
-        return 0
+        compacted=1
+        break
       fi
     done
-    for row in "${COMPACT_ERROR_PREFIX_ROWS[@]}"; do
-      IFS=$'\t' read -r prefix kind cutoff short wide suffix <<<"$row"
-      [[ "$message" == "$prefix"* ]] || continue
-      tail="${message#"$prefix"}"
-      case "$kind" in
-        base)
-          value="${tail##*/}"
-          ;;
-        dir)
-          value="${tail##*/}"
-          if (( cols < 24 )); then
-            printf 'missing dir'
-          elif (( cols < 28 )); then
-            printf 'missing dir %s' "$value"
-          else
-            printf 'missing dir: %s' "$value"
-          fi
-          return 0
-          ;;
-        command)
-          value="${tail%"$suffix"}"
-          ;;
-        raw)
-          value="$tail"
-          ;;
-        profile)
-          if (( cols < 40 )); then
-            value="$(fit_profile_text_rtrim "$tail" "$((cols - 15))")"
-            printf 'missing %s' "$value"
-          else
-            printf 'not found: %s' "$tail"
-          fi
-          return 0
-          ;;
-      esac
-      if (( cols < cutoff )); then
-        printf "$short" "$value"
-      else
-        printf "$wide" "$value"
-      fi
-      return 0
-    done
+    if (( ! compacted )); then
+      for row in "${COMPACT_ERROR_PREFIX_ROWS[@]}"; do
+        IFS=$'\t' read -r table_prefix kind cutoff short wide suffix <<<"$row"
+        [[ "$message" == "$table_prefix"* ]] || continue
+        tail="${message#"$table_prefix"}"
+        case "$kind" in
+          base)
+            value="${tail##*/}"
+            ;;
+          dir)
+            value="${tail##*/}"
+            if (( cols < 24 )); then
+              message='missing dir'
+            elif (( cols < 28 )); then
+              message="missing dir $value"
+            else
+              message="missing dir: $value"
+            fi
+            compacted=1
+            break
+            ;;
+          command)
+            value="${tail%"$suffix"}"
+            ;;
+          raw)
+            value="$tail"
+            ;;
+          profile)
+            if (( cols < 40 )); then
+              value="$(fit_profile_text_rtrim "$tail" "$((cols - 15))")"
+              message="missing $value"
+            else
+              message="not found: $tail"
+            fi
+            compacted=1
+            break
+            ;;
+        esac
+        if (( cols < cutoff )); then
+          message="$(printf "$short" "$value")"
+        else
+          message="$(printf "$wide" "$value")"
+        fi
+        compacted=1
+        break
+      done
+    fi
   fi
-
   if (( cols < 32 )) && [[ "$message" == usage:\ codex-auth\ * ]]; then
-    printf 'usage:%s' "${message#usage: codex-auth}"
-    return 0
+    message="usage:${message#usage: codex-auth}"
   fi
-
-  printf '%s' "$message"
-}
-
-print_error() {
-  local message="$*"
-  local cols prefix indent current word candidate rendered line_prefix line_width
-  local wrote_line=0
-  local words=()
-  local line_prefixes=()
-
-  cols="$(terminal_width)"
-  message="$(compact_error_message "$message" "$cols")"
   if usage_unicode_enabled || (( cols < 30 )); then
     prefix='! '
   else
