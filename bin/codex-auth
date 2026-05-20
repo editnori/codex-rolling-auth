@@ -2414,24 +2414,22 @@ usage_header_profile() {
   fi
 }
 
-usage_header_percent_label() {
+usage_header_limit_label() {
   local mode="$1"
   local label="$2"
   local nano_label="$3"
+  local reset_glyph
 
-  if usage_mode_is_pico_or_nano "$mode"; then
-    printf '%s%%' "$nano_label"
-  else
-    printf '%s%%' "$label"
+  if (( ! USAGE_VERBOSE )); then
+    if usage_mode_is_pico_or_nano "$mode"; then
+      printf '%s%%' "$nano_label"
+    else
+      printf '%s%%' "$label"
+    fi
+    return 0
   fi
-}
 
-usage_header_verbose_label() {
-  local mode="$1"
-  local label="$2"
-  local nano_label="$3"
-  local reset_glyph="${4:-}"
-
+  reset_glyph="$(usage_reset_glyph)"
   case "$mode" in
     pico|nano)
       printf '%s%%' "$nano_label"
@@ -2472,35 +2470,21 @@ usage_header_verbose_label() {
 
 usage_header_week() {
   local mode="${1:-normal}"
-  local reset_glyph
-  reset_glyph="$(usage_reset_glyph)"
 
-  if (( ! USAGE_VERBOSE )); then
-    usage_header_percent_label "$mode" "week" "wk"
-    return 0
-  fi
-
-  usage_header_verbose_label "$mode" "week" "wk" "$reset_glyph"
+  usage_header_limit_label "$mode" "week" "wk"
 }
 
 usage_header_short() {
   local mode="${1:-normal}"
   local label="${USAGE_SHORT_LABEL:-5h}"
   local nano_label
-  local reset_glyph
 
   if [[ "$label" == "short" ]] && usage_mode_is_pico_or_nano "$mode"; then
     label="5h"
   fi
   nano_label="${label:0:2}"
-  reset_glyph="$(usage_reset_glyph)"
 
-  if (( ! USAGE_VERBOSE )); then
-    usage_header_percent_label "$mode" "$label" "$nano_label"
-    return 0
-  fi
-
-  usage_header_verbose_label "$mode" "$label" "$nano_label" "$reset_glyph"
+  usage_header_limit_label "$mode" "$label" "$nano_label"
 }
 
 usage_header_state() {
