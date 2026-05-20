@@ -122,7 +122,7 @@ print_help_item() {
   local cmd="$1"
   local desc="$2"
   local width="$3"
-  local action action_w command_w desc_w line gap row pattern token first
+  local action action_tone action_w command_w desc_w line gap row pattern token first
   local tokens=()
   local action_rows=(
     "usage --refresh --select"$'\t'"select"
@@ -156,6 +156,23 @@ print_help_item() {
     fi
     action="${desc%% *}"
   done
+  case "$action" in
+    select|best)
+      action_tone="accent"
+      ;;
+    use|save|view|cache|export|new|copy|load|write)
+      action_tone="good"
+      ;;
+    auth|login|import|wide|refresh|resume|roll|audit)
+      action_tone="warn"
+      ;;
+    delete|remove)
+      action_tone="bad"
+      ;;
+    *)
+      action_tone="muted"
+      ;;
+  esac
   action_w=7
   (( width < 56 )) && action_w=6
 
@@ -172,7 +189,7 @@ print_help_item() {
         line+=" $token"
       else
         if (( first )); then
-          print_toned_fit "$action" "$action_w" "$(help_action_tone "$action")"
+          print_toned_fit "$action" "$action_w" "$action_tone"
         else
           printf '%*s' "$action_w" ''
         fi
@@ -185,7 +202,7 @@ print_help_item() {
     done
     if [[ -n "$line" ]]; then
       if (( first )); then
-        print_toned_fit "$action" "$action_w" "$(help_action_tone "$action")"
+        print_toned_fit "$action" "$action_w" "$action_tone"
       else
         printf '%*s' "$action_w" ''
       fi
@@ -205,33 +222,13 @@ print_help_item() {
   (( command_w < 14 )) && command_w=14
   desc_w=$((width - action_w - command_w - 3))
   (( desc_w < 1 )) && desc_w=1
-  print_toned_fit "$action" "$action_w" "$(help_action_tone "$action")"
+  print_toned_fit "$action" "$action_w" "$action_tone"
   printf ' '
   print_toned_fit "$cmd" "$command_w" accent
   gap=2
   printf '%*s' "$gap" ''
   print_toned_fit_rtrim "$desc" "$desc_w" muted
   printf '\n'
-}
-
-help_action_tone() {
-  case "${1:-}" in
-    select|best)
-      printf 'accent'
-      ;;
-    use|save|view|cache|export|new|copy|load|write)
-      printf 'good'
-      ;;
-    auth|login|import|wide|refresh|resume|roll|audit)
-      printf 'warn'
-      ;;
-    delete|remove)
-      printf 'bad'
-      ;;
-    *)
-      printf 'muted'
-      ;;
-  esac
 }
 
 display_path() {
