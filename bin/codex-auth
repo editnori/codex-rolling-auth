@@ -2143,12 +2143,17 @@ print_toned_fit_center() {
   usage_tone_reset
 }
 
-usage_section_rule() {
+print_usage_section_rule() {
   local width="$1"
   local label="${2:-}"
-  local text rule_glyph
-  rule_glyph="$(usage_rule_glyph)"
+  local tone="muted" text
 
+  case "$label" in
+    limited|cap) tone="bad" ;;
+    login|offline) tone="warn" ;;
+    ready) tone="good" ;;
+  esac
+  usage_tone_color "$tone"
   if [[ -n "$label" ]]; then
     case "$label" in
       limited) text="limits" ;;
@@ -2159,22 +2164,8 @@ usage_section_rule() {
     esac
     printf '%s' "$text"
   else
-    repeat_glyph "$rule_glyph" "$width"
+    repeat_glyph "$(usage_rule_glyph)" "$width"
   fi
-}
-
-print_usage_section_rule() {
-  local width="$1"
-  local label="${2:-}"
-  local tone="muted"
-
-  case "$label" in
-    limited|cap) tone="bad" ;;
-    login|offline) tone="warn" ;;
-    ready) tone="good" ;;
-  esac
-  usage_tone_color "$tone"
-  usage_section_rule "$width" "$label"
   usage_tone_reset
   printf '\n'
 }
