@@ -2913,33 +2913,6 @@ usage_summary_try_append() {
   fi
 }
 
-usage_summary_note_active_record() {
-  local valid="$1"
-  local mark="$2"
-  local profile="$3"
-  local weekly="$4"
-  local short="$5"
-  local short_label="$6"
-  local -n active_profile_ref="$7"
-  local -n active_short_ref="$8"
-  local -n active_weekly_ref="$9"
-  local -n active_label_ref="${10}"
-  local -n active_has_usage_ref="${11}"
-
-  [[ "$mark" == "*" ]] || return 0
-  active_profile_ref="$profile"
-  active_short_ref="$short"
-  active_weekly_ref="$weekly"
-  if [[ "$valid" == "0" && -n "$short" && "$short" != "-" ]]; then
-    [[ -n "$short_label" ]] && active_label_ref="$short_label"
-    active_has_usage_ref=1
-  elif [[ "$valid" == "0" && -n "$weekly" && "$weekly" != "-" ]]; then
-    active_short_ref="$weekly"
-    active_label_ref="wk"
-    active_has_usage_ref=1
-  fi
-}
-
 usage_summary_scan_record() {
   local record="$1"
   local -n best_profile_out="$2"
@@ -2962,8 +2935,19 @@ usage_summary_scan_record() {
   if [[ "$cache_age" =~ ^[0-9]+$ ]] && (( cache_age > cache_age_max_out )); then
     cache_age_max_out="$cache_age"
   fi
-  usage_summary_note_active_record "$valid" "$mark" "$profile" "$weekly" "$short" "$short_label" \
-    active_profile_out active_short_out active_weekly_out active_label_out active_has_usage_out
+  if [[ "$mark" == "*" ]]; then
+    active_profile_out="$profile"
+    active_short_out="$short"
+    active_weekly_out="$weekly"
+    if [[ "$valid" == "0" && -n "$short" && "$short" != "-" ]]; then
+      [[ -n "$short_label" ]] && active_label_out="$short_label"
+      active_has_usage_out=1
+    elif [[ "$valid" == "0" && -n "$weekly" && "$weekly" != "-" ]]; then
+      active_short_out="$weekly"
+      active_label_out="wk"
+      active_has_usage_out=1
+    fi
+  fi
   [[ -z "$best_profile_out" && "$status" == "ok" ]] && best_profile_out="$profile"
   [[ "$status" == stale* ]] && stale_out=$((stale_out + 1))
   if [[ "$status" == "offline" ]]; then
