@@ -2877,8 +2877,6 @@ print_usage_summary_colored_line() {
   local show_cache="${23}"
   local cache_age_label="${24}"
   local active_has_usage="${25}"
-  local colored_pair colored_show colored_prefix colored_value colored_value_tone
-  local colored_pairs=()
 
   if (( old_summary )); then
     usage_tone_color muted; printf 'old active '; usage_tone_reset
@@ -2898,20 +2896,38 @@ print_usage_summary_colored_line() {
     usage_tone_color muted; printf 'no fresh ready'; usage_tone_reset
     usage_tone_color muted; printf '%sno active' "$sep"; usage_tone_reset
   fi
-  colored_pairs+=("$((has_active * active_has_usage))"$'\037'" $active_label "$'\037'"$active_short"$'\037'"$(usage_limit_tone "$active_short")")
-  colored_pairs+=("$show_week"$'\037'' wk '$'\037'"$active_weekly"$'\037'"$(usage_limit_tone "$active_weekly")")
-  colored_pairs+=("$show_ready"$'\037'"${sep}ready "$'\037'"$ready"$'\037'good)
-  colored_pairs+=("$show_caps"$'\037'"${sep}${cap_label} "$'\037'"$caps"$'\037'bad)
-  colored_pairs+=("$show_login"$'\037'"${sep}login "$'\037'"$login"$'\037'muted)
-  colored_pairs+=("$show_unavailable"$'\037'"${sep}no data "$'\037'"$unavailable"$'\037'muted)
-  colored_pairs+=("$show_offline"$'\037'"${sep}offline "$'\037'"$offline"$'\037'warn)
-  colored_pairs+=("$show_stale"$'\037'"${sep}stale "$'\037'"$stale"$'\037'warn)
-  for colored_pair in "${colored_pairs[@]}"; do
-    IFS=$'\037' read -r colored_show colored_prefix colored_value colored_value_tone <<<"$colored_pair"
-    (( colored_show )) || continue
-    usage_tone_color muted; printf '%s' "$colored_prefix"; usage_tone_reset
-    usage_tone_color "$colored_value_tone"; printf '%s' "$colored_value"; usage_tone_reset
-  done
+  if (( has_active * active_has_usage )); then
+    usage_tone_color muted; printf ' %s ' "$active_label"; usage_tone_reset
+    usage_tone_color "$(usage_limit_tone "$active_short")"; printf '%s' "$active_short"; usage_tone_reset
+  fi
+  if (( show_week )); then
+    usage_tone_color muted; printf ' wk '; usage_tone_reset
+    usage_tone_color "$(usage_limit_tone "$active_weekly")"; printf '%s' "$active_weekly"; usage_tone_reset
+  fi
+  if (( show_ready )); then
+    usage_tone_color muted; printf '%sready ' "$sep"; usage_tone_reset
+    usage_tone_color good; printf '%s' "$ready"; usage_tone_reset
+  fi
+  if (( show_caps )); then
+    usage_tone_color muted; printf '%s%s ' "$sep" "$cap_label"; usage_tone_reset
+    usage_tone_color bad; printf '%s' "$caps"; usage_tone_reset
+  fi
+  if (( show_login )); then
+    usage_tone_color muted; printf '%slogin ' "$sep"; usage_tone_reset
+    usage_tone_color muted; printf '%s' "$login"; usage_tone_reset
+  fi
+  if (( show_unavailable )); then
+    usage_tone_color muted; printf '%sno data ' "$sep"; usage_tone_reset
+    usage_tone_color muted; printf '%s' "$unavailable"; usage_tone_reset
+  fi
+  if (( show_offline )); then
+    usage_tone_color muted; printf '%soffline ' "$sep"; usage_tone_reset
+    usage_tone_color warn; printf '%s' "$offline"; usage_tone_reset
+  fi
+  if (( show_stale )); then
+    usage_tone_color muted; printf '%sstale ' "$sep"; usage_tone_reset
+    usage_tone_color warn; printf '%s' "$stale"; usage_tone_reset
+  fi
   if (( show_cache )); then
     usage_tone_color muted; printf '%s' "${sep}cache $cache_age_label"; usage_tone_reset
   fi
