@@ -1996,22 +1996,6 @@ usage_bar() {
   repeat_glyph "$empty_glyph" "$empty_count"
 }
 
-usage_render_total_width() {
-  local role_w="$1"
-  local profile_w="$2"
-  local cell_w="$3"
-  local status_w="$4"
-  local role_profile_gap status_gap
-
-  role_profile_gap=$((1 + (role_w > 1)))
-  status_gap="$role_profile_gap"
-  if (( status_w > 0 )); then
-    printf '%s' "$((role_w + role_profile_gap + profile_w + 1 + cell_w + 1 + cell_w + status_gap + status_w))"
-  else
-    printf '%s' "$((role_w + role_profile_gap + profile_w + 1 + cell_w + 1 + cell_w))"
-  fi
-}
-
 clamp_int_between() {
   local value="$1"
   local min="$2"
@@ -5223,7 +5207,8 @@ arrow_action_menu() {
     (( render_cols < 16 )) && render_cols=16
   fi
   IFS=$'\t' read -r mode role_w profile_w cell_w status_w bar_width <<<"$(usage_render_widths "$render_cols")"
-  total_w="$(usage_render_total_width "$role_w" "$profile_w" "$cell_w" "$status_w")"
+  total_w=$((role_w + 1 + (role_w > 1) + profile_w + 1 + cell_w + 1 + cell_w))
+  (( status_w > 0 )) && total_w=$((total_w + 1 + (role_w > 1) + status_w))
   total_w="$(clamp_int_between "$total_w" 0 "$render_cols")"
   summary_text="$(usage_metadata_summary_line "$total_w" "$default_profile" "${records[@]}")"
   action_w=5
@@ -5504,7 +5489,8 @@ render_usage_records() {
   max_cols=$((120 + USAGE_VERBOSE * 12))
   render_cols="$(clamp_int_between "$(terminal_width)" 0 "$max_cols")"
   IFS=$'\t' read -r mode role_w profile_w cell_w status_w bar_width <<<"$(usage_render_widths "$render_cols")"
-  total_w="$(usage_render_total_width "$role_w" "$profile_w" "$cell_w" "$status_w")"
+  total_w=$((role_w + 1 + (role_w > 1) + profile_w + 1 + cell_w + 1 + cell_w))
+  (( status_w > 0 )) && total_w=$((total_w + 1 + (role_w > 1) + status_w))
 
   print_palette_summary_header "Auth" "Codex profiles" "$(usage_metadata_summary_line "$total_w" "$default_profile" "${SORTED_USAGE_RECORDS[@]}")" "$total_w" usage 0
   if [[ "${CODEX_AUTH_USAGE_HEADER:-0}" == "1" ]]; then
