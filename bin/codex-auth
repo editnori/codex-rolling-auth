@@ -4957,32 +4957,6 @@ selector_menu_row_for_record() {
   printf '%s\037action\037%s\037%s\037%s\n' "$active_row" "$row_action" "$row_profile_field" "$display"
 }
 
-selector_menu_rows() {
-  local -n rows_ref="$1"
-  local -n has_active_ref="$2"
-  local default_profile="$3"
-  local selector_palette_mode="$4"
-  local mode="$5"
-  local role_w="$6"
-  local profile_w="$7"
-  local cell_w="$8"
-  local status_w="$9"
-  local bar_width="${10}"
-  local total_w="${11}"
-  local selector_profile_w="${12}"
-  local action_w="${13}"
-  shift 13
-  local record row active_row row_kind row_action row_profile_field row_display
-
-  for record in "$@"; do
-    row="$(selector_menu_row_for_record "$default_profile" "$selector_palette_mode" "$mode" "$role_w" "$profile_w" "$cell_w" "$status_w" "$bar_width" "$total_w" "$selector_profile_w" "$action_w" "$record")" || continue
-    IFS=$'\037' read -r active_row row_kind row_action row_profile_field row_display <<<"$row"
-    (( active_row )) && has_active_ref=1
-    rows_ref+=("$row_kind"$'\t'"$row_action"$'\t'"$row_profile_field"$'\t'"$row_display")
-  done
-  return 0
-}
-
 arrow_action_menu() {
   local default_profile="${1:-}"
   shift
@@ -5001,6 +4975,7 @@ arrow_action_menu() {
   local selector_palette_mode=0
   local render_cols
   local display palette_profile
+  local record row active_row row_kind row_action row_profile_field row_display
 
   if command -v fzf >/dev/null 2>&1 && [[ "${CODEX_AUTH_NO_FZF:-}" != "1" ]]; then
     use_fzf=1
@@ -5038,7 +5013,12 @@ arrow_action_menu() {
   selector_profile_w="$profile_w"
   (( selector_profile_w < 10 )) && selector_profile_w=10
 
-  selector_menu_rows rows has_active_row "$default_profile" "$selector_palette_mode" "$mode" "$role_w" "$profile_w" "$cell_w" "$status_w" "$bar_width" "$total_w" "$selector_profile_w" "$action_w" "${records[@]}"
+  for record in "${records[@]}"; do
+    row="$(selector_menu_row_for_record "$default_profile" "$selector_palette_mode" "$mode" "$role_w" "$profile_w" "$cell_w" "$status_w" "$bar_width" "$total_w" "$selector_profile_w" "$action_w" "$record")" || continue
+    IFS=$'\037' read -r active_row row_kind row_action row_profile_field row_display <<<"$row"
+    (( active_row )) && has_active_row=1
+    rows+=("$row_kind"$'\t'"$row_action"$'\t'"$row_profile_field"$'\t'"$row_display")
+  done
   if (( ! has_active_row )) && [[ -f "$AUTH_FILE" ]]; then
     if (( selector_palette_mode )); then
       palette_profile="$(selector_palette_profile_label "current" "$total_w" "$selector_profile_w")"
