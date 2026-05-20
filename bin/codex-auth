@@ -2481,33 +2481,6 @@ print_usage_render_header() {
   printf '%s\n' "$reset"
 }
 
-print_usage_placeholder_limit_cell() {
-  local mode="$1"
-  local cell_w="$2"
-  local glyph label_w=4 pad
-
-  (( cell_w <= 0 )) && return 0
-  glyph="-"
-  if [[ "$mode" == "pico" ]]; then
-    label_w="$cell_w"
-  elif (( USAGE_VERBOSE )) && [[ ! "$mode" =~ ^(pico|nano|micro|tiny|tight)$ ]]; then
-    label_w=6
-  fi
-  (( label_w > cell_w )) && label_w="$cell_w"
-
-  usage_tone_color muted
-  if usage_mode_is_pico_or_nano "$mode"; then
-    fit_text_center "$glyph" "$cell_w"
-    usage_tone_reset
-    return 0
-  fi
-  printf "%${label_w}s" "$glyph"
-  usage_tone_reset
-  pad=$((cell_w - label_w))
-  (( pad > 0 )) && printf '%*s' "$pad" ''
-  return 0
-}
-
 print_usage_render_data_line() {
   local role="$1"
   local profile="$2"
@@ -2526,7 +2499,7 @@ print_usage_render_data_line() {
   local status_w="${15}"
   local bar_width="${16}"
   local mode="${17}"
-  local unavailable_text role_profile_gap status_gap status cutoff text
+  local unavailable_text role_profile_gap status_gap status cutoff text placeholder_label_w placeholder_pad placeholder_center placeholder_i
 
   print_toned_fit "$role" "$role_w" "$(usage_role_tone "$role")"
   role_profile_gap=$((1 + (role_w > 1)))
@@ -2556,9 +2529,29 @@ offline	3	of
 offline	7	off
 offline	100000	offline
 EOF
-    print_usage_placeholder_limit_cell "$mode" "$cell_w"
-    printf ' '
-    print_usage_placeholder_limit_cell "$mode" "$cell_w"
+    placeholder_label_w=4
+    if [[ "$mode" == "pico" ]]; then
+      placeholder_label_w="$cell_w"
+    elif (( USAGE_VERBOSE )) && [[ ! "$mode" =~ ^(pico|nano|micro|tiny|tight)$ ]]; then
+      placeholder_label_w=6
+    fi
+    (( placeholder_label_w > cell_w )) && placeholder_label_w="$cell_w"
+    placeholder_center=0
+    usage_mode_is_pico_or_nano "$mode" && placeholder_center=1
+    for placeholder_i in 0 1; do
+      (( placeholder_i > 0 )) && printf ' '
+      (( cell_w <= 0 )) && continue
+      usage_tone_color muted
+      if (( placeholder_center )); then
+        fit_text_center "-" "$cell_w"
+        usage_tone_reset
+        continue
+      fi
+      printf "%${placeholder_label_w}s" "-"
+      usage_tone_reset
+      placeholder_pad=$((cell_w - placeholder_label_w))
+      (( placeholder_pad > 0 )) && printf '%*s' "$placeholder_pad" ''
+    done
     if (( status_w > 0 )); then
       printf '%*s' "$status_gap" ''
       print_toned_fit_center "$unavailable_text" "$status_w" "$(usage_status_tone "$raw_status" "$valid")"
