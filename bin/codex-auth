@@ -4331,57 +4331,21 @@ usage_payload_transient_error() {
   ' <<<"$payload" >/dev/null 2>&1
 }
 
-usage_payload_print_transient_fallback() {
-  local payload="$1"
-  local cached_payload="$2"
+usage_payload_for_profile() {
+  local profile_file="$1"
+  local fingerprint="${2:-}"
+  local profile_name payload cached_payload age
 
-  [[ -n "$payload" && "$payload" != "null" ]] || return 1
-  usage_payload_transient_error "$payload" || return 1
-  if [[ -n "$cached_payload" ]]; then
-    if [[ "$USAGE_REFRESH" == "1" && "${CODEX_AUTH_REFRESH_FALLBACK_CACHE:-1}" == "1" ]]; then
-      mark_stale_payload "$cached_payload"
-    else
-      printf '%s\n' "$cached_payload"
-    fi
-  else
-    printf '%s\n' "$payload"
+  profile_name="$(basename "$profile_file" .json)"
+  [[ -n "$fingerprint" ]] || fingerprint="$(credential_fingerprint "$profile_file" || true)"
+  cached_payload=""
+  [[ -n "$fingerprint" ]] && cached_payload="$(state_payload_for_profile "$profile_name" "$fingerprint" || true)"
+
+  if [[ "$USAGE_REFRESH" == "1" && "${CODEX_AUTH_REFRESH_BLOCKED:-0}" == "1" && -n "$cached_payload" ]] \
+    && usage_payload_still_blocked "$cached_payload"; then
+    printf '%s\n' "$cached_payload"
+    return 0
   fi
-}
-
-usage_payload_print_empty_fallback() {
-  local payload="$1"
-  local cached_payload="$2"
-
-  [[ -z "$payload" || "$payload" == "null" ]] || return 1
-  if [[ -n "$cached_payload" ]]; then
-    if [[ "$USAGE_REFRESH" == "1" ]]; then
-      if [[ "${CODEX_AUTH_REFRESH_FALLBACK_CACHE:-1}" == "1" ]]; then
-        mark_stale_payload "$cached_payload"
-      else
-        printf '%s\n' '{"error":{"message":"no response"}}'
-      fi
-    else
-      printf '%s\n' "$cached_payload"
-    fi
-  else
-    printf '%s\n' '{"error":{"message":"no response"}}'
-  fi
-}
-
-usage_payload_print_blocked_cache() {
-  local cached_payload="$1"
-
-  [[ "$USAGE_REFRESH" == "1" && "${CODEX_AUTH_REFRESH_BLOCKED:-0}" == "1" && -n "$cached_payload" ]] || return 1
-  usage_payload_still_blocked "$cached_payload" || return 1
-  printf '%s\n' "$cached_payload"
-}
-
-usage_payload_print_cache_hit() {
-  local profile_name="$1"
-  local fingerprint="$2"
-  local cached_payload="$3"
-  local age
-
   if [[ -n "$fingerprint" && "$USAGE_REFRESH" != "1" ]]; then
     if [[ -n "$cached_payload" ]]; then
       age="$(state_age_for_profile "$profile_name" "$fingerprint")"
@@ -4401,31 +4365,36 @@ usage_payload_print_cache_hit() {
     printf 'null\n'
     return 0
   fi
-  return 1
-}
-
-usage_payload_for_profile() {
-  local profile_file="$1"
-  local fingerprint="${2:-}"
-  local profile_name payload cached_payload
-
-  profile_name="$(basename "$profile_file" .json)"
-  [[ -n "$fingerprint" ]] || fingerprint="$(credential_fingerprint "$profile_file" || true)"
-  cached_payload=""
-  [[ -n "$fingerprint" ]] && cached_payload="$(state_payload_for_profile "$profile_name" "$fingerprint" || true)"
-
-  if usage_payload_print_blocked_cache "$cached_payload"; then
-    return 0
-  fi
-  if usage_payload_print_cache_hit "$profile_name" "$fingerprint" "$cached_payload"; then
-    return 0
-  fi
 
   payload="$(usage_json_for_profile "$profile_file")"
-  if usage_payload_print_transient_fallback "$payload" "$cached_payload"; then
+
+  if [[ -n "$payload" && "$payload" != "null" ]] && usage_payload_transient_error "$payload"; then
+    if [[ -n "$cached_payload" ]]; then
+      if [[ "$USAGE_REFRESH" == "1" && "${CODEX_AUTH_REFRESH_FALLBACK_CACHE:-1}" == "1" ]]; then
+        mark_stale_payload "$cached_payload"
+      else
+        printf '%s\n' "$cached_payload"
+      fi
+    else
+      printf '%s\n' "$payload"
+    fi
     return 0
   fi
-  if usage_payload_print_empty_fallback "$payload" "$cached_payload"; then
+
+  if [[ -z "$payload" || "$payload" == "null" ]]; then
+    if [[ -n "$cached_payload" ]]; then
+      if [[ "$USAGE_REFRESH" == "1" ]]; then
+        if [[ "${CODEX_AUTH_REFRESH_FALLBACK_CACHE:-1}" == "1" ]]; then
+          mark_stale_payload "$cached_payload"
+        else
+          printf '%s\n' '{"error":{"message":"no response"}}'
+        fi
+      else
+        printf '%s\n' "$cached_payload"
+      fi
+    else
+      printf '%s\n' '{"error":{"message":"no response"}}'
+    fi
     return 0
   fi
 
