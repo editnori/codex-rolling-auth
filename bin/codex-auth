@@ -2703,14 +2703,12 @@ print_usage_summary_line() {
   part="${sep}offline $offline"
   if (( show_offline && ${#line} + ${#part} <= width )); then line+="$part"; else show_offline=0; fi
   if (( stale > 0 )); then
-    show_stale=1
     part="${sep}stale $stale"
-    if (( ${#line} + ${#part} <= width )); then line+="$part"; else show_stale=0; fi
+    if (( ${#line} + ${#part} <= width )); then line+="$part"; show_stale=1; fi
   fi
   if [[ -n "$cache_age_label" ]]; then
-    show_cache=1
     part="${sep}cache $cache_age_label"
-    if (( ${#line} + ${#part} <= width )); then line+="$part"; else show_cache=0; fi
+    if (( ${#line} + ${#part} <= width )); then line+="$part"; show_cache=1; fi
   fi
 
   if (( ${#line} > width )); then
