@@ -3075,51 +3075,6 @@ print_usage_summary_compact_line() {
   printf '\n'
 }
 
-usage_summary_fallback_line() {
-  local width="$1"
-  local old_summary="$2"
-  local has_active="$3"
-  local active_has_usage="$4"
-  local has_best="$5"
-  local ready="$6"
-  local caps="$7"
-  local sep="$8"
-  local active_profile="$9"
-  local active_label="${10}"
-  local active_short="${11}"
-  local line cap_label="capped"
-  local show_ready=0 show_caps=0
-
-  if (( old_summary )); then
-    line="old active $active_profile ${active_label} $active_short"
-  elif (( has_active )); then
-    if (( active_has_usage )); then
-      line="active $active_profile ${active_label} $active_short"
-    else
-      line="active $active_profile"
-    fi
-  elif (( has_best )); then
-    if (( ready > 0 )); then
-      line="ready $ready${sep}no active"
-    else
-      line="no active"
-    fi
-  else
-    line="no active"
-  fi
-
-  if (( caps > 0 && ${#line} + 8 <= width )); then
-    cap_label="cap"
-    line+="${sep}$cap_label $caps"
-    show_caps=1
-  elif (( ready > 0 && ${#line} + 10 <= width )); then
-    line+="${sep}ready $ready"
-    show_ready=1
-  fi
-
-  printf '%s\t%s\t%s\t%s\n' "$line" "$show_ready" "$show_caps" "$cap_label"
-}
-
 print_usage_summary_colored_pair() {
   local show="$1"
   local prefix="$2"
@@ -3281,8 +3236,34 @@ print_usage_summary_line() {
     "$width" "$sep" "$active_weekly" "$ready" "$cap_label" "$caps" "$login" "$unavailable" "$offline" "$stale" "$cache_age_label"
 
   if (( ${#line} > width )); then
-    IFS=$'\t' read -r line show_ready show_caps cap_label \
-      <<<"$(usage_summary_fallback_line "$width" "$old_summary" "$has_active" "$active_has_usage" "$has_best" "$ready" "$caps" "$sep" "$active_profile" "$active_label" "$active_short")"
+    show_ready=0
+    show_caps=0
+    cap_label="capped"
+    if (( old_summary )); then
+      line="old active $active_profile ${active_label} $active_short"
+    elif (( has_active )); then
+      if (( active_has_usage )); then
+        line="active $active_profile ${active_label} $active_short"
+      else
+        line="active $active_profile"
+      fi
+    elif (( has_best )); then
+      if (( ready > 0 )); then
+        line="ready $ready${sep}no active"
+      else
+        line="no active"
+      fi
+    else
+      line="no active"
+    fi
+    if (( caps > 0 && ${#line} + 8 <= width )); then
+      cap_label="cap"
+      line+="${sep}$cap_label $caps"
+      show_caps=1
+    elif (( ready > 0 && ${#line} + 10 <= width )); then
+      line+="${sep}ready $ready"
+      show_ready=1
+    fi
     fallback_used=1
   fi
   if (( fallback_used )); then
