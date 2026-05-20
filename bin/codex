@@ -4,22 +4,14 @@ set -euo pipefail
 CODEX_AUTH_SHIM=1
 SHIM_PATH="$(realpath "$0" 2>/dev/null || printf '%s\n' "$0")"
 
-emit_real_codex_candidate() {
-  local candidate="$1" candidate_path
-
-  [[ -x "$candidate" ]] || return 1
-  candidate_path="$(realpath "$candidate" 2>/dev/null || printf '%s' "$candidate")"
-  [[ "$candidate_path" == "$SHIM_PATH" ]] && return 1
-  printf '%s\n' "$candidate"
-}
-
 find_real_codex() {
-  local wrapper_dir path_dir candidate
+  local wrapper_dir path_dir candidate candidate_path
+  local candidates=()
   local path_dirs=()
 
-  [[ -n "${CODEX_AUTH_CODEX_BIN:-}" ]] && emit_real_codex_candidate "$CODEX_AUTH_CODEX_BIN" && return 0
+  [[ -n "${CODEX_AUTH_CODEX_BIN:-}" ]] && candidates+=("$CODEX_AUTH_CODEX_BIN")
   wrapper_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-  for candidate in \
+  candidates+=( \
     "$wrapper_dir/codex-real" \
     "$HOME/.bun/bin/codex-real" \
     "$HOME/.bun/bin/codex" \
@@ -28,14 +20,20 @@ find_real_codex() {
     /usr/bin/codex \
     /bin/codex \
     "$wrapper_dir"/codex.backup.*
-  do
-    emit_real_codex_candidate "$candidate" && return 0
-  done
+  )
 
   IFS=':' read -r -a path_dirs <<<"${PATH:-}"
   for path_dir in "${path_dirs[@]}"; do
     [[ -n "$path_dir" ]] || path_dir='.'
-    emit_real_codex_candidate "$path_dir/codex" && return 0
+    candidates+=("$path_dir/codex")
+  done
+
+  for candidate in "${candidates[@]}"; do
+    [[ -x "$candidate" ]] || continue
+    candidate_path="$(realpath "$candidate" 2>/dev/null || printf '%s' "$candidate")"
+    [[ "$candidate_path" == "$SHIM_PATH" ]] && continue
+    printf '%s\n' "$candidate"
+    return 0
   done
 
   return 1
