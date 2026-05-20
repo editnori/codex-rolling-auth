@@ -7061,60 +7061,58 @@ parse_usage_args() {
   shift 2
 
   while (( $# > 0 )); do
-    if parse_usage_simple_option "$1" auto_switch_ref; then
-      shift
-      continue
-    fi
-    if [[ "$1" == "--ttl" ]]; then
-      [[ "${2:-}" =~ ^[0-9]+$ ]] || die "usage: --ttl seconds"
-      CACHE_TTL="$2"
-      shift 2
-    elif [[ "$1" == "--" ]]; then
-      shift
-      args_ref+=("$@")
-      break
-    elif [[ "$1" == -* ]]; then
-      die "unknown usage option: $1"
-    else
-      args_ref+=("$1")
-      shift
-    fi
-  done
-}
-
-parse_usage_simple_option() {
-  local option="$1"
-  local -n auto_switch_target_ref="$2"
-
-  case "$option" in
+    case "$1" in
     --auto)
-      auto_switch_target_ref=1
+      auto_switch_ref=1
+      shift
       ;;
     --cached)
       USAGE_CACHED=1
+      shift
       ;;
     --refresh)
       USAGE_REFRESH=1
+      shift
       ;;
     --fast)
       USAGE_FAST_REFRESH=1
+      shift
       ;;
     --sync)
       USAGE_FAST_REFRESH=0
+      shift
       ;;
     --quiet|-q)
       USAGE_QUIET=1
+      shift
       ;;
     --verbose|-v)
       USAGE_VERBOSE=1
+      shift
       ;;
     --select|--menu)
       USAGE_SELECT=1
+      shift
+      ;;
+    --ttl)
+      [[ "${2:-}" =~ ^[0-9]+$ ]] || die "usage: --ttl seconds"
+      CACHE_TTL="$2"
+      shift 2
+      ;;
+    --)
+      shift
+      args_ref+=("$@")
+      break
+      ;;
+    -*)
+      die "unknown usage option: $1"
       ;;
     *)
-      return 1
+      args_ref+=("$1")
+      shift
       ;;
-  esac
+    esac
+  done
 }
 
 profile_files_for_args_into() {
