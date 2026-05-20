@@ -3044,11 +3044,10 @@ usage_payload_transient_error() {
 
 usage_payload_for_profile() {
   local profile_file="$1"
-  local fingerprint="${2:-}"
+  local fingerprint="$2"
   local profile_name payload cached_payload age
 
   profile_name="$(basename "$profile_file" .json)"
-  [[ -n "$fingerprint" ]] || fingerprint="$(credential_fingerprint "$profile_file" || true)"
   cached_payload=""
   [[ -n "$fingerprint" ]] && cached_payload="$(state_payload_for_profile "$profile_name" "$fingerprint" || true)"
 
