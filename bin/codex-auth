@@ -2143,25 +2143,6 @@ print_toned_fit_center() {
   usage_tone_reset
 }
 
-usage_record_group() {
-  local valid="${1:-0}"
-  local status="${2:-}"
-
-  if [[ "$status" == "offline" ]]; then
-    printf 'offline'
-  elif [[ "$status" == "login" ]]; then
-    printf 'login'
-  elif [[ "$valid" != "0" || "$status" == "no data" || "$status" == "no usage" ]]; then
-    printf 'unavailable'
-  elif [[ "$status" == stale* ]]; then
-    printf 'stale'
-  elif [[ "$status" == "ok" ]]; then
-    printf 'ready'
-  else
-    printf 'limited'
-  fi
-}
-
 usage_section_rule() {
   local width="$1"
   local label="${2:-}"
@@ -6450,7 +6431,19 @@ render_usage_records() {
 
   for record in "${SORTED_USAGE_RECORDS[@]}"; do
     IFS=$'\t' read -r valid weekly_used short_used mark profile plan weekly short status record_short_label weekly_reset short_reset cache_age <<<"$record"
-	    group="$(usage_record_group "$valid" "$status")"
+    if [[ "$status" == "offline" ]]; then
+      group="offline"
+    elif [[ "$status" == "login" ]]; then
+      group="login"
+    elif [[ "$valid" != "0" || "$status" == "no data" || "$status" == "no usage" ]]; then
+      group="unavailable"
+    elif [[ "$status" == stale* ]]; then
+      group="stale"
+    elif [[ "$status" == "ok" ]]; then
+      group="ready"
+    else
+      group="limited"
+    fi
     if [[ -z "$previous_group" ]]; then
       if [[ "$group" != "ready" && "$group" != "limited" ]]; then
         print_usage_section_rule "$total_w" "$group"
