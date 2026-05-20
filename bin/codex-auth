@@ -7455,32 +7455,6 @@ patch_codex_ready_for_key() {
   [[ "$marker_key" == "$stock_key" && "$marker_patch_version" == "$PATCH_CODEX_PATCH_VERSION" ]]
 }
 
-patch_codex_set_workspace_version() {
-  local source_dir="$1"
-  local package_version="$2"
-  local cargo_toml="$source_dir/codex-rs/Cargo.toml"
-  local tmp
-
-  [[ -f "$cargo_toml" ]] || die "missing $cargo_toml"
-  tmp="$(mktemp "$(patch_codex_root)/.tmp/Cargo.toml.XXXXXX")"
-  awk -v package_version="$package_version" '
-    BEGIN { in_workspace_package = 0; done = 0 }
-    /^\[workspace\.package\]$/ { in_workspace_package = 1 }
-    /^\[/ && $0 != "[workspace.package]" { in_workspace_package = 0 }
-    in_workspace_package && !done && /^version = "/ {
-      print "version = \"" package_version "\""
-      done = 1
-      next
-    }
-    { print }
-    END { if (!done) exit 1 }
-  ' "$cargo_toml" > "$tmp" || {
-    rm -f "$tmp"
-    die "could not set Codex package version"
-  }
-  mv "$tmp" "$cargo_toml"
-}
-
 patch_codex_write_source_patch() {
   local patch_file="$1"
 
@@ -7831,7 +7805,7 @@ cmd_patch_codex() {
   command -v git >/dev/null 2>&1 || die "git is required for patch-codex"
   command -v cargo >/dev/null 2>&1 || die "cargo is required for patch-codex"
 
-  local lock_wait lock_fd source_commit package_base package_version package_suffix built_bin target_dir target_bin tmp_bin marker tmp
+  local lock_wait lock_fd source_commit package_base package_version package_suffix cargo_toml built_bin target_dir target_bin tmp_bin marker tmp
   local build_args=()
   lock_wait="${CODEX_AUTH_PATCH_LOCK_WAIT:-0}"
   [[ "$lock_wait" =~ ^[0-9]+$ ]] || lock_wait=0
@@ -7864,7 +7838,25 @@ cmd_patch_codex() {
   patch_codex_prepare_source "$source_dir" "$ref" "$no_fetch"
   source_commit="$(git -C "$source_dir" rev-parse HEAD)"
   patch_codex_apply_source_patch "$source_dir"
-  patch_codex_set_workspace_version "$source_dir" "$package_version"
+  cargo_toml="$source_dir/codex-rs/Cargo.toml"
+  [[ -f "$cargo_toml" ]] || die "missing $cargo_toml"
+  tmp="$(mktemp "$(patch_codex_root)/.tmp/Cargo.toml.XXXXXX")"
+  awk -v package_version="$package_version" '
+    BEGIN { in_workspace_package = 0; done = 0 }
+    /^\[workspace\.package\]$/ { in_workspace_package = 1 }
+    /^\[/ && $0 != "[workspace.package]" { in_workspace_package = 0 }
+    in_workspace_package && !done && /^version = "/ {
+      print "version = \"" package_version "\""
+      done = 1
+      next
+    }
+    { print }
+    END { if (!done) exit 1 }
+  ' "$cargo_toml" > "$tmp" || {
+    rm -f "$tmp"
+    die "could not set Codex package version"
+  }
+  mv "$tmp" "$cargo_toml"
 
   [[ "$quiet" == "1" ]] || print_status_note patch "build $profile"
   [[ "$profile" == "release" ]] && build_args=(--release)
