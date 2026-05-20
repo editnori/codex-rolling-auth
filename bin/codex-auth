@@ -3783,6 +3783,20 @@ selector_header_meta_line() {
   local value_w value label_tone="muted"
   local sep name detail name_w detail_w
 
+  if [[ -z "$label" ]]; then
+    label="status"
+    if [[ "$text" == "best "* ]]; then
+      label="best"
+      text="${text#best }"
+    elif [[ "$text" == "active "* ]]; then
+      label="active"
+      text="${text#active }"
+    elif [[ "$text" == "old "* ]]; then
+      label="old"
+      text="${text#old }"
+    fi
+  fi
+
   (( label_w < 1 )) && label_w=1
   value_w=$((total_w - label_w - 2))
   (( value_w < 1 )) && value_w=1
@@ -3828,27 +3842,6 @@ selector_header_meta_line() {
   printf '  '
   fit_text "$value" "$value_w"
   printf '\n'
-}
-
-selector_header_primary_line() {
-  local text="$1"
-  local total_w="$2"
-  local label_w="$3"
-  local label="status"
-  local value="$text"
-
-  if [[ "$text" == "best "* ]]; then
-    label="best"
-    value="${text#best }"
-  elif [[ "$text" == "active "* ]]; then
-    label="active"
-    value="${text#active }"
-  elif [[ "$text" == "old "* ]]; then
-    label="old"
-    value="${text#old }"
-  fi
-
-  selector_header_meta_line "$label" "$value" "$total_w" "$label_w"
 }
 
 usage_summary_split_once() {
@@ -3928,9 +3921,9 @@ print_usage_summary_block() {
     blank_after=1
   fi
 
-  selector_header_primary_line "$first" "$total_w" "$label_w"
+  selector_header_meta_line "" "$first" "$total_w" "$label_w"
   if (( show_active )) && [[ -n "$active_part" ]]; then
-    selector_header_primary_line "$active_part" "$total_w" "$label_w"
+    selector_header_meta_line "" "$active_part" "$total_w" "$label_w"
   fi
   if (( show_pool )) && [[ -n "$pool_part" ]]; then
     selector_header_meta_line "stats" "$pool_part" "$total_w" "$label_w"
