@@ -903,39 +903,6 @@ compact_command_display() {
   printf '%s' "$command"
 }
 
-result_detail_label() {
-  local label="$1"
-  local summary="${2:-}"
-
-  case "$label" in
-    auth)
-      printf 'live'
-      ;;
-    profile)
-      if [[ "$summary" == removed* ]]; then
-        printf 'gone'
-      else
-        printf 'saved'
-      fi
-      ;;
-    source)
-      printf 'from'
-      ;;
-    dest)
-      printf 'out'
-      ;;
-    backup)
-      printf 'undo'
-      ;;
-    active)
-      printf 'state'
-      ;;
-    *)
-      printf '%s' "$label"
-      ;;
-  esac
-}
-
 result_detail_value() {
   local label="$1"
   local value="$2"
@@ -972,22 +939,6 @@ result_detail_value() {
       printf '%s' "$value"
       ;;
   esac
-}
-
-result_compact_active_value() {
-  local label="$1"
-  local value="$2"
-  local value_w="$3"
-
-  if [[ "$label" == "active" && "$value" == "unsaved auth" && "$value_w" -lt 12 ]]; then
-    printf 'unsaved'
-  elif [[ "$label" == "active" && "$value" == "already active" && "$value_w" -lt 14 ]]; then
-    printf 'already'
-  elif [[ "$label" == "active" && "$value" == saved\ * && "$value_w" -lt 12 ]]; then
-    printf 'saved'
-  else
-    printf '%s' "$value"
-  fi
 }
 
 print_result_block() {
@@ -1029,8 +980,40 @@ print_result_block() {
     IFS=$'\t' read -r label value tone <<<"$row"
     [[ -n "$tone" ]] || tone="muted"
     value="$(result_detail_value "$label" "$value" "$value_w")"
-    value="$(result_compact_active_value "$label" "$value" "$value_w")"
-    display_label="$(result_detail_label "$label" "$summary")"
+    if [[ "$label" == "active" && "$value" == "unsaved auth" && "$value_w" -lt 12 ]]; then
+      value="unsaved"
+    elif [[ "$label" == "active" && "$value" == "already active" && "$value_w" -lt 14 ]]; then
+      value="already"
+    elif [[ "$label" == "active" && "$value" == saved\ * && "$value_w" -lt 12 ]]; then
+      value="saved"
+    fi
+    case "$label" in
+      auth)
+        display_label="live"
+        ;;
+      profile)
+        if [[ "$summary" == removed* ]]; then
+          display_label="gone"
+        else
+          display_label="saved"
+        fi
+        ;;
+      source)
+        display_label="from"
+        ;;
+      dest)
+        display_label="out"
+        ;;
+      backup)
+        display_label="undo"
+        ;;
+      active)
+        display_label="state"
+        ;;
+      *)
+        display_label="$label"
+        ;;
+    esac
     print_detail_line "$display_label" "$value" "$label_w" "$value_w" "$tone"
   done
 }
