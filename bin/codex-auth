@@ -281,6 +281,24 @@ codex_bin() {
   fi
 }
 
+canonical_codex_bin() {
+  local codex_cli="$1"
+  local target
+
+  target="$(sed -nE 's/^[[:space:]]*exec[[:space:]]+"?([^" ]+)"?[[:space:]]+"\$@".*$/\1/p' "$codex_cli" 2>/dev/null | head -n 1 || true)"
+  if [[ -n "$target" ]]; then
+    if [[ "$target" != /* ]]; then
+      target="$(cd "$(dirname "$codex_cli")" && realpath "$target" 2>/dev/null || printf '%s/%s\n' "$(pwd -P)" "$target")"
+    fi
+    if [[ -x "$target" ]]; then
+      printf '%s\n' "$target"
+      return 0
+    fi
+  fi
+
+  printf '%s\n' "$codex_cli"
+}
+
 codex_launcher_needs_node() {
   local codex_cli="$1"
   local first_line=""
@@ -5538,6 +5556,7 @@ cmd_patch_codex() {
   else
     stock_bin="$(codex_bin)" || die "codex command not found"
   fi
+  stock_bin="$(canonical_codex_bin "$stock_bin")"
   require_codex_launcher "$stock_bin"
   stock_version="$("$stock_bin" --version 2>/dev/null || true)"
   stock_version="${stock_version%%$'\n'*}"

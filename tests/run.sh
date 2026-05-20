@@ -157,6 +157,25 @@ test_shim_uses_matching_patched_codex() {
   assert_not_contains 'real:--yolo resume abc' "$log"
 }
 
+test_patch_codex_keys_forwarding_wrapper_to_target() {
+  local tmp home target wrapper target_key wrapper_key
+  tmp="$(mktemp -d)"
+  home="$tmp/home"
+  target="$tmp/target/codex"
+  wrapper="$tmp/bin/codex-real"
+  write_fake_codex "$target"
+  mkdir -p "$(dirname "$wrapper")"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    "exec \"$target\" \"\$@\"" > "$wrapper"
+  chmod 0755 "$wrapper"
+
+  target_key="$(CODEX_HOME="$home" CODEX_AUTH_STOCK_CODEX_BIN="$target" "$REPO_ROOT/bin/codex-auth" patch-codex --print-key)"
+  wrapper_key="$(CODEX_HOME="$home" CODEX_AUTH_STOCK_CODEX_BIN="$wrapper" "$REPO_ROOT/bin/codex-auth" patch-codex --print-key)"
+
+  [[ "$wrapper_key" == "$target_key" ]] || fail "forwarding wrapper produced a different patch key"
+}
+
 test_install_promotes_existing_codex_to_real() {
   local tmp prefix log
   tmp="$(mktemp -d)"
@@ -351,6 +370,7 @@ main() {
     test_shim_bypasses_auto_for_app_server \
     test_shim_honors_auto_bypass \
     test_shim_uses_matching_patched_codex \
+    test_patch_codex_keys_forwarding_wrapper_to_target \
     test_install_promotes_existing_codex_to_real \
     test_install_recovers_real_from_old_backup \
     test_install_recovers_real_from_path \
