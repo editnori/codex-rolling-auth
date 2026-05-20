@@ -3863,27 +3863,17 @@ selector_palette_primary_width() {
   printf '%s' "$primary_w"
 }
 
-width_floor_value() {
-  local value="$1"
-  local default="$2"
-  shift 2
-  local row floor output
+selector_palette_status_gap() {
+  local total_w="$1"
+  local row
 
-  for row in "$@"; do
-    floor="${row%%:*}"
-    output="${row#*:}"
-    if (( value >= floor )); then
-      printf '%s' "$output"
+  for row in 108:8 88:6 68:4 58:3 48:2; do
+    if (( total_w >= ${row%%:*} )); then
+      printf '%s' "${row#*:}"
       return 0
     fi
   done
-  printf '%s' "$default"
-}
-
-selector_palette_status_gap() {
-  local total_w="$1"
-
-  width_floor_value "$total_w" 1 108:8 88:6 68:4 58:3 48:2
+  printf '1'
 }
 
 selector_palette_metric_gap() {
@@ -3913,7 +3903,15 @@ selector_palette_table_widths() {
     short_w=4
     status_w=0
   else
-    metric_w="$(width_floor_value "$total_w" 5 108:23 88:19 68:13)"
+    if (( total_w >= 108 )); then
+      metric_w=23
+    elif (( total_w >= 88 )); then
+      metric_w=19
+    elif (( total_w >= 68 )); then
+      metric_w=13
+    else
+      metric_w=5
+    fi
     week_w="$metric_w"
     short_w=$(( total_w < 50 ? 3 : metric_w ))
     status_w=$((total_w - primary_w - 1 - week_w - metric_gap - short_w - status_gap))
