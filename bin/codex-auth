@@ -2392,26 +2392,6 @@ usage_tight_width_fallback() {
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$mode" "$reset_w" "$label_w" "$reset_prefix_w" "$cell_overhead" "$max_profile_w"
 }
 
-usage_initial_metric_widths() {
-  local cols="$1"
-  local role_w="$2"
-  local profile_w="$3"
-  local status_min="$4"
-  local gap_w="$5"
-  local cell_overhead="$6"
-  local min_bar_w="$7"
-  local max_bar_w="$8"
-  local available cell_w bar_width status_w
-
-  available=$(( cols - role_w - profile_w - status_min - gap_w ))
-  cell_w=$(( available / 2 ))
-  bar_width=$(( cell_w - cell_overhead ))
-  bar_width="$(clamp_int_between "$bar_width" "$min_bar_w" "$max_bar_w")"
-  cell_w=$(( bar_width + cell_overhead ))
-  status_w=$(( cols - role_w - profile_w - cell_w - cell_w - gap_w ))
-  printf '%s\t%s\t%s\n' "$cell_w" "$bar_width" "$status_w"
-}
-
 usage_fit_status_widths() {
   local -n profile_w_ref="$1"
   local -n cell_w_ref="$2"
@@ -2490,7 +2470,12 @@ usage_render_widths() {
   fi
 
   profile_w="$(clamp_int_between "$wanted_profile_w" "$profile_min" "$max_profile_w")"
-  IFS=$'\t' read -r cell_w bar_width status_w <<<"$(usage_initial_metric_widths "$cols" "$role_w" "$profile_w" "$status_min" "$gap_w" "$cell_overhead" "$min_bar_w" "$max_bar_w")"
+  available=$(( cols - role_w - profile_w - status_min - gap_w ))
+  cell_w=$(( available / 2 ))
+  bar_width=$(( cell_w - cell_overhead ))
+  bar_width="$(clamp_int_between "$bar_width" "$min_bar_w" "$max_bar_w")"
+  cell_w=$(( bar_width + cell_overhead ))
+  status_w=$(( cols - role_w - profile_w - cell_w - cell_w - gap_w ))
   usage_fit_status_widths profile_w cell_w bar_width status_w "$cols" "$role_w" "$profile_min" "$status_min" "$gap_w" "$cell_overhead" "$min_bar_w"
   if [[ "$show_status" != "1" ]]; then
     status_w=0
