@@ -7971,69 +7971,6 @@ codex_run_cleanup() {
   fi
 }
 
-codex_run_execute_attempt() {
-  local codex_cli="$1"
-  local log_enabled="$2"
-  local -n run_args_ref="$3"
-  local -n status_ref="$4"
-  local -n log_file_ref="$5"
-  local -n run_file_ref="$6"
-  local -n watch_pid_ref="$7"
-  local -n monitor_pid_ref="$8"
-  local -n target_pid_ref="$9"
-  local launcher_arg
-
-  log_file_ref=""
-  run_file_ref=""
-  monitor_pid_ref=""
-  if [[ "$log_enabled" != "0" ]]; then
-    log_file_ref="$(mktemp "$CODEX_HOME/.tmp/codex-run.XXXXXX.log")"
-  fi
-
-  status_ref=0
-  if [[ "$log_enabled" != "0" && -n "$log_file_ref" && -t 0 && -t 1 && -r /dev/tty ]] && command -v script >/dev/null 2>&1; then
-    run_file_ref="$(mktemp "$CODEX_HOME/.tmp/codex-run.XXXXXX.sh")"
-    {
-      printf '#!/usr/bin/env bash\n'
-      printf 'set -euo pipefail\n'
-      printf 'export CODEX_AUTH_RUNNER=1\n'
-      printf 'exec %q' "$codex_cli"
-      for launcher_arg in "${run_args_ref[@]}"; do
-        printf ' %q' "$launcher_arg"
-      done
-      printf '\n'
-    } > "$run_file_ref"
-    chmod 700 "$run_file_ref"
-    set +e
-    if [[ "${CODEX_AUTH_ROLL_LIVE_MONITOR:-1}" != "0" && -n "$log_file_ref" ]]; then
-      codex_run_limit_monitor_loop "$log_file_ref" "" "$$" "$run_file_ref" &
-      monitor_pid_ref=$!
-    fi
-    script -qefc "$run_file_ref" "$log_file_ref"
-    status_ref=$?
-  elif [[ "$log_enabled" != "0" && -n "$log_file_ref" && ! -t 1 ]]; then
-    set +e
-    CODEX_AUTH_RUNNER=1 "$codex_cli" "${run_args_ref[@]}" > >(tee "$log_file_ref") 2> >(tee -a "$log_file_ref" >&2) &
-    target_pid_ref=$!
-    if [[ "${CODEX_AUTH_ROLL_LIVE_MONITOR:-1}" != "0" && -n "$log_file_ref" ]]; then
-      codex_run_limit_monitor_loop "$log_file_ref" "$target_pid_ref" &
-      monitor_pid_ref=$!
-    fi
-    wait "$target_pid_ref"
-    status_ref=$?
-  else
-    set +e
-    CODEX_AUTH_RUNNER=1 "$codex_cli" "${run_args_ref[@]}"
-    status_ref=$?
-    [[ -n "$log_file_ref" ]] && : > "$log_file_ref"
-  fi
-  set -e
-  codex_run_cleanup "$watch_pid_ref" "$monitor_pid_ref" "$run_file_ref" "" 1
-  watch_pid_ref=""
-  monitor_pid_ref=""
-  run_file_ref=""
-}
-
 cmd_run() {
   ensure_dirs
 
@@ -8045,7 +7982,7 @@ cmd_run() {
   local log_enabled="${CODEX_AUTH_ROLL_LOG:-1}"
   local args=()
   local auto_args=()
-  local codex_cli attempt status log_file run_file watch_pid monitor_pid target_pid
+  local codex_cli attempt status log_file run_file watch_pid monitor_pid target_pid launcher_arg
 
   [[ "$max_attempts" =~ ^[1-9][0-9]*$ ]] || max_attempts=5
   [[ -z "$auto_ttl" || "$auto_ttl" =~ ^[0-9]+$ ]] || auto_ttl=""
@@ -8113,7 +8050,55 @@ cmd_run() {
       watch_pid=$!
     fi
 
-    codex_run_execute_attempt "$codex_cli" "$log_enabled" run_args status log_file run_file watch_pid monitor_pid target_pid
+    log_file=""
+    run_file=""
+    monitor_pid=""
+    if [[ "$log_enabled" != "0" ]]; then
+      log_file="$(mktemp "$CODEX_HOME/.tmp/codex-run.XXXXXX.log")"
+    fi
+
+    status=0
+    if [[ "$log_enabled" != "0" && -n "$log_file" && -t 0 && -t 1 && -r /dev/tty ]] && command -v script >/dev/null 2>&1; then
+      run_file="$(mktemp "$CODEX_HOME/.tmp/codex-run.XXXXXX.sh")"
+      {
+        printf '#!/usr/bin/env bash\n'
+        printf 'set -euo pipefail\n'
+        printf 'export CODEX_AUTH_RUNNER=1\n'
+        printf 'exec %q' "$codex_cli"
+        for launcher_arg in "${run_args[@]}"; do
+          printf ' %q' "$launcher_arg"
+        done
+        printf '\n'
+      } > "$run_file"
+      chmod 700 "$run_file"
+      set +e
+      if [[ "${CODEX_AUTH_ROLL_LIVE_MONITOR:-1}" != "0" && -n "$log_file" ]]; then
+        codex_run_limit_monitor_loop "$log_file" "" "$$" "$run_file" &
+        monitor_pid=$!
+      fi
+      script -qefc "$run_file" "$log_file"
+      status=$?
+    elif [[ "$log_enabled" != "0" && -n "$log_file" && ! -t 1 ]]; then
+      set +e
+      CODEX_AUTH_RUNNER=1 "$codex_cli" "${run_args[@]}" > >(tee "$log_file") 2> >(tee -a "$log_file" >&2) &
+      target_pid=$!
+      if [[ "${CODEX_AUTH_ROLL_LIVE_MONITOR:-1}" != "0" && -n "$log_file" ]]; then
+        codex_run_limit_monitor_loop "$log_file" "$target_pid" &
+        monitor_pid=$!
+      fi
+      wait "$target_pid"
+      status=$?
+    else
+      set +e
+      CODEX_AUTH_RUNNER=1 "$codex_cli" "${run_args[@]}"
+      status=$?
+      [[ -n "$log_file" ]] && : > "$log_file"
+    fi
+    set -e
+    codex_run_cleanup "$watch_pid" "$monitor_pid" "$run_file" "" 1
+    watch_pid=""
+    monitor_pid=""
+    run_file=""
 
     if (( status != 0 && attempt < max_attempts )) && [[ -n "$log_file" ]] && codex_run_limit_detected "$log_file"; then
       local resume_args=()
