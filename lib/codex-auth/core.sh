@@ -34,7 +34,11 @@ compact_display_path() {
 }
 
 die() {
-  print_error "$*"
+  if declare -F print_error >/dev/null 2>&1; then
+    print_error "$*"
+  else
+    printf '%s\n' "$*" >&2
+  fi
   exit 1
 }
 
@@ -297,5 +301,4 @@ auth_mode_display_label() {
       ;;
   esac
 }
-
 

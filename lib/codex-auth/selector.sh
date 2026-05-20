@@ -380,40 +380,6 @@ selector_action_role() {
   fi
 }
 
-usage_metadata_summary_line() {
-  local render_w="$1"
-  shift
-  local summary_w=$((render_w * 2))
-  local line sep record _valid _weekly_used _short_used _mark _profile _plan _weekly _short _status _short_label _weekly_reset _short_reset cache_age
-  local old_color="${USAGE_COLOR_ENABLED:-0}"
-  local cache_age_max=-1 cache_age_label
-
-  if (( render_w < 40 )); then
-    summary_w="$render_w"
-  else
-    summary_w="$(clamp_int_between "$summary_w" 64 132)"
-  fi
-  USAGE_COLOR_ENABLED=0
-  line="$(print_usage_summary_line "$summary_w" "$@")"
-  USAGE_COLOR_ENABLED="$old_color"
-  sep="$(usage_separator)"
-
-  if [[ "$line" != cache\ * && "$line" != *"${sep}cache "* ]]; then
-    for record in "$@"; do
-      IFS=$'\t' read -r _valid _weekly_used _short_used _mark _profile _plan _weekly _short _status _short_label _weekly_reset _short_reset cache_age <<<"$record"
-      if [[ "$cache_age" =~ ^[0-9]+$ ]] && (( cache_age > cache_age_max )); then
-        cache_age_max="$cache_age"
-      fi
-    done
-    if (( cache_age_max >= 0 )); then
-      cache_age_label="$(format_cache_age "$cache_age_max")"
-      [[ -n "$cache_age_label" ]] && line+="${sep}cache $cache_age_label"
-    fi
-  fi
-
-  printf '%s' "$line"
-}
-
 selector_header_meta_line() {
   local label="$1"
   local text="$2"
@@ -481,17 +447,6 @@ selector_header_meta_line() {
   printf '  '
   fit_text "$value" "$value_w"
   printf '\n'
-}
-
-usage_summary_split_once() {
-  local text="$1"
-  local sep="$2"
-
-  if [[ "$text" == *"$sep"* ]]; then
-    printf '%s\t%s\n' "${text%%"$sep"*}" "${text#*"$sep"}"
-  else
-    printf '%s\t\n' "$text"
-  fi
 }
 
 usage_summary_parts() {
@@ -593,100 +548,6 @@ selector_palette_controls_line() {
     usage_tone_reset
   else
     printf '%s   %s' "$left" "$right"
-  fi
-}
-
-print_palette_title_line() {
-  local label="$1"
-  local right="$2"
-  local total_w="$3"
-  local sep left compact_label compact_left gap
-
-  sep="$(usage_separator)"
-  left="Auth$sep$label"
-  if (( ${#left} > total_w || ( ${#right} > 0 && ${#left} + ${#right} + 2 > total_w ) )); then
-    case "$label" in
-      Codex\ profiles|Saved\ profiles) compact_label="Profiles" ;;
-      Active\ profile) compact_label="Active" ;;
-      Removed\ profile) compact_label="Removed" ;;
-      *) compact_label="$label" ;;
-    esac
-    compact_left="Auth$sep$compact_label"
-    if (( ${#compact_left} < ${#left} )); then
-      left="$compact_left"
-    fi
-  fi
-  if (( ${#right} > 0 && ${#left} + ${#right} + 2 <= total_w )); then
-    usage_tone_color accent
-    printf '%s' "$left"
-    usage_tone_reset
-    gap=$((total_w - ${#left} - ${#right}))
-    printf '%*s' "$gap" ''
-    usage_tone_color muted
-    printf '%s' "$right"
-    usage_tone_reset
-    printf '\n'
-    return 0
-  fi
-
-  usage_tone_color accent
-  fit_text_rtrim "$left" "$total_w"
-  usage_tone_reset
-  printf '\n'
-}
-
-print_flat_context_line() {
-  local summary="$1"
-  local total_w="$2"
-  local text sep token parts=()
-
-  sep="$(usage_separator)"
-  while [[ -n "$summary" ]]; do
-    IFS=$'\t' read -r token summary <<<"$(usage_summary_split_once "$summary" "$sep")"
-    token="${token//capped /cap }"
-    [[ "$token" == cache\ * ]] && continue
-    [[ -n "$token" ]] && parts+=("$token")
-  done
-
-  if (( ${#parts[@]} == 0 )); then
-    text=""
-  else
-    text="${parts[0]}"
-    local i
-    for ((i = 1; i < ${#parts[@]}; i++)); do
-      text+="   ${parts[$i]}"
-    done
-  fi
-  print_toned_fit_rtrim "$text" "$total_w" muted
-  printf '\n'
-}
-
-print_palette_summary_header() {
-  local label="$1"
-  local summary="$2"
-  local total_w="$3"
-  local mode="${4:-flat}"
-  local gap="${5:-1}"
-  local right="" sep token rest
-
-  sep="$(usage_separator)"
-  rest="$summary"
-  while [[ -n "$rest" ]]; do
-    IFS=$'\t' read -r token rest <<<"$(usage_summary_split_once "$rest" "$sep")"
-    token="${token//capped /cap }"
-    if [[ "$token" == cache\ * ]]; then
-      right="$token"
-      break
-    fi
-  done
-  print_palette_title_line "$label" "$right" "$total_w"
-  if [[ "$mode" == "usage" ]]; then
-    :
-  else
-    print_flat_context_line "$summary" "$total_w"
-  fi
-  if (( gap )); then
-    printf '\n'
   fi
 }
 

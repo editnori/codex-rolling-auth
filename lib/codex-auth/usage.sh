@@ -90,6 +90,40 @@ format_cache_age() {
   fi
 }
 
+usage_metadata_summary_line() {
+  local render_w="$1"
+  shift
+  local summary_w=$((render_w * 2))
+  local line sep record _valid _weekly_used _short_used _mark _profile _plan _weekly _short _status _short_label _weekly_reset _short_reset cache_age
+  local old_color="${USAGE_COLOR_ENABLED:-0}"
+  local cache_age_max=-1 cache_age_label
+
+  if (( render_w < 40 )); then
+    summary_w="$render_w"
+  else
+    summary_w="$(clamp_int_between "$summary_w" 64 132)"
+  fi
+  USAGE_COLOR_ENABLED=0
+  line="$(print_usage_summary_line "$summary_w" "$@")"
+  USAGE_COLOR_ENABLED="$old_color"
+  sep="$(usage_separator)"
+
+  if [[ "$line" != cache\ * && "$line" != *"${sep}cache "* ]]; then
+    for record in "$@"; do
+      IFS=$'\t' read -r _valid _weekly_used _short_used _mark _profile _plan _weekly _short _status _short_label _weekly_reset _short_reset cache_age <<<"$record"
+      if [[ "$cache_age" =~ ^[0-9]+$ ]] && (( cache_age > cache_age_max )); then
+        cache_age_max="$cache_age"
+      fi
+    done
+    if (( cache_age_max >= 0 )); then
+      cache_age_label="$(format_cache_age "$cache_age_max")"
+      [[ -n "$cache_age_label" ]] && line+="${sep}cache $cache_age_label"
+    fi
+  fi
+
+  printf '%s' "$line"
+}
+
 usage_payload_still_blocked() {
   local payload="$1"
   local now
@@ -964,6 +998,7 @@ cmd_usage() {
         return 0
         ;;
       0:1)
+        source_codex_auth_libs selector.sh
         arrow_action_menu "$default_profile" "${SORTED_USAGE_RECORDS[@]}"
         case "$MENU_ACTION" in
           login)
@@ -1170,6 +1205,3 @@ cmd_auto() {
     nohup env CODEX_AUTH_REFRESH_LOCK=try CODEX_AUTH_NO_BACKGROUND=1 CODEX_AUTH_REFRESH_BLOCKED=1 CODEX_AUTH_REFRESH_FALLBACK_CACHE=1 CODEX_AUTH_REFRESH_JOBS="$background_jobs" "$script" refresh --quiet --fast "${stale_names[@]}" >/dev/null 2>&1 &
   fi
 }
-
-PATCH_CODEX_PATCH_VERSION=1
-

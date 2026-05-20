@@ -536,4 +536,106 @@ print_status_note() {
   printf '\n'
 }
 
+usage_summary_split_once() {
+  local text="$1"
+  local sep="$2"
+
+  if [[ "$text" == *"$sep"* ]]; then
+    printf '%s\t%s\n' "${text%%"$sep"*}" "${text#*"$sep"}"
+  else
+    printf '%s\t\n' "$text"
+  fi
+}
+
+print_palette_title_line() {
+  local label="$1"
+  local right="$2"
+  local total_w="$3"
+  local sep left compact_label compact_left gap
+
+  sep="$(usage_separator)"
+  left="Auth$sep$label"
+  if (( ${#left} > total_w || ( ${#right} > 0 && ${#left} + ${#right} + 2 > total_w ) )); then
+    case "$label" in
+      Codex\ profiles|Saved\ profiles) compact_label="Profiles" ;;
+      Active\ profile) compact_label="Active" ;;
+      Removed\ profile) compact_label="Removed" ;;
+      *) compact_label="$label" ;;
+    esac
+    compact_left="Auth$sep$compact_label"
+    if (( ${#compact_left} < ${#left} )); then
+      left="$compact_left"
+    fi
+  fi
+  if (( ${#right} > 0 && ${#left} + ${#right} + 2 <= total_w )); then
+    usage_tone_color accent
+    printf '%s' "$left"
+    usage_tone_reset
+    gap=$((total_w - ${#left} - ${#right}))
+    printf '%*s' "$gap" ''
+    usage_tone_color muted
+    printf '%s' "$right"
+    usage_tone_reset
+    printf '\n'
+    return 0
+  fi
+
+  usage_tone_color accent
+  fit_text_rtrim "$left" "$total_w"
+  usage_tone_reset
+  printf '\n'
+}
+
+print_flat_context_line() {
+  local summary="$1"
+  local total_w="$2"
+  local text sep token parts=()
+
+  sep="$(usage_separator)"
+  while [[ -n "$summary" ]]; do
+    IFS=$'\t' read -r token summary <<<"$(usage_summary_split_once "$summary" "$sep")"
+    token="${token//capped /cap }"
+    [[ "$token" == cache\ * ]] && continue
+    [[ -n "$token" ]] && parts+=("$token")
+  done
+
+  if (( ${#parts[@]} == 0 )); then
+    text=""
+  else
+    text="${parts[0]}"
+    local i
+    for ((i = 1; i < ${#parts[@]}; i++)); do
+      text+="   ${parts[$i]}"
+    done
+  fi
+  print_toned_fit_rtrim "$text" "$total_w" muted
+  printf '\n'
+}
+
+print_palette_summary_header() {
+  local label="$1"
+  local summary="$2"
+  local total_w="$3"
+  local mode="${4:-flat}"
+  local gap="${5:-1}"
+  local right="" sep token rest
+
+  sep="$(usage_separator)"
+  rest="$summary"
+  while [[ -n "$rest" ]]; do
+    IFS=$'\t' read -r token rest <<<"$(usage_summary_split_once "$rest" "$sep")"
+    token="${token//capped /cap }"
+    if [[ "$token" == cache\ * ]]; then
+      right="$token"
+      break
+    fi
+  done
+  print_palette_title_line "$label" "$right" "$total_w"
+  if [[ "$mode" != "usage" ]]; then
+    print_flat_context_line "$summary" "$total_w"
+  fi
+  if (( gap )); then
+    printf '\n'
+  fi
+}
 

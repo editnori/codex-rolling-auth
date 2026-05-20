@@ -66,11 +66,11 @@ CODEX_AUTH_LIB_DIR="${CODEX_AUTH_LIB_DIR:-$CODEX_AUTH_SCRIPT_DIR/../lib/codex-au
 
 CODEX_AUTH_BASE_LIB_FILES=(
   core.sh
-  render.sh
-  selector.sh
-  output.sh
-  profiles.sh
 )
+
+CODEX_AUTH_UI_LIB_FILES=(render.sh output.sh)
+CODEX_AUTH_PROFILE_LIB_FILES=(render.sh output.sh profiles.sh)
+CODEX_AUTH_USAGE_LIB_FILES=(render.sh output.sh profiles.sh usage.sh)
 
 source_codex_auth_libs() {
   local lib_file lib_path
@@ -91,25 +91,25 @@ main() {
 
   source_codex_auth_libs "${CODEX_AUTH_BASE_LIB_FILES[@]}"
   case "$command" in
-    add) cmd_add "$@" ;;
-    usage|limits) source_codex_auth_libs usage.sh; cmd_usage "$@" ;;
-    list|ls) cmd_list "$@" ;;
-    current|status) cmd_current "$@" ;;
-    save) require_arg_count_between "$#" 1 2 "usage: codex-auth save <name> [file]"; cmd_save "$@" ;;
-    import) require_arg_count_between "$#" 2 2 "usage: codex-auth import <name> <file>"; cmd_save "$1" "$2" "imported $1" ;;
-    use|switch) require_arg_count_between "$#" 1 1 "usage: codex-auth use <name>"; cmd_use "$1" ;;
-    login) require_arg_count_between "$#" 1 999999 "usage: codex-auth login <name> [codex login args...]"; cmd_login "$@" ;;
-    auto) source_codex_auth_libs usage.sh; cmd_auto "$@" ;;
-    patch-codex) source_codex_auth_libs patch.sh; cmd_patch_codex "$@" ;;
-    run|wrap) source_codex_auth_libs usage.sh run.sh; cmd_run "$@" ;;
-    recover) source_codex_auth_libs usage.sh run.sh; cmd_recover "$@" ;;
-    refresh) source_codex_auth_libs usage.sh; cmd_refresh "$@" ;;
+    add) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; cmd_add "$@" ;;
+    usage|limits) source_codex_auth_libs "${CODEX_AUTH_USAGE_LIB_FILES[@]}"; cmd_usage "$@" ;;
+    list|ls) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; cmd_list "$@" ;;
+    current|status) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; cmd_current "$@" ;;
+    save) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; require_arg_count_between "$#" 1 2 "usage: codex-auth save <name> [file]"; cmd_save "$@" ;;
+    import) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; require_arg_count_between "$#" 2 2 "usage: codex-auth import <name> <file>"; cmd_save "$1" "$2" "imported $1" ;;
+    use|switch) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; require_arg_count_between "$#" 1 1 "usage: codex-auth use <name>"; cmd_use "$1" ;;
+    login) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; require_arg_count_between "$#" 1 999999 "usage: codex-auth login <name> [codex login args...]"; cmd_login "$@" ;;
+    auto) source_codex_auth_libs "${CODEX_AUTH_USAGE_LIB_FILES[@]}"; cmd_auto "$@" ;;
+    patch-codex) source_codex_auth_libs "${CODEX_AUTH_UI_LIB_FILES[@]}" patch.sh; cmd_patch_codex "$@" ;;
+    run|wrap) source_codex_auth_libs "${CODEX_AUTH_USAGE_LIB_FILES[@]}" run.sh; cmd_run "$@" ;;
+    recover) source_codex_auth_libs "${CODEX_AUTH_USAGE_LIB_FILES[@]}" run.sh; cmd_recover "$@" ;;
+    refresh) source_codex_auth_libs "${CODEX_AUTH_USAGE_LIB_FILES[@]}"; cmd_refresh "$@" ;;
     doctor) source_codex_auth_libs doctor.sh; cmd_doctor "$@" ;;
-    export) require_arg_count_between "$#" 2 2 "usage: codex-auth export <name> <file>"; cmd_export "$@" ;;
-    remove|rm) require_arg_count_between "$#" 1 2 "usage: codex-auth remove <name> --yes"; cmd_remove "$@" ;;
-    paths) cmd_paths ;;
-    -h|--help|help|'') source_codex_auth_libs help.sh; usage ;;
-    *) die "unknown command: $command. Use: codex-auth help" ;;
+    export) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; require_arg_count_between "$#" 2 2 "usage: codex-auth export <name> <file>"; cmd_export "$@" ;;
+    remove|rm) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; require_arg_count_between "$#" 1 2 "usage: codex-auth remove <name> --yes"; cmd_remove "$@" ;;
+    paths) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; cmd_paths ;;
+    -h|--help|help|'') source_codex_auth_libs "${CODEX_AUTH_UI_LIB_FILES[@]}" help.sh; usage ;;
+    *) source_codex_auth_libs "${CODEX_AUTH_UI_LIB_FILES[@]}"; die "unknown command: $command. Use: codex-auth help" ;;
   esac
 }
 
