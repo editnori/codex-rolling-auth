@@ -3622,32 +3622,10 @@ selector_palette_profile_label() {
   fi
 }
 
-selector_palette_status_gap() {
-  local total_w="$1"
-  local row
-
-  for row in 108:8 88:6 68:4 58:3 48:2; do
-    if (( total_w >= ${row%%:*} )); then
-      printf '%s' "${row#*:}"
-      return 0
-    fi
-  done
-  printf '1'
-}
-
-selector_palette_metric_gap() {
-  local total_w="$1"
-
-  if (( total_w >= 48 )); then
-    printf '2'
-  else
-    printf '1'
-  fi
-}
-
 selector_palette_table_widths() {
   local total_w="$1"
-  local primary_w week_w short_w status_w metric_w status_gap metric_gap status_max=13
+  local primary_w week_w short_w status_w metric_w status_gap=1 metric_gap=1 status_max=13
+  local row
 
   primary_w=16
   if (( total_w < 20 )); then
@@ -3665,8 +3643,13 @@ selector_palette_table_widths() {
   elif (( total_w >= 68 )); then
     primary_w=22
   fi
-  status_gap="$(selector_palette_status_gap "$total_w")"
-  metric_gap="$(selector_palette_metric_gap "$total_w")"
+  for row in 108:8 88:6 68:4 58:3 48:2; do
+    if (( total_w >= ${row%%:*} )); then
+      status_gap="${row#*:}"
+      break
+    fi
+  done
+  (( total_w >= 48 )) && metric_gap=2
   if (( total_w < 58 )); then
     status_max=12
   fi
@@ -3698,7 +3681,7 @@ selector_palette_table_widths() {
     status_w=$(( status_w < 2 ? 2 : status_w > status_max ? status_max : status_w ))
   fi
 
-  printf '%s\t%s\t%s\t%s\n' "$primary_w" "$week_w" "$short_w" "$status_w"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$primary_w" "$week_w" "$short_w" "$status_w" "$status_gap" "$metric_gap"
 }
 
 selector_palette_fzf_colors() {
@@ -3803,9 +3786,7 @@ selector_palette_table_header() {
   local primary_w week_w short_w status_w short_label status_label status_gap metric_gap
   local action_w=5 primary_gap=2 primary_profile_w profile_label
 
-  IFS=$'\t' read -r primary_w week_w short_w status_w <<<"$(selector_palette_table_widths "$total_w")"
-  status_gap="$(selector_palette_status_gap "$total_w")"
-  metric_gap="$(selector_palette_metric_gap "$total_w")"
+  IFS=$'\t' read -r primary_w week_w short_w status_w status_gap metric_gap <<<"$(selector_palette_table_widths "$total_w")"
   short_label="${USAGE_SHORT_LABEL:-5h}"
   [[ -n "$short_label" && "$short_label" != "short" ]] || short_label="5h"
   short_label="${short_label}%"
@@ -3851,9 +3832,7 @@ print_selector_palette_table_row() {
   local total_w="$7"
   local primary_w week_w short_w status_w compact_status status_gap metric_gap
 
-  IFS=$'\t' read -r primary_w week_w short_w status_w <<<"$(selector_palette_table_widths "$total_w")"
-  status_gap="$(selector_palette_status_gap "$total_w")"
-  metric_gap="$(selector_palette_metric_gap "$total_w")"
+  IFS=$'\t' read -r primary_w week_w short_w status_w status_gap metric_gap <<<"$(selector_palette_table_widths "$total_w")"
   print_selector_palette_primary "$primary" "$primary_w"
   printf ' '
 
@@ -4696,9 +4675,7 @@ selector_fzf_apply_frame() {
     fzf_pointer_ref=' '
     fzf_prompt_ref='filter '
     terminal_w="$(terminal_width)"
-    IFS=$'\t' read -r primary_w week_w short_w status_w <<<"$(selector_palette_table_widths "$total_w")"
-    status_gap="$(selector_palette_status_gap "$total_w")"
-    metric_gap="$(selector_palette_metric_gap "$total_w")"
+    IFS=$'\t' read -r primary_w week_w short_w status_w status_gap metric_gap <<<"$(selector_palette_table_widths "$total_w")"
     if (( week_w == 0 )); then
       palette_effective_w=$((primary_w + 1 + short_w))
     else
