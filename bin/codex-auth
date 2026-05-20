@@ -6023,7 +6023,7 @@ cmd_doctor() {
   local -A legacy_pid=()
   local -A sidecar_by_parent=()
   local -A sidecar_args_by_pid=()
-  local -a rows=()
+  local -a rows=() sidecar_pids=()
 
   while read -r pid ppid pgid sid tty stat etime args; do
     [[ "$pid" =~ ^[0-9]+$ ]] || continue
@@ -6065,7 +6065,7 @@ cmd_doctor() {
       [[ -n "${legacy_pid["$pid"]:-}" ]] || continue
       sidecars="${sidecar_by_parent["$pid"]:-}"
       if [[ -n "$sidecars" ]]; then
-        sidecar_total="$(wc -w <<<"$sidecars" | tr -d ' ')"
+        read -r -a sidecar_pids <<<"$sidecars"; sidecar_total="${#sidecar_pids[@]}"
       else
         sidecar_total=0
       fi
