@@ -8191,21 +8191,6 @@ codex_run_resume_flag_option() {
   esac
 }
 
-codex_run_append_resume_target() {
-  if [[ "${1:-}" == "resume" ]]; then
-    shift
-    if [[ "${1:-}" == "--last" ]]; then
-      CODEX_RUN_RESUME_ARGS+=(resume --last)
-    elif [[ -n "${1:-}" && "${1:-}" != -* ]]; then
-      CODEX_RUN_RESUME_ARGS+=(resume "$1")
-    else
-      CODEX_RUN_RESUME_ARGS+=(resume --last)
-    fi
-  else
-    CODEX_RUN_RESUME_ARGS+=(resume --last)
-  fi
-}
-
 codex_run_make_resume_args() {
   CODEX_RUN_RESUME_ARGS=()
 
@@ -8229,7 +8214,18 @@ codex_run_make_resume_args() {
     fi
   done
 
-  codex_run_append_resume_target "$@"
+  if [[ "${1:-}" == "resume" ]]; then
+    shift
+    if [[ "${1:-}" == "--last" ]]; then
+      CODEX_RUN_RESUME_ARGS+=(resume --last)
+    elif [[ -n "${1:-}" && "${1:-}" != -* ]]; then
+      CODEX_RUN_RESUME_ARGS+=(resume "$1")
+    else
+      CODEX_RUN_RESUME_ARGS+=(resume --last)
+    fi
+  else
+    CODEX_RUN_RESUME_ARGS+=(resume --last)
+  fi
 }
 
 codex_run_write_launcher() {
@@ -8291,14 +8287,6 @@ codex_run_start_watch_if_enabled() {
     codex_run_watch_loop "$auto_ttl" &
     CODEX_RUN_WATCH_PID=$!
   fi
-}
-
-codex_run_stop_watch() {
-  local watch_pid="${1:-}"
-
-  [[ "$watch_pid" =~ ^[0-9]+$ ]] || return 0
-  kill "$watch_pid" 2>/dev/null || true
-  wait "$watch_pid" 2>/dev/null || true
 }
 
 codex_run_script_child_matches() {
@@ -8400,14 +8388,6 @@ codex_run_start_limit_monitor() {
   CODEX_RUN_LIMIT_MONITOR_PID=$!
 }
 
-codex_run_stop_limit_monitor() {
-  local monitor_pid="${1:-}"
-
-  [[ "$monitor_pid" =~ ^[0-9]+$ ]] || return 0
-  kill "$monitor_pid" 2>/dev/null || true
-  wait "$monitor_pid" 2>/dev/null || true
-}
-
 codex_run_cleanup() {
   local watch_pid="${1:-}"
   local monitor_pid="${2:-}"
@@ -8415,8 +8395,14 @@ codex_run_cleanup() {
   local log_file="${4:-}"
   local keep_log="${5:-0}"
 
-  codex_run_stop_limit_monitor "$monitor_pid"
-  codex_run_stop_watch "$watch_pid"
+  if [[ "$monitor_pid" =~ ^[0-9]+$ ]]; then
+    kill "$monitor_pid" 2>/dev/null || true
+    wait "$monitor_pid" 2>/dev/null || true
+  fi
+  if [[ "$watch_pid" =~ ^[0-9]+$ ]]; then
+    kill "$watch_pid" 2>/dev/null || true
+    wait "$watch_pid" 2>/dev/null || true
+  fi
   [[ -n "$run_file" ]] && rm -f "$run_file" 2>/dev/null || true
   if [[ "$keep_log" != "1" && -n "$log_file" ]]; then
     rm -f "$log_file" 2>/dev/null || true
@@ -8458,14 +8444,6 @@ parse_run_args() {
   done
 }
 
-codex_run_can_use_tty_log() {
-  [[ "$1" != "0" && -n "$2" && -t 0 && -t 1 && -r /dev/tty ]] && command -v script >/dev/null 2>&1
-}
-
-codex_run_can_use_pipe_log() {
-  [[ "$1" != "0" && -n "$2" && ! -t 1 ]]
-}
-
 codex_run_execute_attempt() {
   local codex_cli="$1"
   local log_enabled="$2"
@@ -8485,7 +8463,7 @@ codex_run_execute_attempt() {
   fi
 
   status_ref=0
-  if codex_run_can_use_tty_log "$log_enabled" "$log_file_ref"; then
+  if [[ "$log_enabled" != "0" && -n "$log_file_ref" && -t 0 && -t 1 && -r /dev/tty ]] && command -v script >/dev/null 2>&1; then
     run_file_ref="$(mktemp "$CODEX_HOME/.tmp/codex-run.XXXXXX.sh")"
     codex_run_write_launcher "$run_file_ref" "$codex_cli" "${run_args_ref[@]}"
     set +e
@@ -8493,7 +8471,7 @@ codex_run_execute_attempt() {
     monitor_pid_ref="$CODEX_RUN_LIMIT_MONITOR_PID"
     script -qefc "$run_file_ref" "$log_file_ref"
     status_ref=$?
-  elif codex_run_can_use_pipe_log "$log_enabled" "$log_file_ref"; then
+  elif [[ "$log_enabled" != "0" && -n "$log_file_ref" && ! -t 1 ]]; then
     set +e
     CODEX_AUTH_RUNNER=1 "$codex_cli" "${run_args_ref[@]}" > >(tee "$log_file_ref") 2> >(tee -a "$log_file_ref" >&2) &
     target_pid_ref=$!
