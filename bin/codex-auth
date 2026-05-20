@@ -303,6 +303,12 @@ ensure_dirs() {
   chmod 700 "$CODEX_HOME" "$PROFILE_DIR" "$BACKUP_DIR" "$CODEX_HOME/.tmp" 2>/dev/null || true
 }
 
+selector_prompt_available() {
+  [[ "${CODEX_AUTH_NO_PROMPT:-}" != "1" && -t 0 && -t 1 && -r /dev/tty ]] || return 1
+  [[ "${TERM:-}" == "dumb" && "${CODEX_AUTH_DUMB_PROMPT:-0}" != "1" ]] && return 1
+  return 0
+}
+
 acquire_mutation_lock() {
   local wait
   if (( MUTATION_LOCK_HELD )); then
@@ -2981,17 +2987,19 @@ usage_payload_for_profile() {
   printf '%s\n' "$payload"
 }
 
-usage_json_for_profile() {
+usage_json_for_profile() (
   local profile_file="$1"
   local temp_home payload
 
   temp_home="$(mktemp -d "$CODEX_HOME/.tmp/auth-usage.XXXXXX")"
+  trap '[[ -z "${temp_home:-}" ]] || rm -rf "$temp_home" 2>/dev/null || true' EXIT HUP INT TERM
   copy_auth_file_atomic "$profile_file" "$temp_home/auth.json"
 
   payload="$(usage_json_from_home "$temp_home")"
   rm -rf "$temp_home" 2>/dev/null || true
+  temp_home=""
   printf '%s\n' "$payload"
-}
+)
 
 usage_kill_process_tree() {
   local pid="${1:-}"
@@ -4442,7 +4450,7 @@ arrow_action_menu() {
   MENU_ACTION="skip"
   MENU_PROFILE=""
 
-  [[ "${CODEX_AUTH_NO_PROMPT:-}" != "1" && -t 0 && -t 1 && -r /dev/tty ]] || return 0
+  selector_prompt_available || return 0
 
   local mode role_w profile_w cell_w status_w bar_width total_w
   local rows=()
@@ -5017,7 +5025,11 @@ cmd_usage() {
     usage_best_selection_into "$records" default_profile active_is_best
 
     if [[ "$USAGE_SELECT" == "1" ]]; then
-      prepare_usage_records "$records" "$default_profile"
+      if selector_prompt_available; then
+        prepare_usage_records "$records" "$default_profile"
+      elif [[ "$USAGE_QUIET" != "1" ]]; then
+        render_usage_records "$records" "$default_profile"
+      fi
     elif [[ "$USAGE_QUIET" != "1" ]]; then
       render_usage_records "$records" "$default_profile"
     fi
@@ -5190,7 +5202,11 @@ cmd_auto() {
   active_fp="$(active_auth_fingerprint)"
 
   local records default_profile active_is_best
-  records="$(collect_usage_records "$active_fp" "${profile_files[@]}")"
+  if [[ "$USAGE_CACHED" == "1" ]]; then
+    records="$(collect_usage_records_cached "$active_fp" "${profile_files[@]}")"
+  else
+    records="$(collect_usage_records "$active_fp" "${profile_files[@]}")"
+  fi
   usage_best_selection_into "$records" default_profile active_is_best
 
   if [[ "$USAGE_QUIET" != "1" ]]; then
@@ -5213,6 +5229,10 @@ cmd_auto() {
     fi
   fi
 
+  if (( ! USAGE_BACKGROUND )) || [[ "${CODEX_AUTH_NO_BACKGROUND:-}" == "1" ]]; then
+    return 0
+  fi
+
   local stale_names=()
   local profile_file profile_name fingerprint payload age
   for profile_file in "${profile_files[@]}"; do
@@ -5226,7 +5246,7 @@ cmd_auto() {
       stale_names+=("$profile_name")
     fi
   done
-  if (( USAGE_BACKGROUND && ${#stale_names[@]} > 0 )) && [[ "${CODEX_AUTH_NO_BACKGROUND:-}" != "1" ]]; then
+  if (( ${#stale_names[@]} > 0 )); then
     local script="${BASH_SOURCE[0]}"
     local background_jobs="${CODEX_AUTH_BACKGROUND_REFRESH_JOBS:-1}"
     [[ "$background_jobs" =~ ^[0-9]+$ && "$background_jobs" -gt 0 ]] || background_jobs=1
@@ -5288,7 +5308,6 @@ __PATCH_BLANK__
 +const CODEX_AUTH_ROLLING_INTERVAL_MS_ENV_VAR: &str = "CODEX_AUTH_ROLLING_INTERVAL_MS";
 +const CODEX_AUTH_ROLLING_TTL_ENV_VAR: &str = "CODEX_AUTH_ROLLING_TTL";
 +const DEFAULT_ROLLING_AUTH_INTERVAL_MS: u64 = 60_000;
-+const DEFAULT_ROLLING_AUTH_TTL_SECS: u64 = 60;
  static NEXT_DUMMY_AUTH_ID: AtomicU64 = AtomicU64::new(1);
 __PATCH_BLANK__
  #[derive(Debug, Error)]
@@ -5369,7 +5388,6 @@ __PATCH_BLANK__
 +        env::var(CODEX_AUTH_ROLLING_TTL_ENV_VAR)
 +            .ok()
 +            .and_then(|value| value.trim().parse::<u64>().ok())
-+            .or(Some(DEFAULT_ROLLING_AUTH_TTL_SECS))
 +            .map(|value| value.to_string())
 +    }
 +

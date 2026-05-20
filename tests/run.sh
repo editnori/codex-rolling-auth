@@ -285,6 +285,30 @@ test_recover_does_not_force_yolo() {
   assert_not_contains '--yolo' "$log"
 }
 
+test_dumb_selector_renders_without_fzf_prompt() {
+  local tmp home output
+  tmp="$(mktemp -d)"
+  home="$tmp/home"
+  output="$tmp/out.txt"
+  mkdir -p "$home/auth-profiles"
+  printf '%s\n' '{"OPENAI_API_KEY":"test"}' > "$home/auth-profiles/a.json"
+
+  if ! command -v script >/dev/null 2>&1 || ! command -v timeout >/dev/null 2>&1; then
+    printf 'skip - test_dumb_selector_renders_without_fzf_prompt\n'
+    return 0
+  fi
+
+  TERM=dumb CODEX_HOME="$home" timeout 2 script -qec "$REPO_ROOT/bin/codex-auth usage --cached --select" /dev/null >"$output"
+
+  assert_contains 'Codex profiles' "$output"
+  assert_not_contains 'filter' "$output"
+}
+
+test_rolling_hook_keeps_inline_auto_cached_by_default() {
+  assert_contains 'CODEX_AUTH_ROLLING_TTL_ENV_VAR' "$REPO_ROOT/bin/codex-auth"
+  assert_not_contains 'DEFAULT_ROLLING_AUTH_TTL_SECS' "$REPO_ROOT/bin/codex-auth"
+}
+
 test_doctor_reports_legacy_sidecars() {
   local tmp psfile output
   tmp="$(mktemp -d)"
@@ -334,6 +358,8 @@ main() {
     test_run_uses_cached_auto_without_app_server_refresh \
     test_run_retries_usage_limit_without_leftover_logs \
     test_recover_does_not_force_yolo \
+    test_dumb_selector_renders_without_fzf_prompt \
+    test_rolling_hook_keeps_inline_auto_cached_by_default \
     test_doctor_reports_legacy_sidecars \
     test_doctor_refuses_kill_without_yes
   do
