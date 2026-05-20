@@ -4345,68 +4345,12 @@ print_selector_palette_context_line() {
   printf '\n'
 }
 
-selector_palette_context_add_active() {
-  local -n line_ref="$1"
-  local active_part="$2"
-  local best_value="$3"
-  local compact_best_value="$4"
-  local total_w="$5"
-  local active_value compact_active_value compact_active_name compact_active_limit_value
-
-  [[ -n "$active_part" ]] || return 0
-  active_value="$active_part"
-  [[ "$active_value" == active\ * ]] && active_value="active $(selector_palette_take_short_limit "${active_value#active }")"
-  if (( ${#line_ref} + ${#active_value} + 3 <= total_w )); then
-    line_ref+="   $active_value"
-    return 0
-  fi
-  IFS=$'\t' read -r _ compact_active_name _ compact_active_limit_value <<<"$(selector_palette_limit_parts "${active_part#active }")"
-  if [[ -n "$compact_active_limit_value" ]]; then
-    compact_active_value="act $compact_active_name $compact_active_limit_value"
-  elif [[ -n "$compact_active_name" ]]; then
-    compact_active_value="act $compact_active_name"
-  else
-    compact_active_value=""
-  fi
-  if [[ -n "$compact_active_value" ]] && (( ${#line_ref} + ${#compact_active_value} + 3 <= total_w )); then
-    line_ref+="   $compact_active_value"
-  elif [[ -n "$compact_active_value" && "$compact_best_value" != "$best_value" ]] \
-    && (( ${#compact_best_value} + ${#compact_active_value} + 3 <= total_w )); then
-    line_ref="$compact_best_value   $compact_active_value"
-  fi
-}
-
-selector_palette_context_add_stats() {
-  local -n line_ref="$1"
-  local stats_part="$2"
-  local sep="$3"
-  local total_w="$4"
-  local stat_token next_part prefix added_stats=0
-
-  while [[ -n "$stats_part" ]]; do
-    IFS=$'\t' read -r stat_token next_part <<<"$(usage_summary_split_once "$stats_part" "$sep")"
-    stats_part="$next_part"
-    stat_token="${stat_token//capped /cap }"
-    [[ "$stat_token" == cache\ * ]] && continue
-    [[ -n "$stat_token" ]] || continue
-    if (( added_stats )); then
-      prefix=" "
-    else
-      prefix="   "
-    fi
-    if (( ${#line_ref} + ${#stat_token} + ${#prefix} <= total_w )); then
-      line_ref+="$prefix$stat_token"
-      added_stats=1
-    else
-      break
-    fi
-  done
-}
-
 selector_palette_context_line() {
   local summary="$1"
   local total_w="$2"
   local sep first active_part stats_part line best_value compact_best_value
+  local active_value compact_active_value compact_active_name compact_active_limit_value
+  local stat_token next_part prefix added_stats=0
   local best_parts=()
 
   sep="$(usage_separator)"
@@ -4421,8 +4365,46 @@ selector_palette_context_line() {
     fi
   fi
   line="$best_value"
-  selector_palette_context_add_active line "$active_part" "$best_value" "$compact_best_value" "$total_w"
-  selector_palette_context_add_stats line "$stats_part" "$sep" "$total_w"
+  if [[ -n "$active_part" ]]; then
+    active_value="$active_part"
+    [[ "$active_value" == active\ * ]] && active_value="active $(selector_palette_take_short_limit "${active_value#active }")"
+    if (( ${#line} + ${#active_value} + 3 <= total_w )); then
+      line+="   $active_value"
+    else
+      IFS=$'\t' read -r _ compact_active_name _ compact_active_limit_value <<<"$(selector_palette_limit_parts "${active_part#active }")"
+      if [[ -n "$compact_active_limit_value" ]]; then
+        compact_active_value="act $compact_active_name $compact_active_limit_value"
+      elif [[ -n "$compact_active_name" ]]; then
+        compact_active_value="act $compact_active_name"
+      else
+        compact_active_value=""
+      fi
+      if [[ -n "$compact_active_value" ]] && (( ${#line} + ${#compact_active_value} + 3 <= total_w )); then
+        line+="   $compact_active_value"
+      elif [[ -n "$compact_active_value" && "$compact_best_value" != "$best_value" ]] \
+        && (( ${#compact_best_value} + ${#compact_active_value} + 3 <= total_w )); then
+        line="$compact_best_value   $compact_active_value"
+      fi
+    fi
+  fi
+  while [[ -n "$stats_part" ]]; do
+    IFS=$'\t' read -r stat_token next_part <<<"$(usage_summary_split_once "$stats_part" "$sep")"
+    stats_part="$next_part"
+    stat_token="${stat_token//capped /cap }"
+    [[ "$stat_token" == cache\ * ]] && continue
+    [[ -n "$stat_token" ]] || continue
+    if (( added_stats )); then
+      prefix=" "
+    else
+      prefix="   "
+    fi
+    if (( ${#line} + ${#stat_token} + ${#prefix} <= total_w )); then
+      line+="$prefix$stat_token"
+      added_stats=1
+    else
+      break
+    fi
+  done
   print_selector_palette_context_line "$line" "$total_w"
 }
 
