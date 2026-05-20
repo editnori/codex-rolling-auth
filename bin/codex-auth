@@ -5219,21 +5219,6 @@ selector_fzf_menu() {
   fi
 }
 
-selector_numbered_top_padding() {
-  local row_count="$1"
-  local term_lines="$2"
-  local fallback_height
-
-  if [[ "${CODEX_AUTH_SELECTOR_CENTER:-0}" == "1" && "$term_lines" =~ ^[0-9]+$ ]]; then
-    fallback_height=$((3 + row_count + 1))
-    if (( term_lines > fallback_height + 1 )); then
-      printf '%s' $(((term_lines - fallback_height) / 2))
-      return 0
-    fi
-  fi
-  printf '0'
-}
-
 selector_numbered_header() {
   local selector_palette_mode="$1"
   local selector_controls="$2"
@@ -5261,30 +5246,13 @@ selector_numbered_header() {
   fi
 }
 
-selector_numbered_print_display() {
-  local display="$1"
-  local line_w="$2"
-  local plain
-
-  if [[ "$display" == *$'\033'* ]]; then
-    plain="$(LC_ALL=C sed $'s/\033\\[[0-9;]*m//g' <<<"$display")"
-    if (( ${#plain} <= line_w )); then
-      printf '%s' "$display"
-    else
-      fit_text_rtrim "$plain" "$line_w"
-    fi
-  else
-    fit_text_rtrim "$display" "$line_w"
-  fi
-}
-
 selector_numbered_print_row() {
   local row="$1"
   local cols="$2"
   local -n action_count_ref="$3"
   local -n fallback_actions_ref="$4"
   local -n fallback_profiles_ref="$5"
-  local kind action profile_choice display line_w prefix
+  local kind action profile_choice display line_w prefix plain
 
   IFS=$'\t' read -r kind action profile_choice display <<<"$row"
   [[ "$profile_choice" == "-" ]] && profile_choice=""
@@ -5300,28 +5268,17 @@ selector_numbered_print_row() {
   fi
   (( line_w < 1 )) && line_w=1
   printf '%s' "$prefix"
-  selector_numbered_print_display "$display" "$line_w"
-  printf '\n'
-}
-
-selector_numbered_read_choice() {
-  local choice="$1"
-  local fallback_count="$2"
-  local -n selected_ref="$3"
-
-  if [[ -z "$choice" ]]; then
-    selected_ref=0
-  elif [[ "$choice" == "q" || "$choice" == "Q" ]]; then
-    MENU_ACTION="skip"
-    MENU_PROFILE=""
-    return 1
-  elif [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= fallback_count )); then
-    selected_ref=$((choice - 1))
+  if [[ "$display" == *$'\033'* ]]; then
+    plain="$(LC_ALL=C sed $'s/\033\\[[0-9;]*m//g' <<<"$display")"
+    if (( ${#plain} <= line_w )); then
+      printf '%s' "$display"
+    else
+      fit_text_rtrim "$plain" "$line_w"
+    fi
   else
-    MENU_ACTION="skip"
-    MENU_PROFILE=""
-    return 1
+    fit_text_rtrim "$display" "$line_w"
   fi
+  printf '\n'
 }
 
 selector_numbered_menu() {
@@ -5335,7 +5292,7 @@ selector_numbered_menu() {
   local mode="$8"
   local selector_palette_mode="$9"
   local choice i action_count=0 cols
-  local term_lines fallback_top_padding=0 fallback_pad_i
+  local term_lines fallback_height fallback_top_padding=0 fallback_pad_i
   local selector_controls sep
   local selected=0
   local fallback_actions=()
@@ -5350,7 +5307,12 @@ selector_numbered_menu() {
   else
     selector_controls="1-${#rows_ref[@]} select${sep}q stay"
   fi
-  fallback_top_padding="$(selector_numbered_top_padding "${#rows_ref[@]}" "$term_lines")"
+  if [[ "${CODEX_AUTH_SELECTOR_CENTER:-0}" == "1" && "$term_lines" =~ ^[0-9]+$ ]]; then
+    fallback_height=$((3 + ${#rows_ref[@]} + 1))
+    if (( term_lines > fallback_height + 1 )); then
+      fallback_top_padding=$(((term_lines - fallback_height) / 2))
+    fi
+  fi
   for ((fallback_pad_i = 0; fallback_pad_i < fallback_top_padding; fallback_pad_i++)); do
     printf '\n'
   done
@@ -5365,7 +5327,19 @@ selector_numbered_menu() {
     printf '> '
   fi
   IFS= read -r choice < /dev/tty || return 0
-  selector_numbered_read_choice "$choice" "${#fallback_actions[@]}" selected || return 0
+  if [[ -z "$choice" ]]; then
+    selected=0
+  elif [[ "$choice" == "q" || "$choice" == "Q" ]]; then
+    MENU_ACTION="skip"
+    MENU_PROFILE=""
+    return 0
+  elif [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#fallback_actions[@]} )); then
+    selected=$((choice - 1))
+  else
+    MENU_ACTION="skip"
+    MENU_PROFILE=""
+    return 0
+  fi
 
   MENU_ACTION="${fallback_actions[$selected]}"
   MENU_PROFILE="${fallback_profiles[$selected]}"
