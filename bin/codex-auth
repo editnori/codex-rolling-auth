@@ -8128,28 +8128,6 @@ codex_run_limit_detected() {
   fi
 }
 
-codex_run_resume_option_takes_value() {
-  case "$1" in
-    -c|--config|--enable|--disable|--remote|--remote-auth-token-env|-i|--image|-m|--model|-p|--profile|--profile-v2|-s|--sandbox|-a|--ask-for-approval|-C|--cd|--cwd)
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
-codex_run_resume_flag_option() {
-  case "$1" in
-    --dangerously-bypass-approvals-and-sandbox|--yolo|--oss|--strict-config|--dangerously-auto-approve-everything)
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
 codex_run_make_resume_args() {
   CODEX_RUN_RESUME_ARGS=()
 
@@ -8158,19 +8136,23 @@ codex_run_make_resume_args() {
       shift
       break
     fi
-    if codex_run_resume_option_takes_value "$1"; then
-      CODEX_RUN_RESUME_ARGS+=("$1")
-      shift
-      if (( $# > 0 )); then
+    case "$1" in
+      -c|--config|--enable|--disable|--remote|--remote-auth-token-env|-i|--image|-m|--model|-p|--profile|--profile-v2|-s|--sandbox|-a|--ask-for-approval|-C|--cd|--cwd)
         CODEX_RUN_RESUME_ARGS+=("$1")
         shift
-      fi
-    elif codex_run_resume_flag_option "$1" || [[ "$1" == -* ]]; then
-      CODEX_RUN_RESUME_ARGS+=("$1")
-      shift
-    else
-      break
-    fi
+        if (( $# > 0 )); then
+          CODEX_RUN_RESUME_ARGS+=("$1")
+          shift
+        fi
+        ;;
+      --dangerously-bypass-approvals-and-sandbox|--yolo|--oss|--strict-config|--dangerously-auto-approve-everything|-*)
+        CODEX_RUN_RESUME_ARGS+=("$1")
+        shift
+        ;;
+      *)
+        break
+        ;;
+    esac
   done
 
   if [[ "${1:-}" == "resume" ]]; then
