@@ -889,67 +889,31 @@ print_detail_text_line() {
   printf '\n'
 }
 
-path_row_widths() {
-  local cols="$1"
-  local role_w=5
-  local target_w=8
-  local path_w
-
-  if (( cols < 22 )); then
-    role_w=5
-    target_w=0
-  elif (( cols < 39 )); then
-    role_w=5
-    target_w=0
-  elif (( cols >= 72 )); then
-    role_w=6
-    target_w=9
-  fi
-  if (( target_w <= 0 )); then
-    path_w=$((cols - role_w - 1))
-  else
-    path_w=$((cols - role_w - target_w - 2))
-  fi
-  (( path_w < 8 )) && path_w=8
-  printf '%s\t%s\t%s\n' "$role_w" "$target_w" "$path_w"
-}
-
-path_basename_if_fits() {
-  local path="$1"
-  local path_w="$2"
-  local base
-
-  [[ "$path" == */* ]] || return 1
-  base="${path##*/}"
-  (( ${#base} <= path_w )) || return 1
-  printf '%s' "$base"
-}
-
-path_rendered_value() {
-  local target="$1" path="$2" target_w="$3" path_w="$4"
-  local rendered base
+print_path_line() {
+  local role="$1" target="$2" path="$3" role_w="$4" target_w="$5" path_w="$6"
+  local tone="${7:-muted}" rendered role_label target_label base
 
   rendered="$(compact_display_path "$path" "$path_w")"
-  if (( target_w <= 0 )) && { (( path_w < 24 )) && [[ "$target" != "auth" ]] || [[ "$rendered" == "…/"* || "$rendered" == "*/"* ]]; }; then
-    base="$(path_basename_if_fits "$path" "$path_w" || true)"
+  if (( target_w <= 0 )) && { { (( path_w < 24 )) && [[ "$target" != "auth" ]]; } || [[ "$rendered" == "…/"* || "$rendered" == "*/"* ]]; }; then
+    base=""
+    if [[ "$path" == */* ]]; then
+      base="${path##*/}"
+      (( ${#base} <= path_w )) || base=""
+    fi
     rendered="${base:-$rendered}"
   fi
   if (( ${#rendered} > path_w )); then
-    base="$(path_basename_if_fits "$path" "$path_w" || true)"
+    base=""
+    if [[ "$path" == */* ]]; then
+      base="${path##*/}"
+      (( ${#base} <= path_w )) || base=""
+    fi
     rendered="${base:-$rendered}"
   fi
   if (( target_w <= 0 )) && [[ "$target" == "usage" && "$path_w" -lt 15 ]]; then
     base="state.json"
     (( ${#base} <= path_w )) && rendered="$base"
   fi
-  printf '%s' "$rendered"
-}
-
-print_path_line() {
-  local role="$1" target="$2" path="$3" role_w="$4" target_w="$5" path_w="$6"
-  local tone="${7:-muted}" rendered role_label target_label
-
-  rendered="$(path_rendered_value "$target" "$path" "$target_w" "$path_w")"
   role_label="$role"
   if (( role_w <= 4 )); then
     case "$role" in
@@ -8106,9 +8070,24 @@ cmd_doctor() {
 
 cmd_paths() {
   ensure_dirs
-  local cols role_w target_w path_w total_w home_label
+  local cols role_w=5 target_w=8 path_w total_w home_label
   cols="$(terminal_width)"
-  IFS=$'\t' read -r role_w target_w path_w <<<"$(path_row_widths "$cols")"
+  if (( cols < 22 )); then
+    role_w=5
+    target_w=0
+  elif (( cols < 39 )); then
+    role_w=5
+    target_w=0
+  elif (( cols >= 72 )); then
+    role_w=6
+    target_w=9
+  fi
+  if (( target_w <= 0 )); then
+    path_w=$((cols - role_w - 1))
+  else
+    path_w=$((cols - role_w - target_w - 2))
+  fi
+  (( path_w < 8 )) && path_w=8
   if (( target_w > 0 )); then
     total_w=$((role_w + 1 + target_w + 1 + path_w))
   else
