@@ -1729,23 +1729,6 @@ current_codex_status() {
   fi
 }
 
-parse_list_args() {
-  local -n list_verbose_ref="$1"
-  shift
-
-  while (( $# > 0 )); do
-    case "$1" in
-      --verbose|-v)
-        list_verbose_ref=1
-        shift
-        ;;
-      *)
-        die "usage: codex-auth list [-v]"
-        ;;
-    esac
-  done
-}
-
 profile_list_load_metadata() {
   local -n files_ref="$1"
   local -n active_fp_ref="$2"
@@ -1861,7 +1844,18 @@ print_profile_list_rows() {
 cmd_list() {
   ensure_dirs
   local list_verbose=0
-  parse_list_args list_verbose "$@"
+
+  while (( $# > 0 )); do
+    case "$1" in
+      --verbose|-v)
+        list_verbose=1
+        shift
+        ;;
+      *)
+        die "usage: codex-auth list [-v]"
+        ;;
+    esac
+  done
 
   shopt -s nullglob
   local profiles=("$PROFILE_DIR"/*.json)
