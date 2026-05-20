@@ -7846,50 +7846,6 @@ patch_codex_prepare_source() {
   git -C "$source_dir" checkout --detach "$ref"
 }
 
-patch_codex_write_marker() {
-  local stock_key="$1"
-  local stock_version="$2"
-  local stock_hash="$3"
-  local source_commit="$4"
-  local package_version="$5"
-  local profile="$6"
-  local marker tmp
-
-  marker="$(patch_codex_marker_path)"
-  tmp="$(mktemp "$(patch_codex_root)/.tmp/current.env.XXXXXX")"
-  {
-    printf 'patch_version=%s\n' "$PATCH_CODEX_PATCH_VERSION"
-    printf 'stock_key=%s\n' "$stock_key"
-    printf 'stock_version=%s\n' "$stock_version"
-    printf 'stock_hash=%s\n' "$stock_hash"
-    printf 'source_commit=%s\n' "$source_commit"
-    printf 'package_version=%s\n' "$package_version"
-    printf 'profile=%s\n' "$profile"
-    printf 'built_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  } > "$tmp"
-  mv "$tmp" "$marker"
-}
-
-patch_codex_install_binary() {
-  local built_bin="$1"
-  local stock_key="$2"
-  local stock_version="$3"
-  local stock_hash="$4"
-  local source_commit="$5"
-  local package_version="$6"
-  local profile="$7"
-  local target_bin tmp_bin
-
-  [[ -x "$built_bin" ]] || die "build did not produce $built_bin"
-  target_bin="$(patch_codex_bin_path)"
-  mkdir -p "$(dirname "$target_bin")"
-  tmp_bin="$(mktemp "$(patch_codex_root)/.tmp/codex.XXXXXX")"
-  install -m 0755 "$built_bin" "$tmp_bin"
-  "$tmp_bin" --version >/dev/null 2>&1 || die "patched codex smoke failed"
-  mv "$tmp_bin" "$target_bin"
-  patch_codex_write_marker "$stock_key" "$stock_version" "$stock_hash" "$source_commit" "$package_version" "$profile"
-}
-
 patch_codex_status() {
   local stock_bin="$1"
   local stock_version="$2"
@@ -8022,7 +7978,7 @@ cmd_patch_codex() {
   command -v git >/dev/null 2>&1 || die "git is required for patch-codex"
   command -v cargo >/dev/null 2>&1 || die "cargo is required for patch-codex"
 
-  local lock_wait lock_fd source_commit package_base package_version built_bin target_dir
+  local lock_wait lock_fd source_commit package_base package_version built_bin target_dir target_bin tmp_bin marker tmp
   local build_args=()
   lock_wait="${CODEX_AUTH_PATCH_LOCK_WAIT:-0}"
   [[ "$lock_wait" =~ ^[0-9]+$ ]] || lock_wait=0
@@ -8059,7 +8015,27 @@ cmd_patch_codex() {
   else
     built_bin="$target_dir/debug/codex"
   fi
-  patch_codex_install_binary "$built_bin" "$stock_key" "$stock_version" "$stock_hash" "$source_commit" "$package_version" "$profile"
+  [[ -x "$built_bin" ]] || die "build did not produce $built_bin"
+  target_bin="$(patch_codex_bin_path)"
+  mkdir -p "$(dirname "$target_bin")"
+  tmp_bin="$(mktemp "$(patch_codex_root)/.tmp/codex.XXXXXX")"
+  install -m 0755 "$built_bin" "$tmp_bin"
+  "$tmp_bin" --version >/dev/null 2>&1 || die "patched codex smoke failed"
+  mv "$tmp_bin" "$target_bin"
+
+  marker="$(patch_codex_marker_path)"
+  tmp="$(mktemp "$(patch_codex_root)/.tmp/current.env.XXXXXX")"
+  {
+    printf 'patch_version=%s\n' "$PATCH_CODEX_PATCH_VERSION"
+    printf 'stock_key=%s\n' "$stock_key"
+    printf 'stock_version=%s\n' "$stock_version"
+    printf 'stock_hash=%s\n' "$stock_hash"
+    printf 'source_commit=%s\n' "$source_commit"
+    printf 'package_version=%s\n' "$package_version"
+    printf 'profile=%s\n' "$profile"
+    printf 'built_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } > "$tmp"
+  mv "$tmp" "$marker"
 
   [[ "$quiet" == "1" ]] || patch_codex_status "$stock_bin" "$stock_version" "$stock_hash" "$stock_key"
 }
