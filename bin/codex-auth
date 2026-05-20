@@ -2615,76 +2615,6 @@ EOF
   printf '\n'
 }
 
-usage_summary_scan_records() {
-  local default_profile="${1:-}"
-  shift || true
-  local record
-  local active_profile="" active_short="" active_weekly="" active_label="5h"
-  local best_profile="$default_profile"
-  local caps=0 login=0 unavailable=0 offline=0 stale=0 ready=0
-  local cache_age_max=-1 cache_age_label=""
-  local cache_age_out
-  local has_best=0 has_active=0 active_has_usage=0 old_summary=0
-  local valid weekly_used short_used mark profile plan weekly short status short_label weekly_reset short_reset cache_age
-
-  for record in "$@"; do
-    IFS=$'\t' read -r valid weekly_used short_used mark profile plan weekly short status short_label weekly_reset short_reset cache_age <<<"$record"
-    [[ -n "$profile" ]] || continue
-    if [[ "$cache_age" =~ ^[0-9]+$ ]] && (( cache_age > cache_age_max )); then
-      cache_age_max="$cache_age"
-    fi
-    if [[ "$mark" == "*" ]]; then
-      active_profile="$profile"
-      active_short="$short"
-      active_weekly="$weekly"
-      if [[ "$valid" == "0" && -n "$short" && "$short" != "-" ]]; then
-        [[ -n "$short_label" ]] && active_label="$short_label"
-        active_has_usage=1
-      elif [[ "$valid" == "0" && -n "$weekly" && "$weekly" != "-" ]]; then
-        active_short="$weekly"
-        active_label="wk"
-        active_has_usage=1
-      fi
-    fi
-    [[ -z "$best_profile" && "$status" == "ok" ]] && best_profile="$profile"
-    [[ "$status" == stale* ]] && stale=$((stale + 1))
-    if [[ "$status" == "offline" ]]; then
-      offline=$((offline + 1))
-    elif [[ "$status" == "login" ]]; then
-      login=$((login + 1))
-    elif [[ "$valid" != "0" || "$status" == "no data" || "$status" == "no usage" ]]; then
-      unavailable=$((unavailable + 1))
-    elif [[ "$status" == *cap* ]]; then
-      caps=$((caps + 1))
-    elif [[ "$status" == "ok" ]]; then
-      ready=$((ready + 1))
-    fi
-  done
-
-  if [[ -n "$best_profile" ]]; then
-    has_best=1
-  else
-    best_profile="none"
-  fi
-  if [[ -n "$active_profile" ]]; then
-    has_active=1
-  else
-    active_profile="none"
-  fi
-  [[ -n "$active_short" && "$active_short" != "-" ]] || active_short="n/a"
-  [[ -n "$active_weekly" && "$active_weekly" != "-" ]] || active_weekly="n/a"
-  if (( cache_age_max >= 0 )); then
-    cache_age_label="$(format_cache_age "$cache_age_max")"
-  fi
-  (( stale > 0 && ready == 0 && has_active )) && old_summary=1
-  cache_age_out="$cache_age_label"
-  [[ -n "$cache_age_out" ]] || cache_age_out="__none__"
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$active_profile" "$active_short" "$active_weekly" "$active_label" "$best_profile" \
-    "$has_best" "$has_active" "$active_has_usage" "$caps" "$login" "$unavailable" \
-    "$offline" "$stale" "$ready" "$cache_age_out" "$old_summary"
-}
-
 print_usage_summary_compact_line() {
   local width="$1"
   local has_active="$2"
@@ -2844,8 +2774,12 @@ print_usage_summary_line() {
   local width="$1"
   local default_profile="${2:-}"
   shift 2
-  local active_profile active_short active_weekly active_label best_profile
-  local has_best has_active active_has_usage caps login unavailable offline stale ready cache_age_label old_summary
+  local record valid weekly_used short_used mark profile plan weekly short status short_label weekly_reset short_reset cache_age
+  local active_profile="" active_short="" active_weekly="" active_label="5h"
+  local best_profile="$default_profile"
+  local has_best=0 has_active=0 active_has_usage=0 old_summary=0
+  local caps=0 login=0 unavailable=0 offline=0 stale=0 ready=0
+  local cache_age_max=-1 cache_age_label=""
   local show_cache=0
   local line show_week=0 show_login=0 show_unavailable=0 show_offline=0 show_ready=0 show_caps=0 show_stale=0
   local part
@@ -2854,10 +2788,52 @@ print_usage_summary_line() {
   local sep
   sep="$(usage_separator)"
 
-  IFS=$'\t' read -r active_profile active_short active_weekly active_label best_profile \
-    has_best has_active active_has_usage caps login unavailable offline stale ready cache_age_label old_summary \
-    <<<"$(usage_summary_scan_records "$default_profile" "$@")"
-  [[ "$cache_age_label" != "__none__" ]] || cache_age_label=""
+  for record in "$@"; do
+    IFS=$'\t' read -r valid weekly_used short_used mark profile plan weekly short status short_label weekly_reset short_reset cache_age <<<"$record"
+    [[ -n "$profile" ]] || continue
+    if [[ "$cache_age" =~ ^[0-9]+$ ]] && (( cache_age > cache_age_max )); then
+      cache_age_max="$cache_age"
+    fi
+    if [[ "$mark" == "*" ]]; then
+      active_profile="$profile"
+      active_short="$short"
+      active_weekly="$weekly"
+      if [[ "$valid" == "0" && -n "$short" && "$short" != "-" ]]; then
+        [[ -n "$short_label" ]] && active_label="$short_label"
+        active_has_usage=1
+      elif [[ "$valid" == "0" && -n "$weekly" && "$weekly" != "-" ]]; then
+        active_short="$weekly"
+        active_label="wk"
+        active_has_usage=1
+      fi
+    fi
+    [[ -z "$best_profile" && "$status" == "ok" ]] && best_profile="$profile"
+    [[ "$status" == stale* ]] && stale=$((stale + 1))
+    if [[ "$status" == "offline" ]]; then
+      offline=$((offline + 1))
+    elif [[ "$status" == "login" ]]; then
+      login=$((login + 1))
+    elif [[ "$valid" != "0" || "$status" == "no data" || "$status" == "no usage" ]]; then
+      unavailable=$((unavailable + 1))
+    elif [[ "$status" == *cap* ]]; then
+      caps=$((caps + 1))
+    elif [[ "$status" == "ok" ]]; then
+      ready=$((ready + 1))
+    fi
+  done
+
+  [[ -n "$best_profile" ]] && has_best=1
+  if [[ -n "$active_profile" ]]; then
+    has_active=1
+  else
+    active_profile="none"
+  fi
+  [[ -n "$active_short" && "$active_short" != "-" ]] || active_short="n/a"
+  [[ -n "$active_weekly" && "$active_weekly" != "-" ]] || active_weekly="n/a"
+  if (( cache_age_max >= 0 )); then
+    cache_age_label="$(format_cache_age "$cache_age_max")"
+  fi
+  (( stale > 0 && ready == 0 && has_active )) && old_summary=1
 
   (( width >= 70 && login > 0 )) && show_login=1
   (( width >= 70 && unavailable > 0 )) && show_unavailable=1
