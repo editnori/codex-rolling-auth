@@ -7619,22 +7619,6 @@ PATCH
   sed -i 's/^__PATCH_BLANK__$/ /' "$patch_file"
 }
 
-patch_codex_apply_source_patch() {
-  local source_dir="$1"
-  local manager_file="$source_dir/codex-rs/login/src/auth/manager.rs"
-  local patch_file
-
-  [[ -f "$manager_file" ]] || die "missing $manager_file"
-  if grep -Fq 'CODEX_AUTH_ROLLING_ENV_VAR' "$manager_file"; then
-    return 0
-  fi
-
-  patch_file="$(mktemp "$(patch_codex_root)/.tmp/codex-source.XXXXXX.patch")"
-  patch_codex_write_source_patch "$patch_file"
-  git -C "$source_dir" apply "$patch_file"
-  rm -f "$patch_file"
-}
-
 patch_codex_prepare_source() {
   local source_dir="$1"
   local ref="$2"
@@ -7805,7 +7789,7 @@ cmd_patch_codex() {
   command -v git >/dev/null 2>&1 || die "git is required for patch-codex"
   command -v cargo >/dev/null 2>&1 || die "cargo is required for patch-codex"
 
-  local lock_wait lock_fd source_commit package_base package_version package_suffix cargo_toml built_bin target_dir target_bin tmp_bin marker tmp
+  local lock_wait lock_fd source_commit package_base package_version package_suffix manager_file patch_file cargo_toml built_bin target_dir target_bin tmp_bin marker tmp
   local build_args=()
   lock_wait="${CODEX_AUTH_PATCH_LOCK_WAIT:-0}"
   [[ "$lock_wait" =~ ^[0-9]+$ ]] || lock_wait=0
@@ -7837,7 +7821,14 @@ cmd_patch_codex() {
   [[ "$quiet" == "1" ]] || print_status_note patch "source $ref"
   patch_codex_prepare_source "$source_dir" "$ref" "$no_fetch"
   source_commit="$(git -C "$source_dir" rev-parse HEAD)"
-  patch_codex_apply_source_patch "$source_dir"
+  manager_file="$source_dir/codex-rs/login/src/auth/manager.rs"
+  [[ -f "$manager_file" ]] || die "missing $manager_file"
+  if ! grep -Fq 'CODEX_AUTH_ROLLING_ENV_VAR' "$manager_file"; then
+    patch_file="$(mktemp "$(patch_codex_root)/.tmp/codex-source.XXXXXX.patch")"
+    patch_codex_write_source_patch "$patch_file"
+    git -C "$source_dir" apply "$patch_file"
+    rm -f "$patch_file"
+  fi
   cargo_toml="$source_dir/codex-rs/Cargo.toml"
   [[ -f "$cargo_toml" ]] || die "missing $cargo_toml"
   tmp="$(mktemp "$(patch_codex_root)/.tmp/Cargo.toml.XXXXXX")"
