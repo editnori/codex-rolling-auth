@@ -421,10 +421,10 @@ auth_metadata_records() {
 }
 
 auth_record_fingerprint() {
-  local secret="$1"
+  local secret="$1" hash
 
   if [[ -n "$secret" && ! "$secret" =~ ^[0-9a-f]{64}$ ]]; then
-    printf '%s\n' "$secret" | sha256sum | awk '{print $1}'
+    hash="$(printf '%s\n' "$secret" | sha256sum)"; printf '%s\n' "${hash%% *}"
   elif [[ -n "$secret" ]]; then
     printf '%s' "$secret"
   else
