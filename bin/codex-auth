@@ -3711,7 +3711,7 @@ usage_metadata_summary_line() {
   local render_w="$1"
   shift
   local summary_w=$((render_w * 2))
-  local line sep record valid weekly_used short_used mark profile plan weekly short status short_label weekly_reset short_reset cache_age
+  local line sep record _valid _weekly_used _short_used _mark _profile _plan _weekly _short _status _short_label _weekly_reset _short_reset cache_age
   local old_color="${USAGE_COLOR_ENABLED:-0}"
   local cache_age_max=-1 cache_age_label
 
@@ -3727,7 +3727,7 @@ usage_metadata_summary_line() {
 
   if [[ "$line" != cache\ * && "$line" != *"${sep}cache "* ]]; then
     for record in "$@"; do
-      IFS=$'\t' read -r valid weekly_used short_used mark profile plan weekly short status short_label weekly_reset short_reset cache_age <<<"$record"
+      IFS=$'\t' read -r _valid _weekly_used _short_used _mark _profile _plan _weekly _short _status _short_label _weekly_reset _short_reset cache_age <<<"$record"
       if [[ "$cache_age" =~ ^[0-9]+$ ]] && (( cache_age > cache_age_max )); then
         cache_age_max="$cache_age"
       fi
@@ -4922,7 +4922,7 @@ prepare_usage_records() {
   USAGE_SHORT_LABEL="5h"
   USAGE_PROFILE_WIDTH_HINT=12
   for record in "${sorted_records[@]}"; do
-    IFS=$'\t' read -r valid weekly_used short_used mark profile plan weekly short status record_short_label weekly_reset short_reset cache_age <<<"$record"
+    IFS=$'\t' read -r _valid _weekly_used _short_used _mark profile _plan _weekly _short _status record_short_label _weekly_reset _short_reset _cache_age <<<"$record"
     if (( ${#profile} > USAGE_PROFILE_WIDTH_HINT )); then
       USAGE_PROFILE_WIDTH_HINT="${#profile}"
     fi
