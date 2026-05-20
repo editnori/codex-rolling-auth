@@ -8188,21 +8188,6 @@ cmd_recover() {
   exec "$codex_cli" resume "$@"
 }
 
-first_profile_name_for_fingerprint() {
-  local fingerprint="$1"
-  local other other_fp
-
-  shopt -s nullglob
-  for other in "$PROFILE_DIR"/*.json; do
-    other_fp="$(credential_fingerprint "$other" || true)"
-    if [[ -n "$other_fp" && "$other_fp" == "$fingerprint" ]]; then
-      basename "$other" .json
-      return 0
-    fi
-  done
-  return 1
-}
-
 cmd_remove() {
   local name="$1"
   local yes="${2:-}"
@@ -8212,20 +8197,27 @@ cmd_remove() {
   acquire_mutation_lock
 
   local path active_matches=0 active_fp="" profile_fp="" active_name="" remaining_name="" active_value="unsaved auth"
+  local other other_name other_fp
   path="$(profile_path "$name")"
   [[ -f "$path" ]] || die "profile not found: $name"
   if [[ -f "$AUTH_FILE" ]]; then
     active_fp="$(credential_fingerprint "$AUTH_FILE" || true)"
     profile_fp="$(credential_fingerprint "$path" || true)"
     if [[ -n "$active_fp" && "$active_fp" == "$profile_fp" ]]; then
-      active_name="$(first_profile_name_for_fingerprint "$active_fp" || true)"
+      shopt -s nullglob
+      for other in "$PROFILE_DIR"/*.json; do
+        other_fp="$(credential_fingerprint "$other" || true)"
+        [[ -n "$other_fp" && "$other_fp" == "$active_fp" ]] || continue
+        other_name="$(basename "$other" .json)"
+        [[ -z "$active_name" ]] && active_name="$other_name"
+        [[ "$other_name" != "$name" && -z "$remaining_name" ]] && remaining_name="$other_name"
+      done
       [[ "$active_name" == "$name" ]] && active_matches=1
     fi
   fi
 
   rm -f "$path"
   if (( active_matches )); then
-    remaining_name="$(first_profile_name_for_fingerprint "$active_fp" || true)"
     [[ -n "$remaining_name" ]] && active_value="saved $remaining_name"
     print_result_block "removed active $name" \
       "profile"$'\t'"$(display_path "$path")"$'\t'"bad" \
