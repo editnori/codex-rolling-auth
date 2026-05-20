@@ -1740,9 +1740,6 @@ usage_role_tone() {
     use|u)
       printf 'good'
       ;;
-    same|a)
-      printf 'muted'
-      ;;
     cap|c)
       printf 'bad'
       ;;
