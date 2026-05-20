@@ -7043,66 +7043,6 @@ render_usage_records() {
   done
 }
 
-parse_usage_args() {
-  local -n auto_switch_ref="$1"
-  local -n args_ref="$2"
-  shift 2
-
-  while (( $# > 0 )); do
-    case "$1" in
-    --auto)
-      auto_switch_ref=1
-      shift
-      ;;
-    --cached)
-      USAGE_CACHED=1
-      shift
-      ;;
-    --refresh)
-      USAGE_REFRESH=1
-      shift
-      ;;
-    --fast)
-      USAGE_FAST_REFRESH=1
-      shift
-      ;;
-    --sync)
-      USAGE_FAST_REFRESH=0
-      shift
-      ;;
-    --quiet|-q)
-      USAGE_QUIET=1
-      shift
-      ;;
-    --verbose|-v)
-      USAGE_VERBOSE=1
-      shift
-      ;;
-    --select|--menu)
-      USAGE_SELECT=1
-      shift
-      ;;
-    --ttl)
-      [[ "${2:-}" =~ ^[0-9]+$ ]] || die "usage: --ttl seconds"
-      CACHE_TTL="$2"
-      shift 2
-      ;;
-    --)
-      shift
-      args_ref+=("$@")
-      break
-      ;;
-    -*)
-      die "unknown usage option: $1"
-      ;;
-    *)
-      args_ref+=("$1")
-      shift
-      ;;
-    esac
-  done
-}
-
 profile_files_for_args_into() {
   local -n profile_files_ref="$1"
   local quiet_missing="$2"
@@ -7174,7 +7114,59 @@ cmd_usage() {
   USAGE_REFRESH=0
   USAGE_SELECT=0
   USAGE_FAST_REFRESH=1
-  parse_usage_args auto_switch args "$@"
+  while (( $# > 0 )); do
+    case "$1" in
+      --auto)
+        auto_switch=1
+        shift
+        ;;
+      --cached)
+        USAGE_CACHED=1
+        shift
+        ;;
+      --refresh)
+        USAGE_REFRESH=1
+        shift
+        ;;
+      --fast)
+        USAGE_FAST_REFRESH=1
+        shift
+        ;;
+      --sync)
+        USAGE_FAST_REFRESH=0
+        shift
+        ;;
+      --quiet|-q)
+        USAGE_QUIET=1
+        shift
+        ;;
+      --verbose|-v)
+        USAGE_VERBOSE=1
+        shift
+        ;;
+      --select|--menu)
+        USAGE_SELECT=1
+        shift
+        ;;
+      --ttl)
+        [[ "${2:-}" =~ ^[0-9]+$ ]] || die "usage: --ttl seconds"
+        CACHE_TTL="$2"
+        shift 2
+        ;;
+      --)
+        shift
+        args+=("$@")
+        break
+        ;;
+      -*)
+        die "unknown usage option: $1"
+        ;;
+      *)
+        args+=("$1")
+        shift
+        ;;
+    esac
+  done
   set -- "${args[@]}"
 
   local profile_files=()
