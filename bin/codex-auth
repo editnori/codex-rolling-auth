@@ -207,32 +207,29 @@ print_help_compact_command() {
     elif (( ${#line} + 1 + ${#token} <= command_w )); then
       line+=" $token"
     else
-      print_help_compact_line "$action" "$line" "$action_w" "$command_w" "$first"
+      if (( first )); then
+        print_toned_fit "$action" "$action_w" "$(help_action_tone "$action")"
+      else
+        printf '%*s' "$action_w" ''
+      fi
+      printf ' '
+      print_toned_fit_rtrim "$line" "$command_w" accent
+      printf '\n'
       first=0
       line="$token"
     fi
   done
 
   if [[ -n "$line" ]]; then
-    print_help_compact_line "$action" "$line" "$action_w" "$command_w" "$first"
+    if (( first )); then
+      print_toned_fit "$action" "$action_w" "$(help_action_tone "$action")"
+    else
+      printf '%*s' "$action_w" ''
+    fi
+    printf ' '
+    print_toned_fit_rtrim "$line" "$command_w" accent
+    printf '\n'
   fi
-}
-
-print_help_compact_line() {
-  local action="$1"
-  local cmd="$2"
-  local action_w="$3"
-  local command_w="$4"
-  local first="${5:-0}"
-
-  if (( first )); then
-    print_toned_fit "$action" "$action_w" "$(help_action_tone "$action")"
-  else
-    printf '%*s' "$action_w" ''
-  fi
-  printf ' '
-  print_toned_fit_rtrim "$cmd" "$command_w" accent
-  printf '\n'
 }
 
 help_action_tone() {
