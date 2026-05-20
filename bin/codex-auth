@@ -6721,16 +6721,6 @@ usage_limit_sort_score() {
   fi
 }
 
-usage_record_is_best_candidate() {
-  local valid="$1"
-  local weekly_used="$2"
-  local short_used="$3"
-  local status="$4"
-
-  [[ "$valid" == "0" && "$status" == "ok" ]] || return 1
-  (( weekly_used < 100 && short_used < 100 ))
-}
-
 find_best_ok_profile() {
   local records="$1"
   local include_active="${2:-0}"
@@ -6744,7 +6734,8 @@ find_best_ok_profile() {
 
   while IFS=$'\t' read -r valid weekly_used short_used mark profile plan weekly short status short_label; do
     [[ -n "$profile" ]] || continue
-    usage_record_is_best_candidate "$valid" "$weekly_used" "$short_used" "$status" || continue
+    [[ "$valid" == "0" && "$status" == "ok" ]] || continue
+    (( weekly_used < 100 && short_used < 100 )) || continue
     [[ "$include_active" != "1" && ( "$mark" == "*" || "$mark" == "=" ) ]] && continue
     coverage_rank="$(usage_limit_coverage_rank "$weekly" "$short")"
     (( coverage_rank < 9 )) || continue
@@ -6769,31 +6760,6 @@ find_best_ok_profile() {
   fi
 }
 
-usage_ok_record_sort_rank() {
-  local default_profile="$1" mark="$2" profile="$3"
-
-  if [[ -n "$default_profile" && "$profile" == "$default_profile" ]]; then
-    printf '0'
-    return 0
-  fi
-  case "$mark" in
-    '*') printf '1' ;;
-    '=') printf '4' ;;
-    *) printf '2' ;;
-  esac
-}
-
-usage_non_ok_record_sort_rank() {
-  local mark="$1" status="$2"
-
-  case "$status:$mark" in
-    stale*) printf '3' ;;
-    *:'*') printf '4' ;;
-    *cap*:*) printf '5' ;;
-    *) printf '6' ;;
-  esac
-}
-
 usage_record_sort_rank() {
   local default_profile="$1" valid="$2" mark="$3" profile="$4" status="$5"
 
@@ -6804,9 +6770,22 @@ usage_record_sort_rank() {
   if [[ "$valid" != "0" ]]; then
     printf '9'
   elif [[ "$status" == "ok" ]]; then
-    usage_ok_record_sort_rank "$default_profile" "$mark" "$profile"
+    if [[ -n "$default_profile" && "$profile" == "$default_profile" ]]; then
+      printf '0'
+      return 0
+    fi
+    case "$mark" in
+      '*') printf '1' ;;
+      '=') printf '4' ;;
+      *) printf '2' ;;
+    esac
   else
-    usage_non_ok_record_sort_rank "$mark" "$status"
+    case "$status:$mark" in
+      stale*) printf '3' ;;
+      *:'*') printf '4' ;;
+      *cap*:*) printf '5' ;;
+      *) printf '6' ;;
+    esac
   fi
 }
 
