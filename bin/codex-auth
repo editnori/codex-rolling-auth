@@ -653,44 +653,6 @@ print_profile_list_line() {
   printf '\n'
 }
 
-profile_list_action_label() {
-  local role="$1"
-  local width="$2"
-
-  if (( width <= 1 )); then
-    case "$role" in
-      stay)
-        printf 's'
-        ;;
-      alias)
-        printf 'a'
-        ;;
-      use)
-        printf 'u'
-        ;;
-      *)
-        printf ''
-        ;;
-    esac
-    return 0
-  fi
-
-  case "$role" in
-    stay)
-      printf 'stay'
-      ;;
-    alias)
-      printf 'alias'
-      ;;
-    use)
-      printf 'use'
-      ;;
-    *)
-      printf ''
-      ;;
-  esac
-}
-
 detail_widths() {
   local cols="$1"
   local label_w=8
@@ -1285,7 +1247,7 @@ print_profile_list_rows() {
   local -n profile_fp_ref="${11}"
   local -n account_count_ref="$account_count_var"
   local -n account_primary_ref="$account_primary_var"
-  local path name mode hint fp action alias_of account_display account_base clean right left
+  local path name mode hint fp action action_label alias_of account_display account_base clean right left
   local alias_label alias_text compact_alias alias_glyph
 
   for path in "${profiles_ref[@]}"; do
@@ -1303,6 +1265,16 @@ print_profile_list_rows() {
       action="alias"
     else
       action="use"
+    fi
+    if (( role_w <= 1 )); then
+      case "$action" in
+        stay) action_label="s" ;;
+        alias) action_label="a" ;;
+        use) action_label="u" ;;
+        *) action_label="" ;;
+      esac
+    else
+      action_label="$action"
     fi
     if [[ -n "$alias_of" ]]; then
       alias_label="$(usage_display_profile_name "$alias_of" "" "$account_w")"
@@ -1369,7 +1341,7 @@ print_profile_list_rows() {
     else
       account_display=""
     fi
-    print_profile_list_line "$(profile_list_action_label "$action" "$role_w")" "$name" "$mode" "$account_display" "$role_w" "$profile_w" "$mode_w" "$account_w"
+    print_profile_list_line "$action_label" "$name" "$mode" "$account_display" "$role_w" "$profile_w" "$mode_w" "$account_w"
   done
 }
 
