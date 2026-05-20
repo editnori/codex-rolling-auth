@@ -687,9 +687,7 @@ print_result_block() {
     case "$label" in
       backup)
         if [[ "$value" == */* ]]; then
-          if [[ "${CODEX_AUTH_SHOW_BACKUP_PATH:-0}" != "1" ]]; then
-            value="created"
-          elif (( value_w < 46 )); then
+          if [[ "${CODEX_AUTH_SHOW_BACKUP_PATH:-0}" != "1" || value_w -lt 46 ]]; then
             value="created"
           else
             value="$(compact_display_path "$value" "$value_w")"
