@@ -4754,33 +4754,6 @@ selector_fzf_menu() {
   fi
 }
 
-selector_numbered_header() {
-  local selector_palette_mode="$1"
-  local selector_controls="$2"
-  local summary_text="$3"
-  local total_w="$4"
-  local role_w="$5"
-  local profile_w="$6"
-  local cell_w="$7"
-  local status_w="$8"
-  local mode="$9"
-
-  if (( selector_palette_mode )); then
-    printf '%*s' 4 ''
-    selector_palette_controls_line "$selector_controls" "$total_w"
-    printf '\n'
-    if [[ "${CODEX_AUTH_SELECTOR_CONTEXT:-0}" == "1" ]]; then
-      printf '%*s' 4 ''
-      selector_palette_context_line "$summary_text" "$total_w"
-    fi
-    printf '%*s' 4 ''
-    selector_palette_table_header "$total_w"
-  else
-    selector_header_text "$summary_text" "$selector_controls" "$role_w" "$profile_w" "$cell_w" "$status_w" "$total_w" "$mode" "auth profiles"
-    printf '\n'
-  fi
-}
-
 selector_numbered_print_row() {
   local row="$1"
   local cols="$2"
@@ -4852,7 +4825,20 @@ selector_numbered_menu() {
     printf '\n'
   done
 
-  selector_numbered_header "$selector_palette_mode" "$selector_controls" "$summary_text" "$total_w" "$role_w" "$profile_w" "$cell_w" "$status_w" "$mode"
+  if (( selector_palette_mode )); then
+    printf '%*s' 4 ''
+    selector_palette_controls_line "$selector_controls" "$total_w"
+    printf '\n'
+    if [[ "${CODEX_AUTH_SELECTOR_CONTEXT:-0}" == "1" ]]; then
+      printf '%*s' 4 ''
+      selector_palette_context_line "$summary_text" "$total_w"
+    fi
+    printf '%*s' 4 ''
+    selector_palette_table_header "$total_w"
+  else
+    selector_header_text "$summary_text" "$selector_controls" "$role_w" "$profile_w" "$cell_w" "$status_w" "$total_w" "$mode" "auth profiles"
+    printf '\n'
+  fi
   for i in "${!rows_ref[@]}"; do
     selector_numbered_print_row "${rows_ref[$i]}" "$cols" action_count fallback_actions fallback_profiles
   done
