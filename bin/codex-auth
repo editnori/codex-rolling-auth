@@ -5222,21 +5222,19 @@ cmd_auto() {
   records="$(collect_usage_records "$active_fp" "${profile_files[@]}")"
   usage_best_selection_into "$records" default_profile active_is_best
 
-  local rendered_output=0
   if [[ "$USAGE_QUIET" != "1" ]]; then
     render_usage_records "$records" "$default_profile"
-    rendered_output=1
   fi
 
   if [[ -n "$default_profile" ]]; then
-    (( rendered_output )) && printf '\n'
     if [[ "$USAGE_QUIET" == "1" ]]; then
       cmd_use "$default_profile" >/dev/null
     else
+      printf '\n'
       cmd_use "$default_profile"
     fi
   elif [[ "$USAGE_QUIET" != "1" ]]; then
-    (( rendered_output )) && printf '\n'
+    printf '\n'
     if [[ "$active_is_best" == "1" ]]; then
       print_status_note ready "already on best profile"
     else
