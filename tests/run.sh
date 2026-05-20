@@ -93,6 +93,20 @@ test_shim_auto_execs_real_codex() {
 
   assert_contains 'auth:auto --quiet --no-background' "$log"
   assert_not_contains 'auth:run' "$log"
+  assert_not_contains 'auth:patch-codex --background --quiet' "$log"
+  assert_contains 'real:--yolo resume abc' "$log"
+}
+
+test_shim_background_build_is_opt_in() {
+  local tmp log
+  tmp="$(mktemp -d)"
+  log="$tmp/calls.log"
+  write_fake_codex "$tmp/real-codex"
+  write_fake_auth "$tmp/bin/codex-auth"
+
+  PATH="$tmp/bin:$PATH" CODEX_TEST_LOG="$log" CODEX_AUTH_CODEX_BIN="$tmp/real-codex" CODEX_AUTH_PATCH_BUILD_AUTO=1 "$REPO_ROOT/bin/codex" resume abc
+
+  assert_contains 'auth:patch-codex --background --quiet' "$log"
   assert_contains 'real:--yolo resume abc' "$log"
 }
 
@@ -309,6 +323,7 @@ main() {
   local test_name
   for test_name in \
     test_shim_auto_execs_real_codex \
+    test_shim_background_build_is_opt_in \
     test_shim_bypasses_auto_for_app_server \
     test_shim_honors_auto_bypass \
     test_shim_uses_matching_patched_codex \
