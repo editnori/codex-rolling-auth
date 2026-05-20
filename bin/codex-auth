@@ -2860,22 +2860,6 @@ state_payload_for_profile() {
   ' "$STATE_FILE" 2>/dev/null | tail -n 1
 }
 
-state_age_for_profile() {
-  local profile_name="$1"
-  local fingerprint="$2"
-  local now
-  now="$(now_epoch)"
-
-  [[ -f "$STATE_FILE" ]] || { printf '999999999\n'; return 0; }
-  jq -r --arg name "$profile_name" --arg fp "$fingerprint" --argjson now "$now" '
-    (.profiles[$name] // null) as $profile
-    | if $profile == null or $profile.fingerprint != $fp or $profile.updated_at == null
-      then 999999999
-      else ($now - ($profile.updated_at | tonumber))
-      end
-  ' "$STATE_FILE" 2>/dev/null || printf '999999999\n'
-}
-
 state_update_profile() {
   local profile_name="$1"
   local fingerprint="$2"
@@ -2995,7 +2979,7 @@ usage_payload_for_profile() {
   fi
   if [[ -n "$fingerprint" && "$USAGE_REFRESH" != "1" ]]; then
     if [[ -n "$cached_payload" ]]; then
-      age="$(state_age_for_profile "$profile_name" "$fingerprint")"
+      age="$(jq -r '._codexAuthAgeSec // 999999999' <<<"$cached_payload" 2>/dev/null || printf '999999999\n')"
       if [[ "$USAGE_CACHED" == "1" ]]; then
         printf '%s\n' "$cached_payload"
         return 0
@@ -5343,7 +5327,7 @@ cmd_auto() {
     payload=""
     [[ -n "$fingerprint" ]] && payload="$(state_payload_for_profile "$profile_name" "$fingerprint" || true)"
     age="999999999"
-    [[ -n "$fingerprint" ]] && age="$(state_age_for_profile "$profile_name" "$fingerprint")"
+    [[ -n "$payload" ]] && age="$(jq -r '._codexAuthAgeSec // 999999999' <<<"$payload" 2>/dev/null || printf '999999999\n')"
     if [[ -z "$payload" || ! "$age" =~ ^[0-9]+$ || "$age" -gt "$CACHE_TTL" ]]; then
       stale_names+=("$profile_name")
     fi
