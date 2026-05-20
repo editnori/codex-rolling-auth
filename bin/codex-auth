@@ -3893,71 +3893,48 @@ selector_palette_bar_bg_segments() {
   return 0
 }
 
-selector_palette_bar_unicode() {
-  local value="$1"
-  local width="$2"
-  local tone="$3"
-  local bg_style="$4"
-  local bar_border_glyph="$5"
-  local units full partial used
-  local partial_glyphs=("" "▏" "▎" "▍" "▌" "▋" "▊" "▉")
-
-  units=$(((value * width * 8 + 50) / 100))
-  full=$((units / 8))
-  partial=$((units % 8))
-  if (( full >= width )); then
-    full="$width"
-    partial=0
-  fi
-  used="$full"
-  (( partial > 0 && used < width )) && used=$((used + 1))
-  if usage_color_active && [[ "$bg_style" == "bg" ]]; then
-    selector_palette_bar_bg_segments "$tone" "$width" "$used" "$bar_border_glyph"
-  else
-    usage_tone_color "$tone"
-    repeat_glyph "█" "$full"
-    (( partial > 0 && full < width )) && printf '%s' "${partial_glyphs[$partial]}"
-    usage_tone_reset
-    (( width > used )) && printf '%*s' "$((width - used))" ''
-  fi
-  return 0
-}
-
-selector_palette_bar_ascii() {
-  local value="$1"
-  local width="$2"
-  local tone="$3"
-  local bg_style="$4"
-  local bar_border_glyph="$5"
-  local full
-
-  full=$(((value * width + 50) / 100))
-  (( full > width )) && full="$width"
-  if usage_color_active && [[ "$bg_style" == "bg" ]]; then
-    selector_palette_bar_bg_segments "$tone" "$width" "$full" "$bar_border_glyph"
-  else
-    usage_tone_color "$tone"
-    repeat_glyph "#" "$full"
-    usage_tone_reset
-    (( width > full )) && printf '%*s' "$((width - full))" ''
-  fi
-  return 0
-}
-
 selector_palette_bar() {
   local percent="$1"
   local width="$2"
-  local tone value bg_style
+  local tone value bg_style units full partial used
   local bar_border_glyph="▁"
+  local partial_glyphs=("" "▏" "▎" "▍" "▌" "▋" "▊" "▉")
 
   tone="$(usage_limit_tone "$percent")"
   bg_style="${CODEX_AUTH_SELECTOR_BAR_STYLE:-bg}"
   if value="$(usage_clamped_percent "$percent")"; then
     if usage_unicode_enabled; then
-      selector_palette_bar_unicode "$value" "$width" "$tone" "$bg_style" "$bar_border_glyph"
+      units=$(((value * width * 8 + 50) / 100))
+      full=$((units / 8))
+      partial=$((units % 8))
+      if (( full >= width )); then
+        full="$width"
+        partial=0
+      fi
+      used="$full"
+      (( partial > 0 && used < width )) && used=$((used + 1))
+      if usage_color_active && [[ "$bg_style" == "bg" ]]; then
+        selector_palette_bar_bg_segments "$tone" "$width" "$used" "$bar_border_glyph"
+      else
+        usage_tone_color "$tone"
+        repeat_glyph "█" "$full"
+        (( partial > 0 && full < width )) && printf '%s' "${partial_glyphs[$partial]}"
+        usage_tone_reset
+        (( width > used )) && printf '%*s' "$((width - used))" ''
+      fi
     else
-      selector_palette_bar_ascii "$value" "$width" "$tone" "$bg_style" "$bar_border_glyph"
+      full=$(((value * width + 50) / 100))
+      (( full > width )) && full="$width"
+      if usage_color_active && [[ "$bg_style" == "bg" ]]; then
+        selector_palette_bar_bg_segments "$tone" "$width" "$full" "$bar_border_glyph"
+      else
+        usage_tone_color "$tone"
+        repeat_glyph "#" "$full"
+        usage_tone_reset
+        (( width > full )) && printf '%*s' "$((width - full))" ''
+      fi
     fi
+    return 0
   elif usage_color_active && [[ "$bg_style" == "bg" ]]; then
     usage_tone_bg track
     usage_tone_color track_edge
