@@ -2895,35 +2895,6 @@ print_usage_render_header() {
   print_usage_render_line "$role" "$profile" "$weekly_cell" "$short_cell" "$status" "$role_w" "$profile_w" "$cell_w" "$status_w" "" "$reset"
 }
 
-usage_unavailable_status_cell() {
-  local raw_status="$1"
-  local display_status="$2"
-  local status_w="${3:-0}"
-  local status cutoff text
-
-  while IFS=$'\t' read -r status cutoff text; do
-    [[ "$raw_status" == "$status" ]] || continue
-    (( status_w < cutoff )) || continue
-    printf '%s' "$text"
-    return 0
-  done <<'EOF'
-login	4	log
-login	6	auth
-login	12	login
-login	100000	login needed
-no data	3	na
-no data	7	n/a
-no data	100000	no data
-no usage	3	na
-no usage	8	n/a
-no usage	100000	no usage
-offline	3	of
-offline	7	off
-offline	100000	offline
-EOF
-  printf '%s' "$display_status"
-}
-
 print_usage_placeholder_limit_cell() {
   local mode="$1"
   local cell_w="$2"
@@ -2969,7 +2940,7 @@ print_usage_render_data_line() {
   local status_w="${15}"
   local bar_width="${16}"
   local mode="${17}"
-  local unavailable_text role_profile_gap status_gap
+  local unavailable_text role_profile_gap status_gap status cutoff text
 
   print_toned_fit "$role" "$role_w" "$(usage_role_tone "$role")"
   role_profile_gap=$((1 + (role_w > 1)))
@@ -2978,7 +2949,27 @@ print_usage_render_data_line() {
   fit_profile_text "$(usage_display_profile_name "$profile" "$role" "$profile_w")" "$profile_w"
   printf ' '
   if [[ "$valid" != "0" ]]; then
-    unavailable_text="$(usage_unavailable_status_cell "$raw_status" "$display_status" "$status_w")"
+    unavailable_text="$display_status"
+    while IFS=$'\t' read -r status cutoff text; do
+      [[ "$raw_status" == "$status" ]] || continue
+      (( status_w < cutoff )) || continue
+      unavailable_text="$text"
+      break
+    done <<'EOF'
+login	4	log
+login	6	auth
+login	12	login
+login	100000	login needed
+no data	3	na
+no data	7	n/a
+no data	100000	no data
+no usage	3	na
+no usage	8	n/a
+no usage	100000	no usage
+offline	3	of
+offline	7	off
+offline	100000	offline
+EOF
     print_usage_placeholder_limit_cell "$mode" "$cell_w"
     printf ' '
     print_usage_placeholder_limit_cell "$mode" "$cell_w"
