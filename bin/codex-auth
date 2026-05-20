@@ -1658,10 +1658,6 @@ usage_active_glyph() {
   usage_glyph '●' '*'
 }
 
-usage_reset_glyph() {
-  usage_glyph '↺'
-}
-
 usage_separator() {
   usage_glyph ' · ' ' | '
 }
@@ -2044,11 +2040,9 @@ print_usage_limit_cell() {
     label_w=6
   elif (( ! USAGE_VERBOSE )); then
     percent_label="${percent%\%}"
-  elif [[ -n "$reset_label" ]]; then
-    reset_prefix="$(usage_reset_glyph)"
   fi
-  if [[ -n "$reset_label" && -z "$reset_prefix" && "$percent" != "-" ]]; then
-    reset_prefix="$(usage_reset_glyph)"
+  if [[ -n "$reset_label" && "$percent" != "-" ]]; then
+    reset_prefix="$(usage_glyph '↺')"
   fi
   if [[ -n "$reset_label" ]]; then
     reset_text="${reset_prefix}${reset_label}"
@@ -2417,7 +2411,7 @@ usage_header_limit_label() {
     return 0
   fi
 
-  reset_glyph="$(usage_reset_glyph)"
+  reset_glyph="$(usage_glyph '↺')"
   case "$mode" in
     pico|nano)
       printf '%s%%' "$nano_label"
