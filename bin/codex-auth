@@ -4512,7 +4512,7 @@ collect_usage_records() {
   local active_fp="$1"
   shift
   local profile_files=("$@")
-  local records_dir profile_file i
+  local records_dir profile_file i record
   local max_jobs="${CODEX_AUTH_REFRESH_JOBS:-4}"
   local max_jobs_cap="${CODEX_AUTH_REFRESH_JOBS_MAX:-4}"
   local active_jobs=0
@@ -4546,7 +4546,7 @@ collect_usage_records() {
   done
 
   for i in "${!profile_files[@]}"; do
-    [[ -f "$records_dir/$i.record" ]] && cat "$records_dir/$i.record"
+    [[ -f "$records_dir/$i.record" ]] && { IFS= read -r record < "$records_dir/$i.record" && printf '%s\n' "$record"; }
   done | canonical_usage_active_marks
   rm -rf "$records_dir" 2>/dev/null || true
 }
