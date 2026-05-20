@@ -3296,29 +3296,6 @@ print_usage_summary_colored_line() {
   printf '\n'
 }
 
-usage_summary_visibility_flags() {
-  local width="$1"
-  local ready="$2"
-  local caps="$3"
-  local login="$4"
-  local unavailable="$5"
-  local offline="$6"
-  local -n show_ready_out="$7"
-  local -n show_caps_out="$8"
-  local -n show_login_out="$9"
-  local -n show_unavailable_out="${10}"
-  local -n show_offline_out="${11}"
-
-  (( width >= 70 && login > 0 )) && show_login_out=1
-  (( width >= 70 && unavailable > 0 )) && show_unavailable_out=1
-  (( width >= 70 && offline > 0 )) && show_offline_out=1
-  if (( ready > 0 && (width >= 70 || caps == 0) )); then
-    show_ready_out=1
-  fi
-  (( caps > 0 )) && show_caps_out=1
-  return 0
-}
-
 usage_summary_append_optional_parts() {
   local -n line_out="$1"
   local -n show_week_out="$2"
@@ -3420,8 +3397,13 @@ print_usage_summary_line() {
 
   active_summary="active $active_profile"
   (( active_has_usage )) && active_summary+=" ${active_label} $active_short"
-  usage_summary_visibility_flags "$width" "$ready" "$caps" "$login" "$unavailable" "$offline" \
-    show_ready show_caps show_login show_unavailable show_offline
+  (( width >= 70 && login > 0 )) && show_login=1
+  (( width >= 70 && unavailable > 0 )) && show_unavailable=1
+  (( width >= 70 && offline > 0 )) && show_offline=1
+  if (( ready > 0 && (width >= 70 || caps == 0) )); then
+    show_ready=1
+  fi
+  (( caps > 0 )) && show_caps=1
 
   if (( width < 40 )); then
     print_usage_summary_compact_line "$width" "$has_active" "$active_has_usage" "$active_profile" "$active_label" "$active_short" "$caps" "$ready" "$has_best" "$old_summary" "$sep"
