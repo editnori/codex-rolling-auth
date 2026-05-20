@@ -283,6 +283,18 @@ print_usage_section_rule() {
   printf '\n'
 }
 
+usage_clamped_percent() {
+  local percent="$1"
+  local value
+
+  percent="${percent%\%}"
+  [[ "$percent" =~ ^-?[0-9]+$ ]] || return 1
+  value="$percent"
+  (( value < 0 )) && value=0
+  (( value > 100 )) && value=100
+  printf '%s' "$value"
+}
+
 usage_bar() {
   local percent="${1:-}"
   local width="${2:-8}"
@@ -1249,5 +1261,4 @@ print_usage_summary_line() {
     printf '%s\n' "$line"
   fi
 }
-
 

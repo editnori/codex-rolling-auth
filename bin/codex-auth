@@ -86,11 +86,27 @@ fast_paths() {
 fast_usage_cached() {
   local arg profile_file profile_name
   local profile_files=()
+  local saw_cached=0 saw_select=0
 
   for arg in "$@"; do
-    [[ "$arg" == "--cached" ]] || return 2
+    case "$arg" in
+      --cached)
+        saw_cached=1
+        ;;
+      --select|--menu)
+        saw_select=1
+        ;;
+      *)
+        return 2
+        ;;
+    esac
   done
-  [[ "$#" -eq 1 && ! -f "$STATE_FILE" && ! -f "$AUTH_FILE" ]] || return 2
+  (( saw_cached )) || return 2
+  if (( saw_select )) && [[ "${CODEX_AUTH_NO_PROMPT:-}" != "1" && -t 0 && -t 1 && -r /dev/tty ]] \
+    && { [[ "${TERM:-}" != "dumb" ]] || [[ "${CODEX_AUTH_DUMB_PROMPT:-0}" == "1" ]]; }; then
+    return 2
+  fi
+  [[ ! -f "$STATE_FILE" && ! -f "$AUTH_FILE" ]] || return 2
 
   mkdir -p "$CODEX_HOME" "$PROFILE_DIR" "$BACKUP_DIR" "$CODEX_HOME/.tmp"
   chmod 700 "$CODEX_HOME" "$PROFILE_DIR" "$BACKUP_DIR" "$CODEX_HOME/.tmp" 2>/dev/null || true

@@ -487,6 +487,279 @@ canonical_usage_active_marks() {
   done
 }
 
+collect_usage_records_cached_python() {
+  local active_fp="$1"
+  shift
+  local python_output
+
+  command -v python3 >/dev/null 2>&1 || return 1
+  python_output="$(
+    CODEX_AUTH_ACTIVE_FP="$active_fp" \
+    CODEX_AUTH_STATE_FILE="$STATE_FILE" \
+    CODEX_AUTH_NOW="$(now_epoch)" \
+    python3 - "$@" <<'PY'
+import hashlib
+import json
+import math
+import os
+import re
+import sys
+import time
+
+ACTIVE_FP = os.environ.get("CODEX_AUTH_ACTIVE_FP", "")
+STATE_FILE = os.environ.get("CODEX_AUTH_STATE_FILE", "")
+NOW = int(float(os.environ.get("CODEX_AUTH_NOW") or time.time()))
+EMPTY_FP = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+if "TZ" not in os.environ:
+    os.environ["TZ"] = "America/Chicago"
+try:
+    time.tzset()
+except AttributeError:
+    pass
+
+
+def clean_account(value):
+    return re.sub(r"\s+", "", str(value or ""))
+
+
+def fingerprint_secret(secret):
+    if not secret:
+        return EMPTY_FP
+    if re.fullmatch(r"[0-9a-f]{64}", secret):
+        return secret
+    return hashlib.sha256((secret + "\n").encode()).hexdigest()
+
+
+def profile_secret(payload):
+    if isinstance(payload, dict) and payload.get("OPENAI_API_KEY"):
+        return "api:" + str(payload["OPENAI_API_KEY"])
+    tokens = payload.get("tokens") if isinstance(payload, dict) else None
+    if isinstance(tokens, dict):
+        if tokens.get("refresh_token"):
+            return "chatgpt:" + str(tokens["refresh_token"])
+        if tokens.get("access_token"):
+            return "chatgpt-access:" + str(tokens["access_token"])
+    return ""
+
+
+def profile_name(path):
+    base = os.path.basename(path)
+    return base[:-5] if base.endswith(".json") else base
+
+
+def nested_error(payload):
+    err = payload.get("error") if isinstance(payload, dict) else None
+    if isinstance(err, dict):
+        data = err.get("data")
+        for value in (
+            err.get("message"),
+            data.get("message") if isinstance(data, dict) else None,
+            data.get("error", {}).get("message") if isinstance(data, dict) and isinstance(data.get("error"), dict) else None,
+        ):
+            if value is not None:
+                return normalize_error(value)
+    if err is not None:
+        return normalize_error(err)
+    return "error"
+
+
+def normalize_error(value):
+    text = re.sub(r"[\n\t]+", " ", str(value))
+    text = re.sub(r"  +", " ", text).strip()
+    return text or "error"
+
+
+def limit_row(value):
+    if not isinstance(value, dict):
+        return None
+    try:
+        used = math.floor(float(value.get("usedPercent", 0) or 0))
+    except (TypeError, ValueError):
+        used = 0
+    window = value.get("windowDurationMins", "-")
+    try:
+        window_num = int(float(window or 0))
+    except (TypeError, ValueError):
+        window_num = 0
+    return {
+        "used": used,
+        "window": str(window),
+        "window_num": window_num,
+        "reset": value.get("resetsAt", "-"),
+    }
+
+
+def remaining_fields(used, window, reset):
+    if not window or window == "-" or window == "0":
+        return "0", "-", "-"
+    left = max(100 - int(used), 0)
+    reset_text = "-"
+    if reset not in (None, "", "-", "null", "0"):
+        try:
+            reset_text = time.strftime("%m-%d %H:%M", time.localtime(int(float(reset))))
+        except (TypeError, ValueError, OSError):
+            reset_text = "-"
+    return str(int(used)), f"{left}%", reset_text
+
+
+def cache_age(entry):
+    updated = entry.get("updated_at") if isinstance(entry, dict) else None
+    try:
+        return str(max(NOW - int(float(updated)), 0))
+    except (TypeError, ValueError):
+        return ""
+
+
+def record_for(profile, payload, mark, age):
+    if payload is None:
+        return ["1", "-1", "-1", mark, profile, "-", "-", "-", "no data", "5h", "-", "-", ""]
+    if not isinstance(payload, dict):
+        return ["1", "-1", "-1", mark, profile, "-", "-", "-", "no usage", "5h", "-", "-", age]
+    if payload.get("error") is not None:
+        err = nested_error(payload)
+        if any(part in err for part in ("token has been invalidated", "token_invalidated", "invalidated oauth token", "token_revoked")):
+            err = "login"
+        elif err in ("refresh timeout", "refresh unavailable", "no response"):
+            err = "offline"
+        return ["1", "-1", "-1", mark, profile, "-", "-", "-", err, "5h", "-", "-", age]
+
+    rates = None
+    by_id = payload.get("rateLimitsByLimitId")
+    if isinstance(by_id, dict):
+        rates = by_id.get("codex")
+    if rates is None:
+        rates = payload.get("rateLimits")
+    if not isinstance(rates, dict):
+        return ["1", "-1", "-1", mark, profile, "-", "-", "-", "no usage", "5h", "-", "-", age]
+
+    limits = []
+    for key in ("primary", "secondary"):
+        row = limit_row(rates.get(key))
+        if row and row["window_num"] > 0:
+            limits.append(row)
+    limits.sort(key=lambda item: 999999999 if item["window_num"] == 0 else item["window_num"])
+    if not limits:
+        return ["1", "-1", "-1", mark, profile, "-", "-", "-", "no usage", "5h", "-", "-", age]
+
+    empty = {"used": 0, "window": "-", "window_num": 0, "reset": "-"}
+    if len(limits) == 1 and limits[0]["window_num"] >= 1440:
+        short_limit = empty
+    else:
+        short_limit = limits[0]
+    if len(limits) == 1 and limits[0]["window_num"] < 1440:
+        weekly_limit = empty
+    else:
+        weekly_limit = limits[-1]
+
+    short_window = short_limit["window"]
+    short_window_num = short_limit["window_num"]
+    if not short_window_num:
+        short_label = "short"
+    elif short_window_num % 1440 == 0:
+        short_label = f"{short_window_num // 1440}d"
+    elif short_window_num >= 60 and short_window_num % 60 >= 55:
+        short_label = f"{(short_window_num + 59) // 60}h"
+    elif short_window_num % 60 == 0:
+        short_label = f"{short_window_num // 60}h"
+    else:
+        short_label = f"{short_window_num}m"
+
+    short_used, short, short_reset = remaining_fields(short_limit["used"], short_window, short_limit["reset"])
+    weekly_used, weekly, weekly_reset = remaining_fields(weekly_limit["used"], weekly_limit["window"], weekly_limit["reset"])
+
+    reached = str(rates.get("rateLimitReachedType") or "")
+    status = "ok"
+    if int(weekly_used) >= 100 and int(short_used) >= 100:
+        status = "week+5h cap"
+    elif int(weekly_used) >= 100:
+        status = "week cap"
+    elif int(short_used) >= 100:
+        status = f"{short_label} cap"
+    elif reached:
+        status = reached
+    if payload.get("_codexAuthStale") is True:
+        stale_age = format_age(age)
+        status = f"stale {stale_age} {status}" if stale_age else f"stale {status}"
+
+    return [
+        "0",
+        weekly_used,
+        short_used,
+        mark,
+        profile,
+        str(rates.get("planType") or "-"),
+        weekly,
+        short,
+        status,
+        short_label,
+        weekly_reset,
+        short_reset,
+        age,
+    ]
+
+
+def format_age(seconds):
+    try:
+        seconds = int(seconds)
+    except (TypeError, ValueError):
+        return ""
+    if seconds < 60:
+        return "now"
+    if seconds < 3600:
+        return f"{max((seconds + 30) // 60, 1)}m"
+    if seconds < 86400:
+        return f"{max((seconds + 1800) // 3600, 1)}h"
+    return f"{max((seconds + 43200) // 86400, 1)}d"
+
+
+try:
+    state = {}
+    if STATE_FILE and os.path.exists(STATE_FILE):
+        with open(STATE_FILE, "r", encoding="utf-8") as handle:
+            state = json.load(handle)
+    state_profiles = state.get("profiles") if isinstance(state, dict) else {}
+    if not isinstance(state_profiles, dict):
+        state_profiles = {}
+
+    rows = []
+    for path in sys.argv[1:]:
+        name = profile_name(path)
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                auth_payload = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            fp = ""
+        else:
+            fp = fingerprint_secret(profile_secret(auth_payload))
+        mark = "*" if ACTIVE_FP and fp == ACTIVE_FP else " "
+        entry = state_profiles.get(name)
+        payload = None
+        age = ""
+        if isinstance(entry, dict) and entry.get("fingerprint") == fp:
+            payload = entry.get("payload")
+            age = cache_age(entry)
+            if isinstance(payload, dict) and age != "":
+                payload = dict(payload)
+                payload["_codexAuthAgeSec"] = age
+        rows.append(record_for(name, payload, mark, age))
+
+    seen_active = False
+    for row in rows:
+        if row[3] == "*":
+            if seen_active:
+                row[3] = "="
+            else:
+                seen_active = True
+        print("\t".join(str(part) for part in row))
+except Exception:
+    sys.exit(1)
+PY
+  )" || return 1
+
+  printf '%s\n' "$python_output"
+}
+
 collect_usage_records() {
   local active_fp="$1"
   shift
@@ -545,6 +818,10 @@ collect_usage_records_cached() {
       usage_record_for_profile "$profile_name" "$profile_file" "null" "" ""
     done | canonical_usage_active_marks
     return 0
+  fi
+
+  if [[ "${CODEX_AUTH_FAST_CACHED_PYTHON:-1}" != "0" ]]; then
+    collect_usage_records_cached_python "$active_fp" "${profile_files[@]}" && return 0
   fi
 
   map_file="$(mktemp "$CODEX_HOME/.tmp/auth-cache-map.XXXXXX")"
@@ -646,22 +923,35 @@ collect_usage_records_synced() {
 }
 
 usage_limit_sort_fields() {
+  local coverage_rank short_score week_score
+
+  usage_limit_sort_fields_into coverage_rank short_score week_score "$@"
+  printf '%s\t%s\t%s\n' "$coverage_rank" "$short_score" "$week_score"
+}
+
+usage_limit_sort_fields_into() {
+  local -n coverage_rank_ref="$1"
+  local -n short_score_ref="$2"
+  local -n week_score_ref="$3"
+  shift 3
   local weekly="$1"
   local short="$2"
   local weekly_used="$3"
   local short_used="$4"
-  local coverage_rank=9 short_score=101 week_score=101
+  local coverage_value=9 short_value=101 week_value=101
 
   if [[ -n "$weekly" && "$weekly" != "-" && -n "$short" && "$short" != "-" ]]; then
-    coverage_rank=0
+    coverage_value=0
   elif [[ -n "$short" && "$short" != "-" ]]; then
-    coverage_rank=1
+    coverage_value=1
   elif [[ -n "$weekly" && "$weekly" != "-" ]]; then
-    coverage_rank=2
+    coverage_value=2
   fi
-  [[ -n "$short" && "$short" != "-" && "$short_used" =~ ^[0-9]+$ ]] && short_score="$short_used"
-  [[ -n "$weekly" && "$weekly" != "-" && "$weekly_used" =~ ^[0-9]+$ ]] && week_score="$weekly_used"
-  printf '%s\t%s\t%s\n' "$coverage_rank" "$short_score" "$week_score"
+  [[ -n "$short" && "$short" != "-" && "$short_used" =~ ^[0-9]+$ ]] && short_value="$short_used"
+  [[ -n "$weekly" && "$weekly" != "-" && "$weekly_used" =~ ^[0-9]+$ ]] && week_value="$weekly_used"
+  coverage_rank_ref="$coverage_value"
+  short_score_ref="$short_value"
+  week_score_ref="$week_value"
 }
 
 prepare_usage_records() {
@@ -702,7 +992,7 @@ prepare_usage_records() {
               fi
               ;;
           esac
-          IFS=$'\t' read -r coverage_rank short_score week_score <<<"$(usage_limit_sort_fields "$weekly" "$short" "$weekly_used" "$short_used")"
+          usage_limit_sort_fields_into coverage_rank short_score week_score "$weekly" "$short" "$weekly_used" "$short_used"
           printf '%s\t%s\t%03d\t%03d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
             "$rank" "$coverage_rank" "$short_score" "$week_score" "$profile" \
             "$valid" "$weekly_used" "$short_used" "$mark" "$profile" "$plan" "$weekly" "$short" "$status" "$record_short_label" "$weekly_reset" "$short_reset" "$cache_age"
@@ -889,7 +1179,7 @@ usage_best_selection_into() {
     [[ -n "$profile" ]] || continue
     [[ "$valid" == "0" && "$status" == "ok" ]] || continue
     (( weekly_used < 100 && short_used < 100 )) || continue
-    IFS=$'\t' read -r coverage_rank short_score week_score <<<"$(usage_limit_sort_fields "$weekly" "$short" "$weekly_used" "$short_used")"
+    usage_limit_sort_fields_into coverage_rank short_score week_score "$weekly" "$short" "$weekly_used" "$short_used"
     (( coverage_rank < 9 )) || continue
     if (( coverage_rank < best_coverage )) \
       || (( coverage_rank == best_coverage && short_score < best_short )) \

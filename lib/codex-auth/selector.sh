@@ -132,6 +132,295 @@ selector_palette_status_compact() {
   esac
 }
 
+selector_palette_table_widths_into() {
+  local -n primary_ref="$1"
+  local -n week_ref="$2"
+  local -n short_ref="$3"
+  local -n status_ref="$4"
+  local -n status_gap_ref="$5"
+  local -n metric_gap_ref="$6"
+  local total_w="$7"
+  local metric_w row status_max=13
+
+  primary_ref=0
+  week_ref=0
+  short_ref=0
+  status_ref=0
+  status_gap_ref=1
+  metric_gap_ref=1
+  if (( total_w < 32 )); then
+    primary_ref=13
+  elif (( total_w < 60 )); then
+    primary_ref=19
+  elif (( total_w < 68 )); then
+    primary_ref=20
+  elif (( total_w >= 108 )); then
+    primary_ref=28
+  elif (( total_w >= 88 )); then
+    primary_ref=26
+  elif (( total_w >= 68 )); then
+    primary_ref=22
+  fi
+  for row in 108:8 88:6 68:4 58:3 48:2; do
+    if (( total_w >= ${row%%:*} )); then
+      status_gap_ref="${row#*:}"
+      break
+    fi
+  done
+  (( total_w >= 48 )) && metric_gap_ref=2
+  (( total_w < 58 )) && status_max=12
+  if (( total_w < 24 )); then
+    primary_ref=$((total_w - 5))
+    primary_ref=$(( primary_ref < 11 ? 11 : primary_ref ))
+    week_ref=0
+    short_ref=4
+    status_ref=0
+    return 0
+  fi
+
+  if (( total_w >= 108 )); then
+    metric_w=23
+  elif (( total_w >= 88 )); then
+    metric_w=19
+  elif (( total_w >= 68 )); then
+    metric_w=13
+  else
+    metric_w=5
+  fi
+  week_ref="$metric_w"
+  short_ref=$(( total_w < 50 ? 3 : metric_w ))
+  status_ref=$((total_w - primary_ref - 1 - week_ref - metric_gap_ref - short_ref - status_gap_ref))
+  while (( status_ref < 2 && metric_w > 5 )); do
+    metric_w=$((metric_w - 1))
+    week_ref="$metric_w"
+    short_ref=$(( total_w < 50 ? 3 : metric_w ))
+    status_ref=$((total_w - primary_ref - 1 - week_ref - metric_gap_ref - short_ref - status_gap_ref))
+  done
+  status_ref=$(( status_ref < 2 ? 2 : status_ref > status_max ? status_max : status_ref ))
+}
+
+selector_fast_fit_into() {
+  local -n out_ref="$1"
+  local text="$2"
+  local width="$3"
+  local align="${4:-left}"
+  local trunc="…"
+  local pad left right
+
+  out_ref=""
+  (( width <= 0 )) && return 0
+  [[ "${CODEX_AUTH_ASCII:-0}" == "1" ]] && trunc="~"
+  if (( ${#text} > width )); then
+    if (( width == 1 )); then
+      text="$trunc"
+    else
+      text="${text:0:width-1}${trunc}"
+    fi
+  fi
+  pad=$((width - ${#text}))
+  (( pad < 0 )) && pad=0
+  case "$align" in
+    right)
+      printf -v out_ref '%*s%s' "$pad" '' "$text"
+      ;;
+    center)
+      left=$(((pad + 1) / 2))
+      right=$((pad - left))
+      printf -v out_ref '%*s%s%*s' "$left" '' "$text" "$right" ''
+      ;;
+    *)
+      printf -v out_ref '%s%*s' "$text" "$pad" ''
+      ;;
+  esac
+}
+
+selector_usage_display_profile_name_into() {
+  local -n out_ref="$1"
+  local profile="$2"
+  local role="${3:-}"
+  local width="${4:-0}"
+  local suffix compact
+
+  if [[ "$profile" == "current" && "$role" != "active" && "$role" != "●" && "$role" != "*" ]]; then
+    if [[ "$width" =~ ^[0-9]+$ && "$width" -gt 0 && "$width" -lt 7 ]]; then
+      out_ref="cur"
+    else
+      out_ref="current"
+    fi
+  elif [[ "$profile" == "Layth" && "$width" =~ ^[0-9]+$ && "$width" -gt 0 && "$width" -lt 5 ]]; then
+    out_ref="Lay"
+  elif [[ "$width" =~ ^[0-9]+$ && "$width" -gt 0 && ${#profile} -gt width && "$profile" =~ ^Layth([0-9]+)$ ]]; then
+    suffix="${BASH_REMATCH[1]}"
+    compact="L$suffix"
+    if (( ${#compact} <= width )); then out_ref="$compact"; else out_ref="${suffix:0:width}"; fi
+  elif [[ "$width" =~ ^[0-9]+$ && "$width" -gt 0 && ${#profile} -gt width && "$profile" == Layth.* ]]; then
+    suffix="${profile#Layth.}"
+    if (( ${#suffix} <= width )); then out_ref="$suffix"; else out_ref="$profile"; fi
+  else
+    out_ref="$profile"
+  fi
+}
+
+selector_fast_display_status_into() {
+  local -n out_ref="$1"
+  local status="$2"
+
+  if [[ "$status" == stale\ * ]]; then
+    status="${status#stale }"
+    if [[ "$status" == *cap ]]; then out_ref="old cap"; else out_ref="stale"; fi
+  elif [[ "$status" == "week+5h cap" || "$status" == "week cap" || "$status" == "5h cap" ]]; then
+    out_ref="cap"
+  else
+    case "$status" in
+      ok) out_ref="ready" ;;
+      login) out_ref="login" ;;
+      *) out_ref="$status" ;;
+    esac
+  fi
+}
+
+selector_fast_compact_status_into() {
+  local -n out_ref="$1"
+  local status="$2"
+  local width="$3"
+
+  case "$status" in
+    "no data"|"no usage"|"n/a")
+      if (( width > 0 && width < 3 )); then out_ref="na"; else out_ref="$status"; fi
+      ;;
+    "login needed")
+      if (( width > 0 && width < 4 )); then out_ref="log"; elif (( width > 0 && width < 6 )); then out_ref="auth"; elif (( width > 0 && width < 13 )); then out_ref="login"; else out_ref="$status"; fi
+      ;;
+    cap)
+      if (( width > 0 && width < 3 )); then out_ref="cp"; else out_ref="$status"; fi
+      ;;
+    "old cap"|"both cap")
+      if (( width > 0 && width < 3 )); then out_ref="cp"; elif (( width > 0 && width < 7 )); then out_ref="cap"; else out_ref="$status"; fi
+      ;;
+    ready)
+      if (( width > 0 && width < 5 )); then out_ref="ok"; else out_ref="$status"; fi
+      ;;
+    offline)
+      if (( width > 0 && width < 3 )); then out_ref="of"; elif (( width > 0 && width < 7 )); then out_ref="off"; else out_ref="$status"; fi
+      ;;
+    same)
+      if (( width > 0 && width < 4 )); then out_ref="="; else out_ref="$status"; fi
+      ;;
+    *)
+      out_ref="$status"
+      ;;
+  esac
+}
+
+selector_palette_row_into() {
+  local -n out_ref="$1"
+  local primary="$2"
+  local weekly="$3"
+  local short="$4"
+  local status="$5"
+  local _raw_status="$6"
+  local valid="$7"
+  local total_w="$8"
+  local primary_w week_w short_w status_w status_gap metric_gap
+  local action profile action_cell profile_cell primary_cell week_cell short_cell status_cell compact_status spaces
+
+  selector_palette_table_widths_into primary_w week_w short_w status_w status_gap metric_gap "$total_w"
+  action="${primary%% *}"
+  profile="${primary#* }"
+  [[ "$profile" == "$primary" ]] && profile=""
+  [[ "$action" == "best" ]] && action="use"
+  selector_fast_fit_into action_cell "$action" 5 left
+  if (( primary_w <= 7 )); then
+    selector_fast_fit_into primary_cell "$action" "$primary_w" left
+  else
+    selector_usage_display_profile_name_into profile_cell "$profile" "$action" "$((primary_w - 7))"
+    selector_fast_fit_into profile_cell "$profile_cell" "$((primary_w - 7))" left
+    primary_cell="${action_cell}  ${profile_cell}"
+  fi
+
+  if [[ "$valid" == "0" ]]; then
+    selector_fast_fit_into week_cell "${weekly:--}" "$week_w" center
+    selector_fast_fit_into short_cell "${short:--}" "$short_w" center
+  else
+    selector_fast_fit_into week_cell "-" "$week_w" center
+    selector_fast_fit_into short_cell "-" "$short_w" center
+  fi
+  selector_fast_compact_status_into compact_status "$status" "$status_w"
+  selector_fast_fit_into status_cell "$compact_status" "$status_w" left
+  printf -v spaces '%*s' "$metric_gap" ''
+  out_ref="${primary_cell} ${week_cell}${spaces}${short_cell}"
+  if (( status_w > 0 )); then
+    printf -v spaces '%*s' "$status_gap" ''
+    out_ref+="${spaces}${status_cell}"
+  fi
+}
+
+selector_menu_row_for_record_into() {
+  local -n out_ref="$1"
+  shift
+  local default_profile="$1"
+  local selector_palette_mode="$2"
+  local mode="$3"
+  local role_w="$4"
+  local profile_w="$5"
+  local cell_w="$6"
+  local status_w="$7"
+  local bar_width="$8"
+  local total_w="$9"
+  local record="${10}"
+  local valid weekly_used short_used mark profile _plan weekly short status short_label weekly_reset short_reset _cache_age
+  local display display_status palette_profile action_role row_action row_profile_field active_row=0
+
+  if (( ! selector_palette_mode )); then
+    out_ref="$(selector_menu_row_for_record "$default_profile" "$selector_palette_mode" "$mode" "$role_w" "$profile_w" "$cell_w" "$status_w" "$bar_width" "$total_w" "$record")"
+    return $?
+  fi
+
+  IFS=$'\t' read -r valid weekly_used short_used mark profile _plan weekly short status short_label weekly_reset short_reset _cache_age <<<"$record"
+  [[ -n "$profile" ]] || return 1
+  row_action="switch"
+  row_profile_field="$profile"
+  if (( total_w <= 30 )); then
+    selector_usage_display_profile_name_into palette_profile "$profile" "" 6
+  else
+    palette_profile="$profile"
+  fi
+
+  if [[ "$valid" != "0" && "$status" == "login" ]]; then
+    selector_palette_row_into display "login $palette_profile" "-" "-" "login needed" "$status" "$valid" "$total_w"
+    row_action="login"
+  elif [[ "$valid" == "0" ]]; then
+    selector_fast_display_status_into display_status "$status"
+    if [[ "$mark" == "*" ]]; then
+      action_role="stay"
+    elif [[ "$mark" == "=" ]]; then
+      action_role="same"
+    else
+      case "$display_status" in
+        ready|ok) if [[ -n "$default_profile" && "$profile" == "$default_profile" ]]; then action_role="best"; else action_role="use"; fi ;;
+        cap|old\ cap|both\ cap) action_role="cap" ;;
+        *) action_role="warn" ;;
+      esac
+    fi
+    selector_palette_row_into display "$action_role $palette_profile" "$weekly" "$short" "$display_status" "$status" "$valid" "$total_w"
+  else
+    selector_fast_display_status_into display_status "$status"
+    case "$mark" in
+      "*") action_role="stay" ;;
+      "=") action_role="same" ;;
+      *) action_role="use" ;;
+    esac
+    selector_palette_row_into display "$action_role $palette_profile" "-" "-" "$display_status" "$status" "$valid" "$total_w"
+  fi
+  if [[ "$row_action" == "switch" && ( "$mark" == "*" || "$mark" == "=" ) ]]; then
+    active_row=1
+    row_action="skip"
+    row_profile_field="-"
+  fi
+
+  printf -v out_ref '%s\037action\037%s\037%s\037%s' "$active_row" "$row_action" "$row_profile_field" "$display"
+}
+
 selector_palette_metric_cell() {
   local percent="$1"
   local width="$2"
@@ -336,18 +625,6 @@ print_selector_palette_table_row() {
   fi
   printf '%*s' "$status_gap" ''
   print_toned_fit "$compact_status" "$status_w" "$(usage_status_tone "$raw_status" "$valid")"
-}
-
-usage_clamped_percent() {
-  local percent="$1"
-  local value
-
-  percent="${percent%\%}"
-  [[ "$percent" =~ ^-?[0-9]+$ ]] || return 1
-  value="$percent"
-  (( value < 0 )) && value=0
-  (( value > 100 )) && value=100
-  printf '%s' "$value"
 }
 
 selector_action_role() {
@@ -1032,18 +1309,31 @@ arrow_action_menu() {
   total_w="$(clamp_int_between "$total_w" 0 "$render_cols")"
   summary_text="$(usage_metadata_summary_line "$total_w" "$default_profile" "${records[@]}")"
   for record in "${records[@]}"; do
-    row="$(selector_menu_row_for_record "$default_profile" "$selector_palette_mode" "$mode" "$role_w" "$profile_w" "$cell_w" "$status_w" "$bar_width" "$total_w" "$record")" || continue
+    if (( selector_palette_mode )) && [[ "${CODEX_AUTH_FAST_SELECTOR_ROWS:-1}" != "0" ]]; then
+      selector_menu_row_for_record_into row "$default_profile" "$selector_palette_mode" "$mode" "$role_w" "$profile_w" "$cell_w" "$status_w" "$bar_width" "$total_w" "$record" || continue
+    else
+      row="$(selector_menu_row_for_record "$default_profile" "$selector_palette_mode" "$mode" "$role_w" "$profile_w" "$cell_w" "$status_w" "$bar_width" "$total_w" "$record")" || continue
+    fi
     IFS=$'\037' read -r active_row row_kind row_action row_profile_field row_display <<<"$row"
     (( active_row )) && has_active_row=1
     rows+=("$row_kind"$'\t'"$row_action"$'\t'"$row_profile_field"$'\t'"$row_display")
   done
   if (( ! has_active_row )) && [[ -f "$AUTH_FILE" ]]; then
-    if (( total_w <= 30 )); then
-      palette_profile="$(usage_display_profile_name "current" "" 6)"
+    if (( selector_palette_mode )) && [[ "${CODEX_AUTH_FAST_SELECTOR_ROWS:-1}" != "0" ]]; then
+      if (( total_w <= 30 )); then
+        selector_usage_display_profile_name_into palette_profile "current" "" 6
+      else
+        palette_profile="current"
+      fi
+      selector_palette_row_into display "stay $palette_profile" "-" "-" "same" "ok" "1" "$total_w"
     else
-      palette_profile="current"
+      if (( total_w <= 30 )); then
+        palette_profile="$(usage_display_profile_name "current" "" 6)"
+      else
+        palette_profile="current"
+      fi
+      display="$(print_selector_palette_table_row "stay $palette_profile" "-" "-" "same" "ok" "1" "$total_w")"
     fi
-    display="$(print_selector_palette_table_row "stay $palette_profile" "-" "-" "same" "ok" "1" "$total_w")"
     rows+=("action"$'\t'"skip"$'\t'"-"$'\t'"$display")
   fi
 
