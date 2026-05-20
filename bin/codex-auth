@@ -4247,18 +4247,6 @@ selector_action_role() {
   fi
 }
 
-selector_header_action() {
-  local role_w="$1"
-
-  if (( role_w <= 1 )); then
-    printf ' '
-  elif (( role_w < 6 )); then
-    printf 'act'
-  else
-    printf 'action'
-  fi
-}
-
 usage_metadata_summary_line() {
   local render_w="$1"
   shift
@@ -4436,39 +4424,6 @@ usage_frame_chars() {
   fi
 }
 
-print_usage_frame_top() {
-  local title="$1"
-  local width="$2"
-  local tl tr bl br vl vr glyph label rule_w
-  IFS=$'\t' read -r tl tr bl br vl vr glyph <<<"$(usage_frame_chars)"
-
-  label=" $title "
-  rule_w=$((width - 2 - ${#label}))
-  (( rule_w < 0 )) && rule_w=0
-  usage_tone_color muted
-  printf '%s' "$tl"
-  usage_tone_reset
-  usage_tone_color accent
-  printf '%s' "$label"
-  usage_tone_reset
-  usage_tone_color muted
-  repeat_glyph "$glyph" "$rule_w"
-  printf '%s\n' "$tr"
-  usage_tone_reset
-}
-
-print_usage_frame_bottom() {
-  local width="$1"
-  local tl tr bl br vl vr glyph
-  IFS=$'\t' read -r tl tr bl br vl vr glyph <<<"$(usage_frame_chars)"
-
-  usage_tone_color muted
-  printf '%s' "$bl"
-  repeat_glyph "$glyph" "$((width - 2))"
-  printf '%s\n' "$br"
-  usage_tone_reset
-}
-
 usage_summary_split_once() {
   local text="$1"
   local sep="$2"
@@ -4578,6 +4533,7 @@ print_usage_summary_body() {
   local frame="$5"
   local total_w="$6"
   local label_w=5 show_active=0 show_pool=0 blank_after=0
+  local tl tr bl br vl vr glyph
 
   if (( body_w >= 64 )); then
     label_w=7
@@ -4597,7 +4553,14 @@ print_usage_summary_body() {
   if (( show_pool )) && [[ -n "$pool_part" ]]; then
     selector_header_meta_line "stats" "$pool_part" "$body_w" "$label_w" "$frame" "$total_w"
   fi
-  (( frame )) && print_usage_frame_bottom "$total_w"
+  if (( frame )); then
+    IFS=$'\t' read -r tl tr bl br vl vr glyph <<<"$(usage_frame_chars)"
+    usage_tone_color muted
+    printf '%s' "$bl"
+    repeat_glyph "$glyph" "$((total_w - 2))"
+    printf '%s\n' "$br"
+    usage_tone_reset
+  fi
   (( blank_after )) && printf '\n'
   return 0
 }
@@ -4607,13 +4570,27 @@ print_usage_summary_block() {
   local total_w="$2"
   local title="${3:-}"
   local first active_part pool_part
+  local tl tr bl br vl vr glyph label rule_w
   local frame=0 body_w="$total_w"
 
   usage_summary_parts "$summary" "$total_w" first active_part pool_part
   if [[ -n "$title" ]] && (( total_w >= 42 )); then
     frame=1
     body_w=$((total_w - 4))
-    print_usage_frame_top "$title" "$total_w"
+    IFS=$'\t' read -r tl tr bl br vl vr glyph <<<"$(usage_frame_chars)"
+    label=" $title "
+    rule_w=$((total_w - 2 - ${#label}))
+    (( rule_w < 0 )) && rule_w=0
+    usage_tone_color muted
+    printf '%s' "$tl"
+    usage_tone_reset
+    usage_tone_color accent
+    printf '%s' "$label"
+    usage_tone_reset
+    usage_tone_color muted
+    repeat_glyph "$glyph" "$rule_w"
+    printf '%s\n' "$tr"
+    usage_tone_reset
   else
     print_usage_title_line "$title" "$total_w"
   fi
@@ -4631,9 +4608,15 @@ selector_header_text() {
   local total_w="$7"
   local mode="$8"
   local title="${9:-}"
+  local action_label="action"
 
   print_usage_summary_block "$summary" "$total_w" "$title"
-  print_usage_render_header "$(selector_header_action "$role_w")" "$(usage_header_profile "$mode")" "$(usage_header_week "$mode")" "$(usage_header_short "$mode")" "$(usage_header_state "$mode")" \
+  if (( role_w <= 1 )); then
+    action_label=" "
+  elif (( role_w < 6 )); then
+    action_label="act"
+  fi
+  print_usage_render_header "$action_label" "$(usage_header_profile "$mode")" "$(usage_header_week "$mode")" "$(usage_header_short "$mode")" "$(usage_header_state "$mode")" \
     "$role_w" "$profile_w" "$cell_w" "$status_w" "$mode"
   repeat_glyph "$(usage_rule_glyph)" "$total_w"
   printf '\n'
