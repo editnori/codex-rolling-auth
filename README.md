@@ -97,10 +97,12 @@ codex-auth doctor --kill-sidecars --yes
 - Set `CODEX_AUTH_PATCH_BUILD_AUTO=1` if you want the `codex` shim to start a background rebuild when the patched binary is stale.
 - Patched Codex builds live under `$CODEX_HOME/patched-codex`. The shim only uses a patched binary when its marker matches the current stock Codex version/hash.
 - Patched builds are stamped as the installed Codex version plus `+local`, so they do not appear older to Codex's update check.
-- Set `CODEX_AUTH_REFRESH_JOBS` to tune concurrent usage refreshes. The default is 2 and `CODEX_AUTH_REFRESH_JOBS_MAX` caps it at 4 unless you explicitly change the cap.
+- Set `CODEX_AUTH_REFRESH_JOBS` to tune concurrent usage refreshes. The default is 4 and `CODEX_AUTH_REFRESH_JOBS_MAX` caps it at 4 unless you explicitly change the cap.
 - `codex-auth doctor --kill-sidecars --yes` does not kill the Codex TUI processes; it only terminates direct MCP sidecars under legacy `--yolo` Codex roots.
 - Set `CODEX_AUTH_USAGE_HEADER=1` or `CODEX_AUTH_USAGE_STATUS=1` if you want the full table header or status column back.
-- Set `CODEX_AUTH_SELECTOR_CENTER=1` if you want the selector vertically centered in the terminal.
+- The selector defaults to the inline fzf scrolling TUI when fzf is available. It uses adaptive height instead of taking over the whole terminal. Set `CODEX_AUTH_NO_FZF=1` or `CODEX_AUTH_SELECTOR=numbered` for the plain numbered fallback.
+- `codex-auth usage --refresh --select` opens the selector from cached usage and refreshes in the background. Set `CODEX_AUTH_SELECT_SYNC_REFRESH=1` or pass `--sync` if you want to wait for a full refresh before the selector opens.
+- Set `CODEX_AUTH_SELECTOR_CENTER=1` if you want the fallback selector vertically centered in the terminal.
 - Selector bars default to background-color lanes with thin horizontal row borders. Set `CODEX_AUTH_SELECTOR_BAR_STYLE=glyph` if your terminal does not render those cleanly.
 
 ## Test

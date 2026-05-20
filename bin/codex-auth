@@ -4101,9 +4101,11 @@ selector_fzf_menu() {
   local mode="$8"
   local selector_palette_mode="$9"
   local choice kind action profile_choice fzf_prompt fzf_pointer fzf_header term_lines fzf_term
+  local fzf_height fzf_height_arg fzf_outer_top_padding=0 fzf_pad_i
   local fzf_header_line_count=1
   local fzf_color_args=()
   local fzf_border_args=()
+  local fzf_margin_args=()
   local fzf_padding_args=()
   local fzf_header_args=()
   local fzf_opencode_theme=0
@@ -4111,6 +4113,20 @@ selector_fzf_menu() {
   local fzf_color_arg
   local fzf_codex_colors='dark,fg:#eeeeee,fg+:#f4f0e8,bg:#141414,bg+:#262626,hl:#fab283,hl+:#ffd0a0,border:#323232,label:#fab283,prompt:#fab283,pointer:#fab283,header:#9a9a9a,info:#808080,gutter:#141414'
   local fzf_header_line action_label
+  local palette_effective_w right_margin terminal_w primary_w week_w short_w palette_status_w status_gap metric_gap
+  local fzf_vertical_padding=0
+
+  fzf_height=$((${#rows_ref[@]} + 8))
+  (( fzf_height < 12 )) && fzf_height=12
+  term_lines="${LINES:-}"
+  [[ "$term_lines" =~ ^[0-9]+$ ]] || term_lines="$(tput lines 2>/dev/null || true)"
+  if [[ "$term_lines" =~ ^[0-9]+$ ]]; then
+    max_height=$((term_lines - 2))
+    (( max_height < 12 )) && max_height=12
+    (( fzf_height > max_height )) && fzf_height="$max_height"
+  elif (( fzf_height > 24 )); then
+    fzf_height=24
+  fi
 
   fzf_color_arg=""
   if [[ -n "${CODEX_AUTH_FZF_THEME:-}" ]]; then
@@ -4129,6 +4145,7 @@ selector_fzf_menu() {
     fzf_opencode_theme=1
   fi
   [[ -n "$fzf_color_arg" ]] && fzf_color_args+=(--color="$fzf_color_arg")
+  fzf_height_arg="~$fzf_height"
   selector_control_sep="$(usage_separator)"
   if usage_unicode_enabled; then
     fzf_prompt='filter ▸ '
@@ -4145,6 +4162,20 @@ selector_fzf_menu() {
   if (( fzf_opencode_theme )); then
     fzf_pointer=' '
     fzf_prompt='filter '
+    terminal_w="$(terminal_width)"
+    IFS=$'\t' read -r primary_w week_w short_w palette_status_w status_gap metric_gap <<<"$(selector_palette_table_widths "$total_w")"
+    if (( week_w == 0 )); then
+      palette_effective_w=$((primary_w + 1 + short_w))
+    else
+      palette_effective_w=$((primary_w + 1 + week_w + metric_gap + short_w))
+      if (( palette_status_w > 0 )); then
+        palette_effective_w=$((palette_effective_w + status_gap + palette_status_w))
+      fi
+    fi
+    right_margin=$((terminal_w - palette_effective_w - 4))
+    if (( right_margin > 0 )); then
+      fzf_margin_args+=(--margin="0,$right_margin,0,0")
+    fi
     fzf_border_args+=(--border=none)
   else
     fzf_border_args+=(--border=rounded --border-label=' auth profiles ' --border-label-pos=3)
@@ -4163,18 +4194,26 @@ selector_fzf_menu() {
       fzf_header_line_count=$((fzf_header_line_count + 1))
     done <<<"$fzf_header"
     (( fzf_header_line_count < 1 )) && fzf_header_line_count=1
-    fzf_content_height=$((${#rows_ref[@]} + fzf_header_line_count + 1))
-    term_lines="${LINES:-}"
-    [[ "$term_lines" =~ ^[0-9]+$ ]] || term_lines="$(tput lines 2>/dev/null || true)"
+    fzf_height=$((${#rows_ref[@]} + fzf_header_line_count + 1))
     if [[ "$term_lines" =~ ^[0-9]+$ ]]; then
       max_height=$((term_lines - 2))
       max_height=$(( max_height < 6 ? 6 : max_height ))
-      if (( fzf_content_height + 2 <= max_height )); then
-        fzf_padding_args+=(--padding=1,0,1,0)
+      if (( fzf_height + 2 <= max_height )); then
+        fzf_height=$((fzf_height + 2))
+        fzf_vertical_padding=1
       fi
-    elif (( fzf_content_height < 22 )); then
+      fzf_height=$(( fzf_height > max_height ? max_height : fzf_height ))
+    elif (( fzf_height < 22 )); then
+      fzf_height=$((fzf_height + 2))
+      fzf_vertical_padding=1
+    fi
+    if (( fzf_vertical_padding )); then
       fzf_padding_args+=(--padding=1,0,1,0)
     fi
+    if [[ "${CODEX_AUTH_SELECTOR_CENTER:-0}" == "1" && "$term_lines" =~ ^[0-9]+$ ]] && (( term_lines > fzf_height + 1 )); then
+      fzf_outer_top_padding=$(((term_lines - fzf_height) / 2))
+    fi
+    fzf_height_arg="~$fzf_height"
     fzf_header_args+=(--header-lines="$fzf_header_line_count" --header-first)
   else
     action_label="action"
@@ -4214,6 +4253,11 @@ selector_fzf_menu() {
     )"
     fzf_header_args+=(--header="$fzf_header")
   fi
+
+  for ((fzf_pad_i = 0; fzf_pad_i < fzf_outer_top_padding; fzf_pad_i++)); do
+    printf '\n'
+  done
+
   fzf_term="${TERM:-}"
   [[ -n "$fzf_term" && "$fzf_term" != "dumb" ]] || fzf_term="xterm-256color"
 
@@ -4229,8 +4273,9 @@ selector_fzf_menu() {
       --ansi \
       --no-sort \
       --layout=reverse \
-      --height=100% \
+      --height="$fzf_height_arg" \
       "${fzf_border_args[@]}" \
+      "${fzf_margin_args[@]}" \
       "${fzf_padding_args[@]}" \
       --prompt="$fzf_prompt" \
       --pointer="$fzf_pointer" \
@@ -4476,12 +4521,32 @@ arrow_action_menu() {
   local has_active_row=0
   local use_fzf=0
   local selector_palette_mode=0
+  local selector_backend="${CODEX_AUTH_SELECTOR:-auto}"
   local render_cols
   local display palette_profile
   local record row active_row row_kind row_action row_profile_field row_display
 
-  if command -v fzf >/dev/null 2>&1 && [[ "${CODEX_AUTH_NO_FZF:-}" != "1" ]]; then
-    use_fzf=1
+  if [[ "${CODEX_AUTH_USE_FZF:-0}" == "1" ]]; then
+    selector_backend="fzf"
+  fi
+  case "$selector_backend" in
+    fzf|fzf-palette)
+      use_fzf=1
+      ;;
+    auto)
+      if command -v fzf >/dev/null 2>&1; then
+        use_fzf=1
+      fi
+      ;;
+    numbered|fallback|simple|"")
+      use_fzf=0
+      ;;
+    *)
+      use_fzf=0
+      ;;
+  esac
+  if (( use_fzf )) && { [[ "${CODEX_AUTH_NO_FZF:-}" == "1" ]] || ! command -v fzf >/dev/null 2>&1; }; then
+    use_fzf=0
   fi
   render_cols="$(terminal_width)"
   if (( render_cols < 32 )); then
@@ -4894,6 +4959,23 @@ acquire_refresh_lock_into() {
   flock -w "$refresh_lock_wait" "$fd_ref"
 }
 
+start_usage_background_refresh() {
+  local profile_file profile_name script background_jobs
+  local profile_names=()
+
+  (( $# > 0 )) || return 0
+  for profile_file in "$@"; do
+    profile_name="$(basename "$profile_file" .json)"
+    [[ -n "$profile_name" ]] && profile_names+=("$profile_name")
+  done
+  (( ${#profile_names[@]} > 0 )) || return 0
+
+  script="${BASH_SOURCE[0]}"
+  background_jobs="${CODEX_AUTH_BACKGROUND_REFRESH_JOBS:-1}"
+  [[ "$background_jobs" =~ ^[0-9]+$ && "$background_jobs" -gt 0 ]] || background_jobs=1
+  nohup env CODEX_AUTH_REFRESH_LOCK=try CODEX_AUTH_NO_BACKGROUND=1 CODEX_AUTH_REFRESH_BLOCKED=1 CODEX_AUTH_REFRESH_FALLBACK_CACHE=1 CODEX_AUTH_REFRESH_JOBS="$background_jobs" "$script" refresh --quiet --fast "${profile_names[@]}" >/dev/null 2>&1 &
+}
+
 usage_best_selection_into() {
   local records="$1"
   local -n default_profile_ref="$2"
@@ -5008,6 +5090,13 @@ cmd_usage() {
   if (( ${#profile_files[@]} == 0 )); then
     [[ "$USAGE_QUIET" == "1" ]] || print_empty_profiles
     return 0
+  fi
+  if [[ "$USAGE_SELECT" == "1" && "$USAGE_REFRESH" == "1" && "$USAGE_FAST_REFRESH" == "1" ]] \
+    && selector_prompt_available \
+    && [[ "${CODEX_AUTH_SELECT_SYNC_REFRESH:-0}" != "1" ]]; then
+    start_usage_background_refresh "${profile_files[@]}"
+    USAGE_REFRESH=0
+    USAGE_CACHED=1
   fi
   if [[ "$USAGE_REFRESH" == "1" && "$USAGE_QUIET" != "1" && -t 2 ]]; then
     print_status_note refresh "${#profile_files[@]} profiles" >&2

@@ -323,6 +323,70 @@ test_dumb_selector_renders_without_fzf_prompt() {
   assert_not_contains 'filter' "$output"
 }
 
+test_selector_uses_fzf_by_default_when_available() {
+  local tmp home output fzf_input fzf_args
+  tmp="$(mktemp -d)"
+  home="$tmp/home"
+  output="$tmp/out.txt"
+  fzf_input="$tmp/fzf-input.txt"
+  fzf_args="$tmp/fzf-args.txt"
+  mkdir -p "$home/auth-profiles" "$tmp/bin"
+  printf '%s\n' '{"OPENAI_API_KEY":"test"}' > "$home/auth-profiles/a.json"
+  cat > "$tmp/bin/fzf" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$CODEX_TEST_FZF_ARGS"
+cat > "$CODEX_TEST_FZF_INPUT"
+grep -m1 '^action' "$CODEX_TEST_FZF_INPUT"
+EOF
+  chmod 0755 "$tmp/bin/fzf"
+
+  if ! command -v script >/dev/null 2>&1 || ! command -v timeout >/dev/null 2>&1; then
+    printf 'skip - test_selector_uses_fzf_by_default_when_available\n'
+    return 0
+  fi
+
+  PATH="$tmp/bin:$PATH" CODEX_TEST_FZF_INPUT="$fzf_input" CODEX_TEST_FZF_ARGS="$fzf_args" TERM=xterm CODEX_HOME="$home" timeout 2 script -qec "$REPO_ROOT/bin/codex-auth usage --cached --select" /dev/null >"$output"
+
+  assert_contains '--with-nth=4..' "$fzf_args"
+  assert_contains '--height=~' "$fzf_args"
+  assert_not_contains '--height=100%' "$fzf_args"
+  assert_contains $'action\tswitch\ta' "$fzf_input"
+  assert_not_contains '1. ' "$fzf_input"
+  assert_contains 'active a' "$output"
+}
+
+test_refresh_select_uses_cached_selector_without_blocking() {
+  local tmp home output fzf_input fzf_args log
+  tmp="$(mktemp -d)"
+  home="$tmp/home"
+  output="$tmp/out.txt"
+  fzf_input="$tmp/fzf-input.txt"
+  fzf_args="$tmp/fzf-args.txt"
+  log="$tmp/calls.log"
+  mkdir -p "$home/auth-profiles" "$tmp/bin"
+  printf '%s\n' '{"OPENAI_API_KEY":"a"}' > "$home/auth-profiles/a.json"
+  write_fake_codex "$tmp/real-codex"
+  cat > "$tmp/bin/fzf" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$CODEX_TEST_FZF_ARGS"
+cat > "$CODEX_TEST_FZF_INPUT"
+grep -m1 '^action' "$CODEX_TEST_FZF_INPUT"
+EOF
+  chmod 0755 "$tmp/bin/fzf"
+
+  if ! command -v script >/dev/null 2>&1 || ! command -v timeout >/dev/null 2>&1; then
+    printf 'skip - test_refresh_select_uses_cached_selector_without_blocking\n'
+    return 0
+  fi
+
+  PATH="$tmp/bin:$PATH" CODEX_TEST_LOG="$log" CODEX_TEST_FZF_INPUT="$fzf_input" CODEX_TEST_FZF_ARGS="$fzf_args" TERM=xterm CODEX_HOME="$home" CODEX_AUTH_CODEX_BIN="$tmp/real-codex" timeout 2 script -qec "$REPO_ROOT/bin/codex-auth usage --refresh --select" /dev/null >"$output"
+
+  assert_contains '--height=~' "$fzf_args"
+  assert_not_contains '--height=100%' "$fzf_args"
+  assert_contains $'action\tswitch\ta' "$fzf_input"
+  assert_contains 'active a' "$output"
+}
+
 test_rolling_hook_keeps_inline_auto_cached_by_default() {
   assert_contains 'CODEX_AUTH_ROLLING_TTL_ENV_VAR' "$REPO_ROOT/bin/codex-auth"
   assert_not_contains 'DEFAULT_ROLLING_AUTH_TTL_SECS' "$REPO_ROOT/bin/codex-auth"
@@ -379,6 +443,8 @@ main() {
     test_run_retries_usage_limit_without_leftover_logs \
     test_recover_does_not_force_yolo \
     test_dumb_selector_renders_without_fzf_prompt \
+    test_selector_uses_fzf_by_default_when_available \
+    test_refresh_select_uses_cached_selector_without_blocking \
     test_rolling_hook_keeps_inline_auto_cached_by_default \
     test_doctor_reports_legacy_sidecars \
     test_doctor_refuses_kill_without_yes
