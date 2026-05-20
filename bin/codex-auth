@@ -4475,69 +4475,16 @@ usage_json_cleanup_coproc() {
   fi
 }
 
-usage_json_timeout_seconds() {
-  local timeout_sec="${CODEX_AUTH_USAGE_TIMEOUT:-4}"
-
-  [[ "$timeout_sec" =~ ^[0-9]+$ && "$timeout_sec" -gt 0 ]] || timeout_sec=4
-  printf '%s' "$timeout_sec"
-}
-
-usage_json_handle_line() {
-  local line="$1"
-  local rate_in="$2"
-  local -n requested_out="$3"
-  local -n payload_out="$4"
-  local -n done_out="$5"
-  local line_id
-
-  line_id="$(jq -r '.id // empty' <<<"$line" 2>/dev/null || true)"
-  if [[ "$line_id" == "1" && "$requested_out" == "0" ]]; then
-    printf '%s\n' '{"method":"initialized"}' 2>/dev/null >&"$rate_in" || true
-    printf '%s\n' '{"id":2,"method":"account/rateLimits/read"}' 2>/dev/null >&"$rate_in" || true
-    requested_out=1
-  elif [[ "$line_id" == "2" ]]; then
-    payload_out="$(jq -c 'if has("result") then .result else {error:.error} end' <<<"$line" 2>/dev/null || true)"
-    done_out=1
-  fi
-  return 0
-}
-
-usage_json_check_wait() {
-  local rate_pid="$1"
-  local start="$2"
-  local timeout_sec="$3"
-  local -n payload_out="$4"
-  local -n done_out="$5"
-  local now
-
-  now="$(now_epoch)"
-  if (( now - start >= timeout_sec )); then
-    payload_out='{"error":{"message":"refresh timeout"}}'
-    done_out=1
-    return 0
-  fi
-  if ! kill -0 "$rate_pid" 2>/dev/null; then
-    payload_out='{"error":{"message":"refresh unavailable"}}'
-    done_out=1
-  fi
-  return 0
-}
-
-usage_json_codex_bin() {
-  local -n codex_cli_ref="$1"
-
-  codex_cli_ref="$(codex_bin)" || return 1
-  codex_launcher_ready "$codex_cli_ref"
-}
-
 usage_json_from_home() {
   local home_dir="$1"
-  local codex_cli line payload rate_in rate_out rate_pid
+  local codex_cli line line_id now payload rate_in rate_out rate_pid
   local requested=0 done=0
   local start timeout_sec
 
-  usage_json_codex_bin codex_cli || return 0
-  timeout_sec="$(usage_json_timeout_seconds)"
+  codex_cli="$(codex_bin)" || return 0
+  codex_launcher_ready "$codex_cli" || return 0
+  timeout_sec="${CODEX_AUTH_USAGE_TIMEOUT:-4}"
+  [[ "$timeout_sec" =~ ^[0-9]+$ && "$timeout_sec" -gt 0 ]] || timeout_sec=4
 
   if ! coproc CODEX_RATE { CODEX_AUTH_RUNNER=1 CODEX_HOME="$home_dir" "$codex_cli" app-server --listen stdio:// 2>/dev/null; }; then
     printf '%s\n' '{"error":{"message":"refresh unavailable"}}'
@@ -4561,9 +4508,24 @@ usage_json_from_home() {
       break
     fi
     if IFS= read -r -t 0.25 line 2>/dev/null <&"$rate_out"; then
-      usage_json_handle_line "$line" "$rate_in" requested payload done
+      line_id="$(jq -r '.id // empty' <<<"$line" 2>/dev/null || true)"
+      if [[ "$line_id" == "1" && "$requested" == "0" ]]; then
+        printf '%s\n' '{"method":"initialized"}' 2>/dev/null >&"$rate_in" || true
+        printf '%s\n' '{"id":2,"method":"account/rateLimits/read"}' 2>/dev/null >&"$rate_in" || true
+        requested=1
+      elif [[ "$line_id" == "2" ]]; then
+        payload="$(jq -c 'if has("result") then .result else {error:.error} end' <<<"$line" 2>/dev/null || true)"
+        done=1
+      fi
     else
-      usage_json_check_wait "$rate_pid" "$start" "$timeout_sec" payload done
+      now="$(now_epoch)"
+      if (( now - start >= timeout_sec )); then
+        payload='{"error":{"message":"refresh timeout"}}'
+        done=1
+      elif ! kill -0 "$rate_pid" 2>/dev/null; then
+        payload='{"error":{"message":"refresh unavailable"}}'
+        done=1
+      fi
     fi
     (( done )) && break
   done
