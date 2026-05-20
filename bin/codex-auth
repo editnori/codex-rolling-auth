@@ -4074,9 +4074,7 @@ selector_fzf_menu() {
   local status_w="$7"
   local mode="$8"
   local selector_palette_mode="$9"
-  local fzf_height fzf_height_arg choice kind action profile_choice fzf_prompt fzf_pointer fzf_header term_lines
-  local fzf_outer_top_padding=0
-  local fzf_pad_i=0
+  local fzf_height choice kind action profile_choice fzf_prompt fzf_pointer fzf_header term_lines
   local fzf_header_line_count=1
   local fzf_color_args=()
   local fzf_border_args=()
@@ -4087,18 +4085,6 @@ selector_fzf_menu() {
   local fzf_color_arg
   local fzf_codex_colors='dark,fg:#eeeeee,fg+:#f4f0e8,bg:#141414,bg+:#262626,hl:#fab283,hl+:#ffd0a0,border:#323232,label:#fab283,prompt:#fab283,pointer:#fab283,header:#9a9a9a,info:#808080,gutter:#141414'
   local fzf_vertical_padding=0 fzf_header_line action_label
-
-  fzf_height=$((${#rows_ref[@]} + 8))
-  (( fzf_height < 12 )) && fzf_height=12
-  term_lines="${LINES:-}"
-  [[ "$term_lines" =~ ^[0-9]+$ ]] || term_lines="$(tput lines 2>/dev/null || true)"
-  if [[ "$term_lines" =~ ^[0-9]+$ ]]; then
-    max_height=$((term_lines - 2))
-    (( max_height < 12 )) && max_height=12
-    (( fzf_height > max_height )) && fzf_height="$max_height"
-  elif (( fzf_height > 24 )); then
-    fzf_height=24
-  fi
 
   fzf_color_arg=""
   if [[ -n "${CODEX_AUTH_FZF_THEME:-}" ]]; then
@@ -4117,7 +4103,6 @@ selector_fzf_menu() {
     fzf_opencode_theme=1
   fi
   [[ -n "$fzf_color_arg" ]] && fzf_color_args+=(--color="$fzf_color_arg")
-  fzf_height_arg="100%"
   selector_control_sep="$(usage_separator)"
   if usage_unicode_enabled; then
     fzf_prompt='filter ▸ '
@@ -4153,6 +4138,8 @@ selector_fzf_menu() {
     done <<<"$fzf_header"
     (( fzf_header_line_count < 1 )) && fzf_header_line_count=1
     fzf_height=$((${#rows_ref[@]} + fzf_header_line_count + 1))
+    term_lines="${LINES:-}"
+    [[ "$term_lines" =~ ^[0-9]+$ ]] || term_lines="$(tput lines 2>/dev/null || true)"
     if [[ "$term_lines" =~ ^[0-9]+$ ]]; then
       max_height=$((term_lines - 2))
       max_height=$(( max_height < 6 ? 6 : max_height ))
@@ -4168,10 +4155,6 @@ selector_fzf_menu() {
     if (( fzf_vertical_padding )); then
       fzf_padding_args+=(--padding=1,0,1,0)
     fi
-    if [[ "${CODEX_AUTH_SELECTOR_CENTER:-0}" == "1" && "$term_lines" =~ ^[0-9]+$ ]] && (( term_lines > fzf_height + 1 )); then
-      fzf_outer_top_padding=$(((term_lines - fzf_height) / 2))
-    fi
-    fzf_height_arg="100%"
     fzf_header_args+=(--header-lines="$fzf_header_line_count" --header-first)
   else
     action_label="action"
@@ -4212,10 +4195,6 @@ selector_fzf_menu() {
     fzf_header_args+=(--header="$fzf_header")
   fi
 
-  for ((fzf_pad_i = 0; fzf_pad_i < fzf_outer_top_padding; fzf_pad_i++)); do
-    printf '\n'
-  done
-
   choice="$(
     {
       if (( fzf_opencode_theme )); then
@@ -4228,7 +4207,7 @@ selector_fzf_menu() {
       --ansi \
       --no-sort \
       --layout=reverse \
-      --height="$fzf_height_arg" \
+      --height=100% \
       "${fzf_border_args[@]}" \
       "${fzf_padding_args[@]}" \
       --prompt="$fzf_prompt" \
