@@ -2186,22 +2186,12 @@ usage_render_widths() {
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$mode" "$role_w" "$profile_w" "$cell_w" "$status_w" "$bar_width"
 }
 
-usage_status_is_exact_cap() {
-  case "$1" in
-    "week+5h cap"|"week cap"|"5h cap")
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
 usage_display_status() {
   local status="$1"
   local mode="${2:-normal}"
   local stale_status=0
   local stale_age=""
+  local exact_cap=0
 
   if [[ "$status" == stale\ * ]]; then
     stale_status=1
@@ -2211,6 +2201,11 @@ usage_display_status() {
       status="${BASH_REMATCH[2]}"
     fi
   fi
+  case "$status" in
+    "week+5h cap"|"week cap"|"5h cap")
+      exact_cap=1
+      ;;
+  esac
 
   if (( stale_status )); then
     if usage_mode_is_pico_or_nano "$mode"; then
@@ -2226,7 +2221,7 @@ usage_display_status() {
         else
           printf 'stale'
         fi
-      elif usage_status_is_exact_cap "$status"; then
+      elif (( exact_cap )); then
         printf 'cap'
       else
         printf 'stale'
@@ -2237,7 +2232,7 @@ usage_display_status() {
       else
         printf 'stale'
       fi
-    elif usage_status_is_exact_cap "$status"; then
+    elif (( exact_cap )); then
       printf 'old cap'
     else
       printf 'stale'
@@ -2245,7 +2240,7 @@ usage_display_status() {
     return 0
   fi
 
-  if usage_status_is_exact_cap "$status"; then
+  if (( exact_cap )); then
     printf 'cap'
     return 0
   fi
