@@ -83,6 +83,35 @@ fast_paths() {
   printf 'cache  usage     %s\n' "$state_display"
 }
 
+fast_usage_cached() {
+  local arg profile_file profile_name
+  local profile_files=()
+
+  for arg in "$@"; do
+    [[ "$arg" == "--cached" ]] || return 2
+  done
+  [[ "$#" -eq 1 && ! -f "$STATE_FILE" && ! -f "$AUTH_FILE" ]] || return 2
+
+  mkdir -p "$CODEX_HOME" "$PROFILE_DIR" "$BACKUP_DIR" "$CODEX_HOME/.tmp"
+  chmod 700 "$CODEX_HOME" "$PROFILE_DIR" "$BACKUP_DIR" "$CODEX_HOME/.tmp" 2>/dev/null || true
+
+  shopt -s nullglob
+  profile_files=("$PROFILE_DIR"/*.json)
+  shopt -u nullglob
+
+  printf 'Auth · Codex profiles\n'
+  if (( ${#profile_files[@]} == 0 )); then
+    printf 'no saved profiles\n'
+    return 0
+  fi
+  printf 'no data\n'
+  for profile_file in "${profile_files[@]}"; do
+    profile_name="${profile_file##*/}"
+    profile_name="${profile_name%.json}"
+    printf '       %-16s  %-20s  %-16s\n' "$profile_name" "-" "-"
+  done
+}
+
 fast_patch_codex_bin() {
   if [[ -n "${CODEX_AUTH_STOCK_CODEX_BIN:-}" && -x "${CODEX_AUTH_STOCK_CODEX_BIN:-}" ]]; then
     printf '%s\n' "$CODEX_AUTH_STOCK_CODEX_BIN"
@@ -177,6 +206,10 @@ main() {
   if [[ "$command" == "paths" && "$#" == 0 && "${CODEX_AUTH_FAST_PATHS:-1}" != "0" ]]; then
     fast_paths
     return 0
+  fi
+  if [[ "$command" == "usage" || "$command" == "limits" ]] && [[ "${CODEX_AUTH_FAST_USAGE_CACHED:-1}" != "0" ]]; then
+    fast_usage_cached "$@" && return 0
+    [[ "$?" == "2" ]] || return $?
   fi
   if [[ "$command" == "patch-codex" && "${CODEX_AUTH_FAST_PATCH:-1}" != "0" ]]; then
     fast_patch_codex "$@" && return 0
