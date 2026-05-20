@@ -4995,70 +4995,6 @@ print_palette_summary_header() {
   fi
 }
 
-selector_fzf_base_height() {
-  local row_count="$1"
-  local fzf_height=$((row_count + 8))
-  local term_lines max_height
-
-  (( fzf_height < 12 )) && fzf_height=12
-  term_lines="${LINES:-}"
-  [[ "$term_lines" =~ ^[0-9]+$ ]] || term_lines="$(tput lines 2>/dev/null || true)"
-  if [[ "$term_lines" =~ ^[0-9]+$ ]]; then
-    max_height=$((term_lines - 2))
-    (( max_height < 12 )) && max_height=12
-    (( fzf_height > max_height )) && fzf_height="$max_height"
-  elif (( fzf_height > 24 )); then
-    fzf_height=24
-  fi
-
-  printf '%s\t%s\n' "$fzf_height" "$term_lines"
-}
-
-selector_fzf_theme_color() {
-  local selector_palette_mode="$1"
-  local color_arg=""
-  local opencode_theme=0
-
-  if [[ -n "${CODEX_AUTH_FZF_THEME:-}" ]]; then
-    if [[ "$CODEX_AUTH_FZF_THEME" == "codex" || "$CODEX_AUTH_FZF_THEME" == "1" ]]; then
-      color_arg="$(selector_palette_fzf_colors)"
-      opencode_theme=1
-    else
-      color_arg="$CODEX_AUTH_FZF_THEME"
-    fi
-  elif (( selector_palette_mode )); then
-    if usage_color_active; then
-      color_arg="$(selector_palette_fzf_colors)"
-    else
-      color_arg="bw"
-    fi
-    opencode_theme=1
-  fi
-
-  printf '%s\t%s\n' "$color_arg" "$opencode_theme"
-}
-
-selector_fzf_controls() {
-  local total_w="$1"
-  local fzf_prompt fzf_pointer selector_control_sep selector_controls
-
-  selector_control_sep="$(usage_separator)"
-  if usage_unicode_enabled; then
-    fzf_prompt='filter ▸ '
-    fzf_pointer='▸'
-  else
-    fzf_prompt='filter > '
-    fzf_pointer='>'
-  fi
-  if (( total_w < 32 )); then
-    selector_controls="enter${selector_control_sep}esc stay${selector_control_sep}filter"
-  else
-    selector_controls="enter select${selector_control_sep}esc stay${selector_control_sep}type filter"
-  fi
-
-  printf '%s\t%s\t%s\n' "$fzf_prompt" "$fzf_pointer" "$selector_controls"
-}
-
 selector_fzf_apply_frame() {
   local fzf_opencode_theme="$1"
   local total_w="$2"
@@ -5180,15 +5116,53 @@ selector_fzf_menu() {
   local fzf_header_args=()
   local fzf_layout_args=(--layout=reverse)
   local fzf_opencode_theme=0
-  local selector_controls
+  local selector_controls selector_control_sep max_height
   local fzf_color_arg
 
-  IFS=$'\t' read -r fzf_height term_lines <<<"$(selector_fzf_base_height "${#rows_ref[@]}")"
-  IFS=$'\t' read -r fzf_color_arg fzf_opencode_theme <<<"$(selector_fzf_theme_color "$selector_palette_mode")"
+  fzf_height=$((${#rows_ref[@]} + 8))
+  (( fzf_height < 12 )) && fzf_height=12
+  term_lines="${LINES:-}"
+  [[ "$term_lines" =~ ^[0-9]+$ ]] || term_lines="$(tput lines 2>/dev/null || true)"
+  if [[ "$term_lines" =~ ^[0-9]+$ ]]; then
+    max_height=$((term_lines - 2))
+    (( max_height < 12 )) && max_height=12
+    (( fzf_height > max_height )) && fzf_height="$max_height"
+  elif (( fzf_height > 24 )); then
+    fzf_height=24
+  fi
+
+  fzf_color_arg=""
+  if [[ -n "${CODEX_AUTH_FZF_THEME:-}" ]]; then
+    if [[ "$CODEX_AUTH_FZF_THEME" == "codex" || "$CODEX_AUTH_FZF_THEME" == "1" ]]; then
+      fzf_color_arg="$(selector_palette_fzf_colors)"
+      fzf_opencode_theme=1
+    else
+      fzf_color_arg="$CODEX_AUTH_FZF_THEME"
+    fi
+  elif (( selector_palette_mode )); then
+    if usage_color_active; then
+      fzf_color_arg="$(selector_palette_fzf_colors)"
+    else
+      fzf_color_arg="bw"
+    fi
+    fzf_opencode_theme=1
+  fi
   [[ -n "$fzf_color_arg" ]] && fzf_color_args+=(--color="$fzf_color_arg")
   fzf_height_arg="~$fzf_height"
   fzf_ellipsis_args+=(--ellipsis='')
-  IFS=$'\t' read -r fzf_prompt fzf_pointer selector_controls <<<"$(selector_fzf_controls "$total_w")"
+  selector_control_sep="$(usage_separator)"
+  if usage_unicode_enabled; then
+    fzf_prompt='filter ▸ '
+    fzf_pointer='▸'
+  else
+    fzf_prompt='filter > '
+    fzf_pointer='>'
+  fi
+  if (( total_w < 32 )); then
+    selector_controls="enter${selector_control_sep}esc stay${selector_control_sep}filter"
+  else
+    selector_controls="enter select${selector_control_sep}esc stay${selector_control_sep}type filter"
+  fi
   selector_fzf_apply_frame "$fzf_opencode_theme" "$total_w" fzf_prompt fzf_pointer fzf_border_args fzf_margin_args
   selector_fzf_prepare_header rows_ref "$summary_text" "$selector_controls" "$total_w" "$role_w" "$profile_w" "$cell_w" "$status_w" "$mode" \
     "$fzf_opencode_theme" "$term_lines" fzf_header fzf_height fzf_height_arg fzf_outer_top_padding fzf_header_line_count fzf_padding_args fzf_header_args
