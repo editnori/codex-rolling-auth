@@ -5345,66 +5345,6 @@ selector_numbered_menu() {
   MENU_PROFILE="${fallback_profiles[$selected]}"
 }
 
-selector_valid_palette_role() {
-  local default_profile="$1"
-  local profile="$2"
-  local mark="$3"
-  local display_status="$4"
-
-  if [[ "$mark" == "*" ]]; then
-    printf 'stay'
-  elif [[ "$mark" == "=" ]]; then
-    printf 'same'
-  else
-    case "$display_status" in
-      ready|ok)
-        if [[ -n "$default_profile" && "$profile" == "$default_profile" ]]; then
-          printf 'best'
-        else
-          printf 'use'
-        fi
-        ;;
-      cap|old\ cap|both\ cap)
-        printf 'cap'
-        ;;
-      *)
-        printf 'warn'
-        ;;
-    esac
-  fi
-}
-
-selector_valid_plain_role() {
-  local default_profile="$1"
-  local profile="$2"
-  local mark="$3"
-  local display_status="$4"
-  local role_w="$5"
-
-  if [[ "$mark" == "*" ]]; then
-    selector_action_role "stay" "$role_w"
-  elif [[ "$mark" == "=" ]]; then
-    selector_action_role "same" "$role_w"
-  elif [[ "$display_status" == "cap" || "$display_status" == "old cap" || "$display_status" == "both cap" ]]; then
-    selector_action_role "cap" "$role_w"
-  elif [[ -n "$default_profile" && "$profile" == "$default_profile" ]]; then
-    selector_action_role "best" "$role_w"
-  else
-    selector_action_role "switch" "$role_w"
-  fi
-}
-
-selector_invalid_role() {
-  local mark="$1"
-  local palette_mode="$2"
-
-  case "$mark:$palette_mode" in
-    "*:1") printf 'stay' ;;
-    "=:1"|"=:0") printf 'same' ;;
-    *) printf 'use' ;;
-  esac
-}
-
 selector_menu_row_for_record() {
   local default_profile="$1"
   local selector_palette_mode="$2"
@@ -5439,11 +5379,41 @@ selector_menu_row_for_record() {
     if (( selector_palette_mode )); then
       display_status="$(usage_display_status "$status" "normal")"
       palette_profile="$(selector_palette_profile_label "$profile" "$total_w" "$selector_profile_w")"
-      action_role="$(selector_valid_palette_role "$default_profile" "$profile" "$mark" "$display_status")"
+      if [[ "$mark" == "*" ]]; then
+        action_role="stay"
+      elif [[ "$mark" == "=" ]]; then
+        action_role="same"
+      else
+        case "$display_status" in
+          ready|ok)
+            if [[ -n "$default_profile" && "$profile" == "$default_profile" ]]; then
+              action_role="best"
+            else
+              action_role="use"
+            fi
+            ;;
+          cap|old\ cap|both\ cap)
+            action_role="cap"
+            ;;
+          *)
+            action_role="warn"
+            ;;
+        esac
+      fi
       display="$(print_selector_palette_table_row "$action_role $palette_profile" "$weekly" "$short" "$display_status" "$status" "$valid" "$total_w")"
     else
       display_status="$(usage_display_status "$status" "$mode")"
-      action_role="$(selector_valid_plain_role "$default_profile" "$profile" "$mark" "$display_status" "$role_w")"
+      if [[ "$mark" == "*" ]]; then
+        action_role="$(selector_action_role "stay" "$role_w")"
+      elif [[ "$mark" == "=" ]]; then
+        action_role="$(selector_action_role "same" "$role_w")"
+      elif [[ "$display_status" == "cap" || "$display_status" == "old cap" || "$display_status" == "both cap" ]]; then
+        action_role="$(selector_action_role "cap" "$role_w")"
+      elif [[ -n "$default_profile" && "$profile" == "$default_profile" ]]; then
+        action_role="$(selector_action_role "best" "$role_w")"
+      else
+        action_role="$(selector_action_role "switch" "$role_w")"
+      fi
       display="$(print_usage_render_data_line "$action_role" "$profile" "$weekly" "$weekly_reset" "$short" "$short_reset" \
         "$display_status" "$status" "$valid" "$weekly_used" "$short_used" "$role_w" "$profile_w" "$cell_w" "$status_w" "$bar_width" "$mode")"
     fi
@@ -5451,11 +5421,19 @@ selector_menu_row_for_record() {
     if (( selector_palette_mode )); then
       display_status="$(usage_display_status "$status" "normal")"
       palette_profile="$(selector_palette_profile_label "$profile" "$total_w" "$selector_profile_w")"
-      action_role="$(selector_invalid_role "$mark" 1)"
+      case "$mark" in
+        "*") action_role="stay" ;;
+        "=") action_role="same" ;;
+        *) action_role="use" ;;
+      esac
       display="$(print_selector_palette_table_row "$action_role $palette_profile" "-" "-" "$display_status" "$status" "$valid" "$total_w")"
     else
       display_status="$(usage_display_status "$status" "$mode")"
-      action_role="$(selector_invalid_role "$mark" 0)"
+      if [[ "$mark" == "=" ]]; then
+        action_role="same"
+      else
+        action_role="use"
+      fi
       display="$(print_selector_row "$action_role" "$(usage_display_profile_name "$profile" "" "$selector_profile_w")" "$display_status" "$action_w" "$selector_profile_w" "$total_w")"
     fi
   fi
