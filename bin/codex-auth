@@ -4923,7 +4923,7 @@ usage_best_selection_into() {
       best_week="$week_score"
       best_short="$short_score"
     fi
-  done < <(printf '%s\n' "$records" | sed '/^[[:space:]]*$/d')
+  done <<<"$records"
 
   if [[ -n "$best_profile" ]]; then
     if [[ "$best_mark" == "*" ]]; then
