@@ -2253,16 +2253,6 @@ print_usage_limit_cell() {
   return 0
 }
 
-usage_reset_prefix_width() {
-  local reset_w="$1"
-
-  if (( reset_w > 0 )) && usage_unicode_enabled; then
-    printf '1'
-  else
-    printf '0'
-  fi
-}
-
 usage_cell_overhead() {
   local mode="$1"
   local label_w="$2"
@@ -2302,7 +2292,11 @@ usage_render_widths() {
   if (( ! USAGE_VERBOSE )); then
     reset_w=0
   fi
-  reset_prefix_w="$(usage_reset_prefix_width "$reset_w")"
+  if (( reset_w > 0 )) && usage_unicode_enabled; then
+    reset_prefix_w=1
+  else
+    reset_prefix_w=0
+  fi
   cell_overhead="$(usage_cell_overhead "$mode" "$label_w" "$reset_w" "$reset_prefix_w")"
 
   max_profile_w=$(( cols - role_w - status_min - (2 * (cell_overhead + min_bar_w)) - gap_w ))
@@ -2310,7 +2304,11 @@ usage_render_widths() {
     mode="tight"
     reset_w=5
     label_w=4
-    reset_prefix_w="$(usage_reset_prefix_width "$reset_w")"
+    if usage_unicode_enabled; then
+      reset_prefix_w=1
+    else
+      reset_prefix_w=0
+    fi
     cell_overhead="$(usage_cell_overhead "$mode" "$label_w" "$reset_w" "$reset_prefix_w")"
     max_profile_w=$(( cols - role_w - status_min - (2 * (cell_overhead + min_bar_w)) - gap_w ))
   fi
