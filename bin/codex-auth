@@ -7923,47 +7923,6 @@ codex_run_limit_detected() {
   fi
 }
 
-codex_run_make_resume_args() {
-  CODEX_RUN_RESUME_ARGS=()
-
-  while (( $# > 0 )); do
-    if [[ "$1" == "--" ]]; then
-      shift
-      break
-    fi
-    case "$1" in
-      -c|--config|--enable|--disable|--remote|--remote-auth-token-env|-i|--image|-m|--model|-p|--profile|--profile-v2|-s|--sandbox|-a|--ask-for-approval|-C|--cd|--cwd)
-        CODEX_RUN_RESUME_ARGS+=("$1")
-        shift
-        if (( $# > 0 )); then
-          CODEX_RUN_RESUME_ARGS+=("$1")
-          shift
-        fi
-        ;;
-      --dangerously-bypass-approvals-and-sandbox|--yolo|--oss|--strict-config|--dangerously-auto-approve-everything|-*)
-        CODEX_RUN_RESUME_ARGS+=("$1")
-        shift
-        ;;
-      *)
-        break
-        ;;
-    esac
-  done
-
-  if [[ "${1:-}" == "resume" ]]; then
-    shift
-    if [[ "${1:-}" == "--last" ]]; then
-      CODEX_RUN_RESUME_ARGS+=(resume --last)
-    elif [[ -n "${1:-}" && "${1:-}" != -* ]]; then
-      CODEX_RUN_RESUME_ARGS+=(resume "$1")
-    else
-      CODEX_RUN_RESUME_ARGS+=(resume --last)
-    fi
-  else
-    CODEX_RUN_RESUME_ARGS+=(resume --last)
-  fi
-}
-
 codex_run_watch_loop() {
   local auto_ttl="$1"
   local interval="${CODEX_AUTH_ROLL_INTERVAL:-60}"
@@ -8181,7 +8140,6 @@ cmd_run() {
   require_codex_launcher "$codex_cli"
 
   local run_args=("${args[@]}")
-  CODEX_RUN_RESUME_ARGS=()
   attempt=1
   log_file=""
   run_file=""
@@ -8207,11 +8165,47 @@ cmd_run() {
     codex_run_execute_attempt "$codex_cli" "$log_enabled" run_args status log_file run_file watch_pid monitor_pid target_pid
 
     if (( status != 0 && attempt < max_attempts )) && [[ -n "$log_file" ]] && codex_run_limit_detected "$log_file"; then
+      local resume_args=()
       [[ "$keep_log" == "1" ]] || rm -f "$log_file" 2>/dev/null || true
       log_file=""
       print_status_note roll "usage limit, rotating" >&2
-      codex_run_make_resume_args "${run_args[@]}"
-      run_args=("${CODEX_RUN_RESUME_ARGS[@]}")
+      set -- "${run_args[@]}"
+      while (( $# > 0 )); do
+        if [[ "$1" == "--" ]]; then
+          shift
+          break
+        fi
+        case "$1" in
+          -c|--config|--enable|--disable|--remote|--remote-auth-token-env|-i|--image|-m|--model|-p|--profile|--profile-v2|-s|--sandbox|-a|--ask-for-approval|-C|--cd|--cwd)
+            resume_args+=("$1")
+            shift
+            if (( $# > 0 )); then
+              resume_args+=("$1")
+              shift
+            fi
+            ;;
+          --dangerously-bypass-approvals-and-sandbox|--yolo|--oss|--strict-config|--dangerously-auto-approve-everything|-*)
+            resume_args+=("$1")
+            shift
+            ;;
+          *)
+            break
+            ;;
+        esac
+      done
+      if [[ "${1:-}" == "resume" ]]; then
+        shift
+        if [[ "${1:-}" == "--last" ]]; then
+          resume_args+=(resume --last)
+        elif [[ -n "${1:-}" && "${1:-}" != -* ]]; then
+          resume_args+=(resume "$1")
+        else
+          resume_args+=(resume --last)
+        fi
+      else
+        resume_args+=(resume --last)
+      fi
+      run_args=("${resume_args[@]}")
       attempt=$((attempt + 1))
       continue
     fi
