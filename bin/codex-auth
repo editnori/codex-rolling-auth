@@ -4523,49 +4523,6 @@ usage_limit_remaining_fields() {
   printf '%s\t%s%%\t%s\n' "$used" "$left" "$reset_text"
 }
 
-usage_record_error_status() {
-  local err="$1"
-
-  if [[ "$err" == *"token has been invalidated"* || "$err" == *"token_invalidated"* || "$err" == *"invalidated oauth token"* || "$err" == *"token_revoked"* ]]; then
-    printf 'login'
-  elif [[ "$err" == "refresh timeout" || "$err" == "refresh unavailable" || "$err" == "no response" ]]; then
-    printf 'offline'
-  else
-    printf '%s' "$err"
-  fi
-}
-
-usage_record_limit_status() {
-  local weekly_used="$1"
-  local short_used="$2"
-  local short_label="$3"
-  local reached="$4"
-  local stale="$5"
-  local cache_age="$6"
-  local status="ok"
-  local stale_age_label
-
-  if (( weekly_used >= 100 && short_used >= 100 )); then
-    status="week+5h cap"
-  elif (( weekly_used >= 100 )); then
-    status="week cap"
-  elif (( short_used >= 100 )); then
-    status="${short_label} cap"
-  elif [[ -n "$reached" ]]; then
-    status="$reached"
-  fi
-  if [[ "$stale" == "true" ]]; then
-    stale_age_label="$(format_cache_age "$cache_age")"
-    if [[ -n "$stale_age_label" ]]; then
-      status="stale $stale_age_label $status"
-    else
-      status="stale $status"
-    fi
-  fi
-
-  printf '%s' "$status"
-}
-
 usage_record_for_profile() {
   local profile_name="$1"
   local profile_file="$2"
@@ -4591,7 +4548,11 @@ usage_record_for_profile() {
   IFS=$'\037' read -r kind err cache_age stale plan short_used short_window short_reset weekly_used weekly_window weekly_reset credits reached <<<"$extracted"
 
   if [[ "$kind" == "error" ]]; then
-    err="$(usage_record_error_status "$err")"
+    if [[ "$err" == *"token has been invalidated"* || "$err" == *"token_invalidated"* || "$err" == *"invalidated oauth token"* || "$err" == *"token_revoked"* ]]; then
+      err="login"
+    elif [[ "$err" == "refresh timeout" || "$err" == "refresh unavailable" || "$err" == "no response" ]]; then
+      err="offline"
+    fi
     printf '1\t-1\t-1\t%s\t%s\t-\t-\t-\t%s\t5h\t-\t-\t%s\n' "$mark" "$profile_name" "$err" "$cache_age"
     return 0
   fi
@@ -4605,7 +4566,24 @@ usage_record_for_profile() {
   short_label="$(window_label "$short_window")"
   IFS=$'\t' read -r short_used short short_reset_text <<<"$(usage_limit_remaining_fields "$short_used" "$short_window" "$short_reset")"
   IFS=$'\t' read -r weekly_used weekly weekly_reset_text <<<"$(usage_limit_remaining_fields "$weekly_used" "$weekly_window" "$weekly_reset")"
-  status="$(usage_record_limit_status "$weekly_used" "$short_used" "$short_label" "$reached" "$stale" "$cache_age")"
+  status="ok"
+  if (( weekly_used >= 100 && short_used >= 100 )); then
+    status="week+5h cap"
+  elif (( weekly_used >= 100 )); then
+    status="week cap"
+  elif (( short_used >= 100 )); then
+    status="${short_label} cap"
+  elif [[ -n "$reached" ]]; then
+    status="$reached"
+  fi
+  if [[ "$stale" == "true" ]]; then
+    stale_age_label="$(format_cache_age "$cache_age")"
+    if [[ -n "$stale_age_label" ]]; then
+      status="stale $stale_age_label $status"
+    else
+      status="stale $status"
+    fi
+  fi
 
   printf '0\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$weekly_used" "$short_used" "$mark" "$profile_name" "$plan" "$weekly" "$short" "$status" "$short_label" "$weekly_reset_text" "$short_reset_text" "$cache_age"
