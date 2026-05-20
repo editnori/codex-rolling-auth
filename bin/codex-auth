@@ -7596,10 +7596,6 @@ patch_codex_log_path() {
   printf '%s/build.log\n' "$(patch_codex_root)"
 }
 
-patch_codex_self_path() {
-  realpath "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s\n' "${BASH_SOURCE[0]}"
-}
-
 patch_codex_stock_bin() {
   if [[ -n "${CODEX_AUTH_STOCK_CODEX_BIN:-}" && -x "${CODEX_AUTH_STOCK_CODEX_BIN:-}" ]]; then
     printf '%s\n' "$CODEX_AUTH_STOCK_CODEX_BIN"
@@ -7608,43 +7604,22 @@ patch_codex_stock_bin() {
   codex_bin
 }
 
-patch_codex_stock_version() {
-  local stock_bin="$1"
-  local version
-
-  version="$("$stock_bin" --version 2>/dev/null | sed -n '1s/[[:space:]]*$//p' || true)"
-  [[ -n "$version" ]] || version="unknown"
-  printf '%s' "$version"
-}
-
-patch_codex_stock_hash() {
-  local stock_bin="$1"
-
-  if command -v sha256sum >/dev/null 2>&1 && [[ -f "$stock_bin" ]]; then
-    sha256sum "$stock_bin" | awk '{print $1}'
-  else
-    printf '%s' "$stock_bin" | cksum | awk '{print $1 "-" $2}'
-  fi
-}
-
-patch_codex_stock_key_from_parts() {
-  local version="$1"
-  local hash="$2"
-
-  if command -v sha256sum >/dev/null 2>&1; then
-    printf '%s\037%s\n' "$version" "$hash" | sha256sum | awk '{print $1}'
-  else
-    printf '%s\037%s\n' "$version" "$hash" | cksum | awk '{print $1 "-" $2}'
-  fi
-}
-
 patch_codex_stock_info() {
   local stock_bin="$1"
   local version hash key
 
-  version="$(patch_codex_stock_version "$stock_bin")"
-  hash="$(patch_codex_stock_hash "$stock_bin")"
-  key="$(patch_codex_stock_key_from_parts "$version" "$hash")"
+  version="$("$stock_bin" --version 2>/dev/null | sed -n '1s/[[:space:]]*$//p' || true)"
+  [[ -n "$version" ]] || version="unknown"
+  if command -v sha256sum >/dev/null 2>&1 && [[ -f "$stock_bin" ]]; then
+    hash="$(sha256sum "$stock_bin" | awk '{print $1}')"
+  else
+    hash="$(printf '%s' "$stock_bin" | cksum | awk '{print $1 "-" $2}')"
+  fi
+  if command -v sha256sum >/dev/null 2>&1; then
+    key="$(printf '%s\037%s\n' "$version" "$hash" | sha256sum | awk '{print $1}')"
+  else
+    key="$(printf '%s\037%s\n' "$version" "$hash" | cksum | awk '{print $1 "-" $2}')"
+  fi
   printf '%s\t%s\t%s\n' "$version" "$hash" "$key"
 }
 
@@ -7932,14 +7907,6 @@ patch_codex_prepare_source() {
   git -C "$source_dir" checkout --detach "$ref"
 }
 
-patch_codex_build_args() {
-  local profile="$1"
-
-  if [[ "$profile" == "release" ]]; then
-    printf '%s\n' --release
-  fi
-}
-
 patch_codex_built_binary_path() {
   local source_dir="$1"
   local profile="$2"
@@ -7958,7 +7925,7 @@ patch_codex_run_build() {
   local check_login="$3"
   local args=()
 
-  mapfile -t args < <(patch_codex_build_args "$profile")
+  [[ "$profile" == "release" ]] && args=(--release)
   if [[ "$check_login" == "1" ]]; then
     (cd "$source_dir/codex-rs" && cargo check -p codex-login)
   fi
@@ -8040,7 +8007,7 @@ patch_codex_background() {
   local quiet="$2"
   local self log
 
-  self="$(patch_codex_self_path)"
+  self="$(realpath "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s\n' "${BASH_SOURCE[0]}")"
   log="$(patch_codex_log_path)"
   mkdir -p "$(dirname "$log")" "$(patch_codex_root)/.tmp"
   nohup env CODEX_AUTH_STOCK_CODEX_BIN="$stock_bin" CODEX_AUTH_PATCH_BACKGROUND_CHILD=1 "$self" patch-codex --quiet --foreground >"$log" 2>&1 &
