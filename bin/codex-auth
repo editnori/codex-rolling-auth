@@ -1040,14 +1040,6 @@ compact_error_message() {
   printf '%s' "$message"
 }
 
-print_error_prefix() {
-  if usage_unicode_enabled || (( $1 < 30 )); then
-    printf '! '
-  else
-    printf 'error: '
-  fi
-}
-
 print_error_has_body() {
   [[ "$1" != "$2" && "$1" != "$3" ]]
 }
@@ -1061,7 +1053,11 @@ print_error() {
 
   cols="$(terminal_width)"
   message="$(compact_error_message "$message" "$cols")"
-  prefix="$(print_error_prefix "$cols")"
+  if usage_unicode_enabled || (( cols < 30 )); then
+    prefix='! '
+  else
+    prefix='error: '
+  fi
   indent="$(printf '%*s' "${#prefix}" '')"
   line_prefixes=("$prefix" "$indent")
   current="$prefix"
