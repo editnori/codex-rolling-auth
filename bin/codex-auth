@@ -2377,7 +2377,6 @@ usage_metric_header_cell() {
   fi
 
   fit_text_center "$display" "$width"
-  return 0
 }
 
 print_usage_render_header() {
