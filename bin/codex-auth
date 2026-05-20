@@ -7923,21 +7923,6 @@ codex_run_limit_detected() {
   fi
 }
 
-codex_run_watch_loop() {
-  local auto_ttl="$1"
-  local interval="${CODEX_AUTH_ROLL_INTERVAL:-60}"
-  local auto_args
-
-  [[ "$interval" =~ ^[1-9][0-9]*$ ]] || interval=60
-  while true; do
-    sleep "$interval" || exit 0
-    [[ "${CODEX_AUTH_AUTO:-1}" != "0" ]] || continue
-    auto_args=(--quiet --no-background)
-    [[ "$auto_ttl" =~ ^[0-9]+$ ]] && auto_args+=(--ttl "$auto_ttl")
-    CODEX_AUTH_NO_BACKGROUND=1 cmd_auto "${auto_args[@]}" || true
-  done
-}
-
 codex_run_kill_script_for_log() {
   local parent_pid="$1"
   local run_file="$2"
@@ -8158,7 +8143,17 @@ cmd_run() {
 
     watch_pid=""
     if [[ "$run_auto" != "0" && "$watch_enabled" != "0" && "${CODEX_AUTH_AUTO:-1}" != "0" ]]; then
-      codex_run_watch_loop "$auto_ttl" &
+      (
+        watch_interval="${CODEX_AUTH_ROLL_INTERVAL:-60}"
+        [[ "$watch_interval" =~ ^[1-9][0-9]*$ ]] || watch_interval=60
+        while true; do
+          sleep "$watch_interval" || exit 0
+          [[ "${CODEX_AUTH_AUTO:-1}" != "0" ]] || continue
+          watch_auto_args=(--quiet --no-background)
+          [[ "$auto_ttl" =~ ^[0-9]+$ ]] && watch_auto_args+=(--ttl "$auto_ttl")
+          CODEX_AUTH_NO_BACKGROUND=1 cmd_auto "${watch_auto_args[@]}" || true
+        done
+      ) &
       watch_pid=$!
     fi
 
