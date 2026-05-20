@@ -6635,58 +6635,50 @@ usage_limit_sort_score() {
   fi
 }
 
-usage_record_sort_line() {
-  local default_profile="$1"
-  local record="$2"
-  local valid weekly_used short_used mark profile plan weekly short status short_label weekly_reset short_reset cache_age
-  local rank coverage_rank short_score week_score
-
-  IFS=$'\t' read -r valid weekly_used short_used mark profile plan weekly short status short_label weekly_reset short_reset cache_age <<<"$record"
-  case "$status" in
-    offline) rank=7 ;;
-    login) rank=8 ;;
-    *)
-      if [[ "$valid" != "0" ]]; then
-        rank=9
-      elif [[ "$status" == "ok" ]]; then
-        if [[ -n "$default_profile" && "$profile" == "$default_profile" ]]; then
-          rank=0
-        else
-          case "$mark" in
-            '*') rank=1 ;;
-            '=') rank=4 ;;
-            *) rank=2 ;;
-          esac
-        fi
-      else
-        case "$status:$mark" in
-          stale*) rank=3 ;;
-          *:'*') rank=4 ;;
-          *cap*:*) rank=5 ;;
-          *) rank=6 ;;
-        esac
-      fi
-      ;;
-  esac
-  coverage_rank="$(usage_limit_coverage_rank "$weekly" "$short")"
-  short_score="$(usage_limit_sort_score "$short_used" "$short")"
-  week_score="$(usage_limit_sort_score "$weekly_used" "$weekly")"
-  printf '%s\t%s\t%03d\t%03d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$rank" "$coverage_rank" "$short_score" "$week_score" "$profile" \
-    "$valid" "$weekly_used" "$short_used" "$mark" "$profile" "$plan" "$weekly" "$short" "$status" "$short_label" "$weekly_reset" "$short_reset" "$cache_age"
-}
-
 prepare_usage_records() {
   local records="$1"
   local default_profile="${2:-}"
   local sorted_records=()
   local record valid weekly_used short_used mark profile plan weekly short status record_short_label weekly_reset short_reset cache_age
+  local rank coverage_rank short_score week_score
 
   mapfile -t sorted_records < <(
     printf '%s\n' "$records" \
       | sed '/^[[:space:]]*$/d' \
       | while IFS= read -r record; do
-          usage_record_sort_line "$default_profile" "$record"
+          IFS=$'\t' read -r valid weekly_used short_used mark profile plan weekly short status record_short_label weekly_reset short_reset cache_age <<<"$record"
+          case "$status" in
+            offline) rank=7 ;;
+            login) rank=8 ;;
+            *)
+              if [[ "$valid" != "0" ]]; then
+                rank=9
+              elif [[ "$status" == "ok" ]]; then
+                if [[ -n "$default_profile" && "$profile" == "$default_profile" ]]; then
+                  rank=0
+                else
+                  case "$mark" in
+                    '*') rank=1 ;;
+                    '=') rank=4 ;;
+                    *) rank=2 ;;
+                  esac
+                fi
+              else
+                case "$status:$mark" in
+                  stale*) rank=3 ;;
+                  *:'*') rank=4 ;;
+                  *cap*:*) rank=5 ;;
+                  *) rank=6 ;;
+                esac
+              fi
+              ;;
+          esac
+          coverage_rank="$(usage_limit_coverage_rank "$weekly" "$short")"
+          short_score="$(usage_limit_sort_score "$short_used" "$short")"
+          week_score="$(usage_limit_sort_score "$weekly_used" "$weekly")"
+          printf '%s\t%s\t%03d\t%03d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "$rank" "$coverage_rank" "$short_score" "$week_score" "$profile" \
+            "$valid" "$weekly_used" "$short_used" "$mark" "$profile" "$plan" "$weekly" "$short" "$status" "$record_short_label" "$weekly_reset" "$short_reset" "$cache_age"
         done \
       | sort -t $'\t' -k1,1n -k2,2n -k3,3n -k4,4n -k5,5 \
       | cut -f6-
