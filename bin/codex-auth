@@ -8297,41 +8297,6 @@ codex_run_cleanup() {
   fi
 }
 
-parse_run_args() {
-  local -n max_attempts_ref="$1"
-  local -n run_auto_ref="$2"
-  local -n log_enabled_ref="$3"
-  local -n args_ref="$4"
-  shift 4
-
-  while (( $# > 0 )); do
-    case "$1" in
-      --attempts)
-        [[ "${2:-}" =~ ^[1-9][0-9]*$ ]] || die "usage: codex-auth run [--attempts n] -- <codex args>"
-        max_attempts_ref="$2"
-        shift 2
-        ;;
-      --no-auto)
-        run_auto_ref=0
-        shift
-        ;;
-      --no-log)
-        log_enabled_ref=0
-        shift
-        ;;
-      --)
-        shift
-        args_ref+=("$@")
-        break
-        ;;
-      *)
-        args_ref+=("$1")
-        shift
-        ;;
-    esac
-  done
-}
-
 codex_run_execute_attempt() {
   local codex_cli="$1"
   local log_enabled="$2"
@@ -8395,7 +8360,32 @@ cmd_run() {
   [[ "$max_attempts" =~ ^[1-9][0-9]*$ ]] || max_attempts=5
   [[ -z "$auto_ttl" || "$auto_ttl" =~ ^[0-9]+$ ]] || auto_ttl=""
 
-  parse_run_args max_attempts run_auto log_enabled args "$@"
+  while (( $# > 0 )); do
+    case "$1" in
+      --attempts)
+        [[ "${2:-}" =~ ^[1-9][0-9]*$ ]] || die "usage: codex-auth run [--attempts n] -- <codex args>"
+        max_attempts="$2"
+        shift 2
+        ;;
+      --no-auto)
+        run_auto=0
+        shift
+        ;;
+      --no-log)
+        log_enabled=0
+        shift
+        ;;
+      --)
+        shift
+        args+=("$@")
+        break
+        ;;
+      *)
+        args+=("$1")
+        shift
+        ;;
+    esac
+  done
 
   codex_cli="$(codex_bin)" || die "codex command not found"
   require_codex_launcher "$codex_cli"
