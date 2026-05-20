@@ -7166,19 +7166,6 @@ usage_maybe_acquire_refresh_lock() {
   fi
 }
 
-usage_collect_records_for_mode() {
-  local active_fp="$1"
-  shift
-
-  if [[ "$USAGE_CACHED" == "1" && "$USAGE_REFRESH" != "1" ]]; then
-    collect_usage_records_cached "$active_fp" "$@"
-  elif [[ "$USAGE_REFRESH" == "1" && "$USAGE_FAST_REFRESH" != "1" ]]; then
-    collect_usage_records_synced "$active_fp" "$@"
-  else
-    collect_usage_records "$active_fp" "$@"
-  fi
-}
-
 usage_best_selection_into() {
   local records="$1"
   local -n default_profile_ref="$2"
@@ -7279,7 +7266,13 @@ cmd_usage() {
     active_fp="$(active_auth_fingerprint)"
 
     local records=""
-    records="$(usage_collect_records_for_mode "$active_fp" "${profile_files[@]}")"
+    if [[ "$USAGE_CACHED" == "1" && "$USAGE_REFRESH" != "1" ]]; then
+      records="$(collect_usage_records_cached "$active_fp" "${profile_files[@]}")"
+    elif [[ "$USAGE_REFRESH" == "1" && "$USAGE_FAST_REFRESH" != "1" ]]; then
+      records="$(collect_usage_records_synced "$active_fp" "${profile_files[@]}")"
+    else
+      records="$(collect_usage_records "$active_fp" "${profile_files[@]}")"
+    fi
     if (( refresh_lock_held )); then
       flock -u 8 2>/dev/null || true
       refresh_lock_held=0
