@@ -1646,10 +1646,6 @@ usage_glyph() {
   fi
 }
 
-usage_rule_glyph() {
-  usage_glyph '─' '-'
-}
-
 usage_meta_glyph() {
   usage_glyph '·' '.'
 }
@@ -1908,7 +1904,7 @@ print_usage_section_rule() {
     esac
     printf '%s' "$text"
   else
-    repeat_glyph "$(usage_rule_glyph)" "$width"
+    repeat_glyph "$(usage_glyph '─' '-')" "$width"
   fi
   usage_tone_reset
   printf '\n'
@@ -4074,7 +4070,7 @@ print_usage_summary_block() {
       fit_text "$title" "$total_w"
       printf '\n'
     else
-      glyph="$(usage_rule_glyph)"
+      glyph="$(usage_glyph '─' '-')"
       rule_w=$((total_w - title_w - 1))
       usage_tone_color accent
       printf '%s' "$title"
@@ -4136,7 +4132,7 @@ selector_header_text() {
     action_label="act"
   fi
   print_usage_render_header "$action_label" "$role_w" "$profile_w" "$cell_w" "$status_w" "$mode"
-  repeat_glyph "$(usage_rule_glyph)" "$total_w"
+  repeat_glyph "$(usage_glyph '─' '-')" "$total_w"
   printf '\n'
   fit_text_rtrim "$controls" "$total_w"
 }
