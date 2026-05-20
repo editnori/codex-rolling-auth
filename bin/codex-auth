@@ -338,10 +338,7 @@ require_auth_file() {
   local path="$1"
   [[ -f "$path" ]] || die "auth file not found: $path"
   [[ -s "$path" ]] || die "auth file is empty: $path"
-  if command -v jq >/dev/null 2>&1; then
-    jq -e 'has("OPENAI_API_KEY") or has("tokens")' "$path" >/dev/null 2>&1 \
-      || die "not a Codex auth.json with OPENAI_API_KEY or tokens: $path"
-  fi
+  auth_file_is_valid "$path" || die "not a Codex auth.json with OPENAI_API_KEY or tokens: $path"
 }
 
 auth_file_is_valid() {
@@ -4946,6 +4943,17 @@ active_auth_fingerprint() {
   credential_fingerprint "$AUTH_FILE" || true
 }
 
+acquire_refresh_lock_into() {
+  local -n fd_ref="$1"
+  local mode="${2:-wait}" refresh_lock_wait
+
+  exec {fd_ref}>"$CODEX_HOME/.tmp/codex-auth-refresh.lock"
+  [[ "$mode" == "try" ]] && { flock -n "$fd_ref"; return $?; }
+  refresh_lock_wait="${CODEX_AUTH_REFRESH_LOCK_WAIT:-1}"
+  [[ "$refresh_lock_wait" =~ ^[0-9]+$ ]] || refresh_lock_wait=1
+  flock -w "$refresh_lock_wait" "$fd_ref"
+}
+
 usage_best_selection_into() {
   local records="$1"
   local -n default_profile_ref="$2"
@@ -4994,6 +5002,7 @@ cmd_usage() {
   local auto_switch=0
   local args=()
   local refresh_lock_held=0
+  local refresh_lock_fd=""
   USAGE_QUIET=0
   USAGE_CACHED=0
   USAGE_REFRESH=0
@@ -5055,7 +5064,6 @@ cmd_usage() {
   set -- "${args[@]}"
 
   local profile_files=()
-  local refresh_lock_wait
   profile_files_for_args_into profile_files 0 "$@" || return 0
   if (( ${#profile_files[@]} == 0 )); then
     [[ "$USAGE_QUIET" == "1" ]] || print_empty_profiles
@@ -5065,10 +5073,7 @@ cmd_usage() {
     print_status_note refresh "${#profile_files[@]} profiles" >&2
   fi
   if [[ "$USAGE_REFRESH" == "1" ]]; then
-    exec 8>"$CODEX_HOME/.tmp/codex-auth-refresh.lock"
-    refresh_lock_wait="${CODEX_AUTH_REFRESH_LOCK_WAIT:-1}"
-    [[ "$refresh_lock_wait" =~ ^[0-9]+$ ]] || refresh_lock_wait=1
-    if ! flock -w "$refresh_lock_wait" 8; then
+    if ! acquire_refresh_lock_into refresh_lock_fd; then
       [[ "$USAGE_QUIET" == "1" ]] || print_status_note cache "refresh busy" >&2
       USAGE_REFRESH=0
       USAGE_CACHED=1
@@ -5090,7 +5095,7 @@ cmd_usage() {
       records="$(collect_usage_records "$active_fp" "${profile_files[@]}")"
     fi
     if (( refresh_lock_held )); then
-      flock -u 8 2>/dev/null || true
+      flock -u "$refresh_lock_fd" 2>/dev/null || true; exec {refresh_lock_fd}>&- 2>/dev/null || true
       refresh_lock_held=0
     fi
 
@@ -5194,17 +5199,12 @@ cmd_refresh() {
   done
   set -- "${args[@]}"
 
-  exec 9>"$CODEX_HOME/.tmp/codex-auth-refresh.lock"
-  if [[ "${CODEX_AUTH_REFRESH_LOCK:-}" == "try" ]]; then
-    flock -n 9 || return 0
-  else
-    local refresh_lock_wait
-    refresh_lock_wait="${CODEX_AUTH_REFRESH_LOCK_WAIT:-1}"
-    [[ "$refresh_lock_wait" =~ ^[0-9]+$ ]] || refresh_lock_wait=1
-    if ! flock -w "$refresh_lock_wait" 9; then
-      [[ "$USAGE_QUIET" == "1" ]] || print_status_note cache "refresh busy" >&2
-      return 0
+  local refresh_lock_fd=""
+  if ! acquire_refresh_lock_into refresh_lock_fd "${CODEX_AUTH_REFRESH_LOCK:-wait}"; then
+    if [[ "${CODEX_AUTH_REFRESH_LOCK:-}" != "try" && "$USAGE_QUIET" != "1" ]]; then
+      print_status_note cache "refresh busy" >&2
     fi
+    return 0
   fi
 
   local profile_files=()
