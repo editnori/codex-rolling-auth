@@ -4158,22 +4158,11 @@ selector_header_text() {
   fit_text_rtrim "$controls" "$total_w"
 }
 
-selector_palette_take_short_limit() {
-  local text="$1"
-  local name label value
-
-  IFS=$'\t' read -r name _ label value <<<"$(selector_palette_limit_parts "$text")"
-  if [[ -n "$label" && -n "$value" ]]; then
-    printf '%s %s %s' "$name" "$label" "$value"
-  else
-    printf '%s' "$text"
-  fi
-}
-
-selector_palette_limit_parts() {
+selector_palette_limit_context() {
   local text="$1"
   local name="" compact_name="" label="" value="" token
   local parts=()
+  local short_text compact_text=""
   local i
 
   read -r -a parts <<<"$text"
@@ -4191,7 +4180,18 @@ selector_palette_limit_parts() {
         ;;
     esac
   done
-  printf '%s\t%s\t%s\t%s\n' "$name" "$compact_name" "$label" "$value"
+  short_text="$text"
+  if [[ -n "$label" && -n "$value" ]]; then
+    short_text="$name $label $value"
+  fi
+  if [[ -n "$compact_name" ]]; then
+    if [[ -n "$value" ]]; then
+      compact_text="$compact_name $value"
+    else
+      compact_text="$compact_name"
+    fi
+  fi
+  printf '%s\t%s\n' "$short_text" "$compact_text"
 }
 
 print_selector_palette_context_line() {
@@ -4276,14 +4276,17 @@ selector_palette_context_line() {
   local summary="$1"
   local total_w="$2"
   local sep first active_part stats_part line best_value compact_best_value
-  local active_value compact_active_value compact_active_name compact_active_limit_value
+  local active_value compact_active_value compact_active_body
   local stat_token next_part prefix added_stats=0
   local best_parts=()
 
   sep="$(usage_separator)"
   IFS=$'\037' read -r first active_part stats_part <<<"$(usage_summary_parts "$summary" "$total_w" 0)"
   best_value="$first"
-  [[ "$best_value" == best\ * ]] && best_value="best $(selector_palette_take_short_limit "${best_value#best }")"
+  if [[ "$best_value" == best\ * ]]; then
+    IFS=$'\t' read -r best_value _ <<<"$(selector_palette_limit_context "${best_value#best }")"
+    best_value="best $best_value"
+  fi
   compact_best_value="$best_value"
   if [[ "$best_value" == best\ * ]]; then
     read -r -a best_parts <<<"${best_value#best }"
@@ -4294,18 +4297,15 @@ selector_palette_context_line() {
   line="$best_value"
   if [[ -n "$active_part" ]]; then
     active_value="$active_part"
-    [[ "$active_value" == active\ * ]] && active_value="active $(selector_palette_take_short_limit "${active_value#active }")"
+    compact_active_value=""
+    if [[ "$active_value" == active\ * ]]; then
+      IFS=$'\t' read -r active_value compact_active_body <<<"$(selector_palette_limit_context "${active_value#active }")"
+      active_value="active $active_value"
+      [[ -n "$compact_active_body" ]] && compact_active_value="act $compact_active_body"
+    fi
     if (( ${#line} + ${#active_value} + 3 <= total_w )); then
       line+="   $active_value"
     else
-      IFS=$'\t' read -r _ compact_active_name _ compact_active_limit_value <<<"$(selector_palette_limit_parts "${active_part#active }")"
-      if [[ -n "$compact_active_limit_value" ]]; then
-        compact_active_value="act $compact_active_name $compact_active_limit_value"
-      elif [[ -n "$compact_active_name" ]]; then
-        compact_active_value="act $compact_active_name"
-      else
-        compact_active_value=""
-      fi
       if [[ -n "$compact_active_value" ]] && (( ${#line} + ${#compact_active_value} + 3 <= total_w )); then
         line+="   $compact_active_value"
       elif [[ -n "$compact_active_value" && "$compact_best_value" != "$best_value" ]] \
