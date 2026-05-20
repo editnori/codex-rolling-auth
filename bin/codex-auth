@@ -2557,37 +2557,6 @@ usage_metric_header_cell() {
   return 0
 }
 
-print_usage_render_line() {
-  local role="$1"
-  local profile="$2"
-  local weekly_cell="$3"
-  local short_cell="$4"
-  local status="$5"
-  local role_w="$6"
-  local profile_w="$7"
-  local cell_w="$8"
-  local status_w="$9"
-  local prefix="${10:-}"
-  local reset="${11:-}"
-  local role_profile_gap status_gap
-
-  role_profile_gap=$((1 + (role_w > 1)))
-  status_gap="$role_profile_gap"
-  printf '%s' "$prefix"
-  fit_text "$role" "$role_w"
-  printf '%*s' "$role_profile_gap" ''
-  fit_text "$profile" "$profile_w"
-  printf ' '
-  fit_text "$weekly_cell" "$cell_w"
-  printf ' '
-  fit_text "$short_cell" "$cell_w"
-  if (( status_w > 0 )); then
-    printf '%*s' "$status_gap" ''
-    fit_text "$status" "$status_w"
-  fi
-  printf '%s\n' "$reset"
-}
-
 print_usage_render_header() {
   local role="$1"
   local profile="$2"
@@ -2600,6 +2569,7 @@ print_usage_render_header() {
   local status_w="$9"
   local mode="${10:-normal}"
   local reset=""
+  local role_profile_gap
 
   weekly_cell="$(usage_metric_header_cell "$weekly_cell" "$cell_w" "$mode")"
   short_cell="$(usage_metric_header_cell "$short_cell" "$cell_w" "$mode")"
@@ -2610,7 +2580,19 @@ print_usage_render_header() {
   fi
   usage_color_active && reset=$'\033[0m'
   usage_tone_color muted
-  print_usage_render_line "$role" "$profile" "$weekly_cell" "$short_cell" "$status" "$role_w" "$profile_w" "$cell_w" "$status_w" "" "$reset"
+  role_profile_gap=$((1 + (role_w > 1)))
+  fit_text "$role" "$role_w"
+  printf '%*s' "$role_profile_gap" ''
+  fit_text "$profile" "$profile_w"
+  printf ' '
+  fit_text "$weekly_cell" "$cell_w"
+  printf ' '
+  fit_text "$short_cell" "$cell_w"
+  if (( status_w > 0 )); then
+    printf '%*s' "$role_profile_gap" ''
+    fit_text "$status" "$status_w"
+  fi
+  printf '%s\n' "$reset"
 }
 
 print_usage_placeholder_limit_cell() {
