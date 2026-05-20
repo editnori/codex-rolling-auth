@@ -68,15 +68,13 @@ usage() {
   USAGE_COLOR_ENABLED=0
   color_enabled && USAGE_COLOR_ENABLED=1
   print_palette_title_line "Commands" "" "$width"
-  if (( width < 32 )); then
-    if (( width >= 22 )); then
-      print_flat_context_line "profiles auth-profiles" "$width"
-    fi
-  else
+  if (( width >= 32 )); then
     path_w=$((width - 9))
     (( path_w < 1 )) && path_w=1
     path="$(compact_display_path "$PROFILE_DIR" "$path_w")"
     print_flat_context_line "profiles $path" "$width"
+  elif (( width >= 22 )); then
+    print_flat_context_line "profiles auth-profiles" "$width"
   fi
   print_help_section "daily" "$width"
   print_help_item "usage --refresh --select" "Refresh and select" "$width"
