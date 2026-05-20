@@ -541,7 +541,7 @@ print_profile_list_line() {
   local role_tone="muted"
   local mode_display
 
-  if [[ "$role" == "$(usage_active_glyph)" || "$role" == "active" || "$role" == "stay" || "$role" == "s" || "$role" == "*" ]]; then
+  if [[ "$role" == "$(usage_glyph '●' '*')" || "$role" == "active" || "$role" == "stay" || "$role" == "s" || "$role" == "*" ]]; then
     role_tone="active"
   fi
   case "$role" in
@@ -1652,10 +1652,6 @@ usage_rule_glyph() {
 
 usage_meta_glyph() {
   usage_glyph '·' '.'
-}
-
-usage_active_glyph() {
-  usage_glyph '●' '*'
 }
 
 usage_separator() {
@@ -3833,7 +3829,7 @@ selector_action_role() {
       best) printf 'u' ;;
       cap) printf 'c' ;;
       login) printf 'l' ;;
-      stay) usage_active_glyph ;;
+      stay) usage_glyph '●' '*' ;;
       *) usage_meta_glyph ;;
     esac
   elif (( role_w < 6 )); then
