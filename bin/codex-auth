@@ -911,33 +911,6 @@ compact_width_choice() {
   fi
 }
 
-compact_value_choice() {
-  local cols="$1"
-  local cutoff="$2"
-  local short_format="$3"
-  local wide_format="$4"
-  local value="$5"
-
-  if (( cols < cutoff )); then
-    printf "$short_format" "$value"
-  else
-    printf "$wide_format" "$value"
-  fi
-}
-
-compact_missing_dir_message() {
-  local cols="$1"
-  local base="$2"
-
-  if (( cols < 24 )); then
-    printf 'missing dir'
-  elif (( cols < 28 )); then
-    printf 'missing dir %s' "$base"
-  else
-    printf 'missing dir: %s' "$base"
-  fi
-}
-
 COMPACT_ERROR_STATIC_ROWS=(
   $'refusing to remove without --yes\t-\tremove needs --yes'
   $'usage: --ttl seconds\t-\tttl needs seconds'
@@ -996,18 +969,6 @@ compact_error_static_message() {
   return 1
 }
 
-compact_profile_not_found_message() {
-  local cols="$1"
-  local tail="$2"
-
-  if (( cols < 40 )); then
-    tail="$(fit_profile_text_rtrim "$tail" "$((cols - 15))")"
-    printf 'missing %s' "$tail"
-  else
-    printf 'not found: %s' "$tail"
-  fi
-}
-
 compact_error_prefixed_message() {
   local cols="$1"
   local message="$2"
@@ -1022,7 +983,14 @@ compact_error_prefixed_message() {
         value="${tail##*/}"
         ;;
       dir)
-        compact_missing_dir_message "$cols" "${tail##*/}"
+        value="${tail##*/}"
+        if (( cols < 24 )); then
+          printf 'missing dir'
+        elif (( cols < 28 )); then
+          printf 'missing dir %s' "$value"
+        else
+          printf 'missing dir: %s' "$value"
+        fi
         return 0
         ;;
       command)
@@ -1032,11 +1000,20 @@ compact_error_prefixed_message() {
         value="$tail"
         ;;
       profile)
-        compact_profile_not_found_message "$cols" "$tail"
+        if (( cols < 40 )); then
+          value="$(fit_profile_text_rtrim "$tail" "$((cols - 15))")"
+          printf 'missing %s' "$value"
+        else
+          printf 'not found: %s' "$tail"
+        fi
         return 0
         ;;
     esac
-    compact_value_choice "$cols" "$cutoff" "$short" "$wide" "$value"
+    if (( cols < cutoff )); then
+      printf "$short" "$value"
+    else
+      printf "$wide" "$value"
+    fi
     return 0
   done
   return 1
