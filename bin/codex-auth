@@ -504,7 +504,7 @@ short_account_hint() {
   elif (( width < 13 && length > width )); then
     fit_profile_text "$hint" "$width"
   elif (( length > 13 )); then
-    printf '%s%s%s' "${hint:0:8}" "$(usage_trunc_glyph)" "${hint:length-4:4}"
+    printf '%s%s%s' "${hint:0:8}" "$(usage_glyph '…' '~')" "${hint:length-4:4}"
   else
     printf '%s' "$hint"
   fi
@@ -1280,12 +1280,12 @@ cmd_list() {
             if (( account_w >= 13 )); then
               right=$((account_w - 9))
               (( right < 4 )) && right=4
-              account_base="${clean:0:8}$(usage_trunc_glyph)${clean:${#clean}-right:right}"
+              account_base="${clean:0:8}$(usage_glyph '…' '~')${clean:${#clean}-right:right}"
             elif (( account_w >= 8 )); then
               right=4
               left=$((account_w - right - 1))
               (( left < 3 )) && left=3
-              account_base="${clean:0:left}$(usage_trunc_glyph)${clean:${#clean}-right:right}"
+              account_base="${clean:0:left}$(usage_glyph '…' '~')${clean:${#clean}-right:right}"
             else
               account_base="$(fit_profile_text "$clean" "$account_w")"
             fi
@@ -1650,10 +1650,6 @@ usage_separator() {
   usage_glyph ' · ' ' | '
 }
 
-usage_trunc_glyph() {
-  usage_glyph '…' '~'
-}
-
 fit_text() {
   local text="$1"
   local width="$2"
@@ -1663,7 +1659,7 @@ fit_text() {
   if (( width <= 0 )); then
     return 0
   fi
-  trunc_glyph="$(usage_trunc_glyph)"
+  trunc_glyph="$(usage_glyph '…' '~')"
   if (( length <= width )); then
     printf '%-*s' "$width" "$text"
   elif (( width == 1 )); then
@@ -1721,7 +1717,7 @@ fit_profile_text() {
     return 0
   fi
 
-  trunc_glyph="$(usage_trunc_glyph)"
+  trunc_glyph="$(usage_glyph '…' '~')"
   if (( width <= 5 )); then
     left=2
   elif (( width <= 8 )); then
