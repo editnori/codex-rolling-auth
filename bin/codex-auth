@@ -4389,78 +4389,52 @@ usage_summary_split_once() {
   fi
 }
 
-usage_summary_extend_best_head() {
-  local -n first_ref="$1"
-  local -n rest_ref="$2"
-  local sep="$3"
-  local next_part
+usage_summary_parts() {
+  local summary="$1"
+  local total_w="$2"
+  local merge_pool_subject="${3:-0}"
+  local sep first rest active_part="" next_part pool_head candidate value_candidate best_subject
 
-  case "$first_ref" in
+  sep="$(usage_separator)"
+  IFS=$'\t' read -r first rest <<<"$(usage_summary_split_once "$summary" "$sep")"
+  case "$first" in
     best|"best active"|"best is active")
-      if [[ -n "$rest_ref" ]]; then
-        IFS=$'\t' read -r next_part rest_ref <<<"$(usage_summary_split_once "$rest_ref" "$sep")"
-        first_ref="$first_ref $next_part"
+      if [[ -n "$rest" ]]; then
+        IFS=$'\t' read -r next_part rest <<<"$(usage_summary_split_once "$rest" "$sep")"
+        first="$first $next_part"
       fi
       ;;
   esac
-  return 0
-}
-
-usage_summary_normalize_best_active() {
-  local -n first_ref="$1"
-  local best_subject
-
-  if [[ "$first_ref" == "best active "* ]]; then
-    best_subject="${first_ref#best active }"
-    first_ref="best $best_subject"
-  elif [[ "$first_ref" == "best is active "* ]]; then
-    best_subject="${first_ref#best is active }"
-    first_ref="best $best_subject"
+  if [[ "$first" == "best active "* ]]; then
+    best_subject="${first#best active }"
+    first="best $best_subject"
+  elif [[ "$first" == "best is active "* ]]; then
+    best_subject="${first#best is active }"
+    first="best $best_subject"
   fi
-  return 0
-}
-
-usage_summary_take_active_part() {
-  local -n active_ref="$1"
-  local -n pool_ref="$2"
-  local sep="$3"
-  local pool_head next_part
-
-  active_ref=""
-  if [[ -n "$pool_ref" ]]; then
-    IFS=$'\t' read -r pool_head next_part <<<"$(usage_summary_split_once "$pool_ref" "$sep")"
+  if [[ -n "$rest" ]]; then
+    IFS=$'\t' read -r pool_head next_part <<<"$(usage_summary_split_once "$rest" "$sep")"
     if [[ "$pool_head" == "active "* || "$pool_head" == "no active" ]]; then
-      active_ref="$pool_head"
-      pool_ref="$next_part"
+      active_part="$pool_head"
+      rest="$next_part"
     fi
   fi
-  return 0
-}
-
-usage_summary_merge_pool_subject() {
-  local -n first_ref="$1"
-  local -n active_ref="$2"
-  local -n pool_ref="$3"
-  local total_w="$4"
-  local sep="$5"
-  local pool_head next_part candidate value_candidate
-
-  [[ -n "$pool_ref" && -z "$active_ref" ]] || return 0
-  IFS=$'\t' read -r pool_head next_part <<<"$(usage_summary_split_once "$pool_ref" "$sep")"
-  case "$pool_head" in
-    ready*|capped*|cap*|login*|"no data"*|offline*|stale*|cache*)
-      return 0
-      ;;
-  esac
-
-  candidate="$first_ref $pool_head"
-  value_candidate="$candidate"
-  [[ "$candidate" == "best "* ]] && value_candidate="${candidate#best }"
-  if (( ${#value_candidate} <= total_w - 7 )); then
-    first_ref="$candidate"
-    pool_ref="$next_part"
+  if (( merge_pool_subject )) && [[ -n "$rest" && -z "$active_part" ]]; then
+    IFS=$'\t' read -r pool_head next_part <<<"$(usage_summary_split_once "$rest" "$sep")"
+    case "$pool_head" in
+      ready*|capped*|cap*|login*|"no data"*|offline*|stale*|cache*) ;;
+      *)
+        candidate="$first $pool_head"
+        value_candidate="$candidate"
+        [[ "$candidate" == "best "* ]] && value_candidate="${candidate#best }"
+        if (( ${#value_candidate} <= total_w - 7 )); then
+          first="$candidate"
+          rest="$next_part"
+        fi
+        ;;
+    esac
   fi
-  return 0
+  printf '%s\037%s\037%s\n' "$first" "$active_part" "$rest"
 }
 
 print_usage_summary_body() {
@@ -4508,15 +4482,10 @@ print_usage_summary_block() {
   local total_w="$2"
   local title="${3:-}"
   local first active_part pool_part
-  local tl tr bl br vl vr glyph label rule_w title_w sep
+  local tl tr bl br vl vr glyph label rule_w title_w
   local frame=0 body_w="$total_w"
 
-  sep="$(usage_separator)"
-  IFS=$'\t' read -r first pool_part <<<"$(usage_summary_split_once "$summary" "$sep")"
-  usage_summary_extend_best_head first pool_part "$sep"
-  usage_summary_normalize_best_active first
-  usage_summary_take_active_part active_part pool_part "$sep"
-  usage_summary_merge_pool_subject first active_part pool_part "$total_w" "$sep"
+  IFS=$'\037' read -r first active_part pool_part <<<"$(usage_summary_parts "$summary" "$total_w" 1)"
   if [[ -n "$title" ]] && (( total_w >= 42 )); then
     frame=1
     body_w=$((total_w - 4))
@@ -4769,15 +4738,11 @@ selector_palette_context_add_stats() {
 selector_palette_context_line() {
   local summary="$1"
   local total_w="$2"
-  local sep first rest active_part="" stats_part line best_value compact_best_value
+  local sep first active_part stats_part line best_value compact_best_value
   local best_parts=()
 
   sep="$(usage_separator)"
-  IFS=$'\t' read -r first rest <<<"$(usage_summary_split_once "$summary" "$sep")"
-  usage_summary_extend_best_head first rest "$sep"
-  usage_summary_normalize_best_active first
-  stats_part="$rest"
-  usage_summary_take_active_part active_part stats_part "$sep"
+  IFS=$'\037' read -r first active_part stats_part <<<"$(usage_summary_parts "$summary" "$total_w" 0)"
   best_value="$first"
   [[ "$best_value" == best\ * ]] && best_value="best $(selector_palette_take_short_limit "${best_value#best }")"
   compact_best_value="$best_value"
