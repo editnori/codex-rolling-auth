@@ -2405,15 +2405,6 @@ usage_display_profile_name() {
   fi
 }
 
-usage_header_profile() {
-  local mode="${1:-normal}"
-  if usage_mode_is_pico_or_nano "$mode"; then
-    printf 'name'
-  else
-    printf 'profile'
-  fi
-}
-
 usage_header_limit_label() {
   local mode="$1"
   local label="$2"
@@ -2468,36 +2459,6 @@ usage_header_limit_label() {
   esac
 }
 
-usage_header_week() {
-  local mode="${1:-normal}"
-
-  usage_header_limit_label "$mode" "week" "wk"
-}
-
-usage_header_short() {
-  local mode="${1:-normal}"
-  local label="${USAGE_SHORT_LABEL:-5h}"
-  local nano_label
-
-  if [[ "$label" == "short" ]] && usage_mode_is_pico_or_nano "$mode"; then
-    label="5h"
-  fi
-  nano_label="${label:0:2}"
-
-  usage_header_limit_label "$mode" "$label" "$nano_label"
-}
-
-usage_header_state() {
-  local mode="${1:-normal}"
-  if usage_mode_is_pico_or_nano "$mode"; then
-    printf 'st'
-  elif [[ "$mode" == "micro" || "$mode" == "tiny" ]]; then
-    printf 'state'
-  else
-    printf 'status'
-  fi
-}
-
 usage_metric_header_cell() {
   local text="$1"
   local width="$2"
@@ -2543,18 +2504,31 @@ usage_metric_header_cell() {
 
 print_usage_render_header() {
   local role="$1"
-  local profile="$2"
-  local weekly_cell="$3"
-  local short_cell="$4"
-  local status="$5"
-  local role_w="$6"
-  local profile_w="$7"
-  local cell_w="$8"
-  local status_w="$9"
-  local mode="${10:-normal}"
+  local role_w="$2"
+  local profile_w="$3"
+  local cell_w="$4"
+  local status_w="$5"
+  local mode="${6:-normal}"
   local reset=""
-  local role_profile_gap
+  local role_profile_gap profile weekly_cell short_cell status
+  local short_label="${USAGE_SHORT_LABEL:-5h}"
+  local short_nano_label
 
+  if usage_mode_is_pico_or_nano "$mode"; then
+    profile="name"
+    status="st"
+    [[ "$short_label" == "short" ]] && short_label="5h"
+  else
+    profile="profile"
+    if [[ "$mode" == "micro" || "$mode" == "tiny" ]]; then
+      status="state"
+    else
+      status="status"
+    fi
+  fi
+  short_nano_label="${short_label:0:2}"
+  weekly_cell="$(usage_header_limit_label "$mode" "week" "wk")"
+  short_cell="$(usage_header_limit_label "$mode" "$short_label" "$short_nano_label")"
   weekly_cell="$(usage_metric_header_cell "$weekly_cell" "$cell_w" "$mode")"
   short_cell="$(usage_metric_header_cell "$short_cell" "$cell_w" "$mode")"
   if (( status_w > 0 )); then
@@ -4178,8 +4152,7 @@ selector_header_text() {
   elif (( role_w < 6 )); then
     action_label="act"
   fi
-  print_usage_render_header "$action_label" "$(usage_header_profile "$mode")" "$(usage_header_week "$mode")" "$(usage_header_short "$mode")" "$(usage_header_state "$mode")" \
-    "$role_w" "$profile_w" "$cell_w" "$status_w" "$mode"
+  print_usage_render_header "$action_label" "$role_w" "$profile_w" "$cell_w" "$status_w" "$mode"
   repeat_glyph "$(usage_rule_glyph)" "$total_w"
   printf '\n'
   fit_text_rtrim "$controls" "$total_w"
@@ -5242,8 +5215,7 @@ render_usage_records() {
   if [[ "${CODEX_AUTH_USAGE_HEADER:-0}" == "1" ]]; then
     header_role="act"
     (( role_w <= 1 )) && header_role=""
-    print_usage_render_header "$header_role" "$(usage_header_profile "$mode")" "$(usage_header_week "$mode")" "$(usage_header_short "$mode")" "$(usage_header_state "$mode")" \
-      "$role_w" "$profile_w" "$cell_w" "$status_w" "$mode"
+    print_usage_render_header "$header_role" "$role_w" "$profile_w" "$cell_w" "$status_w" "$mode"
   fi
 
   for record in "${SORTED_USAGE_RECORDS[@]}"; do
