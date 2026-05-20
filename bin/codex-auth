@@ -5521,7 +5521,9 @@ cmd_patch_codex() {
     stock_bin="$(codex_bin)" || die "codex command not found"
   fi
   require_codex_launcher "$stock_bin"
-  stock_version="$("$stock_bin" --version 2>/dev/null | sed -n '1s/[[:space:]]*$//p' || true)"
+  stock_version="$("$stock_bin" --version 2>/dev/null || true)"
+  stock_version="${stock_version%%$'\n'*}"
+  stock_version="${stock_version%"${stock_version##*[![:space:]]}"}"
   [[ -n "$stock_version" ]] || stock_version="unknown"
   if command -v sha256sum >/dev/null 2>&1 && [[ -f "$stock_bin" ]]; then
     hash_line="$(sha256sum "$stock_bin")"; stock_hash="${hash_line%% *}"
