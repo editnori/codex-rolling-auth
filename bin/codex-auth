@@ -2033,50 +2033,6 @@ usage_print_limit_cell_reset() {
   return 0
 }
 
-usage_print_limit_bar_cell() {
-  local percent="$1"
-  local percent_label="$2"
-  local reset_label="$3"
-  local reset_prefix="$4"
-  local label_w="$5"
-  local bar_width="$6"
-  local cell_w="$7"
-  local tone="$8"
-  local visible pad inner_w left_rail right_rail
-
-  usage_tone_color "$tone"
-  printf "%${label_w}s " "$percent_label"
-  usage_tone_reset
-  if (( bar_width < 3 )); then
-    usage_tone_color "$tone"
-    usage_bar "$percent" "$bar_width"
-    usage_tone_reset
-  else
-    inner_w=$((bar_width - 2))
-    if usage_unicode_enabled; then
-      left_rail="▕"
-      right_rail="▐"
-    else
-      left_rail="["
-      right_rail="]"
-    fi
-    usage_tone_color muted
-    printf '%s' "$left_rail"
-    usage_tone_reset
-    usage_tone_color "$tone"
-    usage_bar "$percent" "$inner_w"
-    usage_tone_reset
-    usage_tone_color muted
-    printf '%s' "$right_rail"
-    usage_tone_reset
-  fi
-  visible=$((label_w + 1 + bar_width))
-  usage_print_limit_cell_reset "$reset_label" "$reset_prefix" visible
-  pad=$((cell_w - visible))
-  (( pad > 0 )) && printf '%*s' "$pad" ''
-  return 0
-}
-
 print_usage_limit_cell() {
   local percent="$1"
   local reset_time="$2"
@@ -2089,7 +2045,7 @@ print_usage_limit_cell() {
   local reset_prefix=""
   local label_w=4
   local tone
-  local visible pad
+  local visible pad inner_w left_rail right_rail
 
   if [[ "$mode" == "micro" || "$mode" == "nano" ]]; then
     reset_label=""
@@ -2131,7 +2087,36 @@ print_usage_limit_cell() {
     return 0
   fi
 
-  usage_print_limit_bar_cell "$percent" "$percent_label" "$reset_label" "$reset_prefix" "$label_w" "$bar_width" "$cell_w" "$tone"
+  usage_tone_color "$tone"
+  printf "%${label_w}s " "$percent_label"
+  usage_tone_reset
+  if (( bar_width < 3 )); then
+    usage_tone_color "$tone"
+    usage_bar "$percent" "$bar_width"
+    usage_tone_reset
+  else
+    inner_w=$((bar_width - 2))
+    if usage_unicode_enabled; then
+      left_rail="▕"
+      right_rail="▐"
+    else
+      left_rail="["
+      right_rail="]"
+    fi
+    usage_tone_color muted
+    printf '%s' "$left_rail"
+    usage_tone_reset
+    usage_tone_color "$tone"
+    usage_bar "$percent" "$inner_w"
+    usage_tone_reset
+    usage_tone_color muted
+    printf '%s' "$right_rail"
+    usage_tone_reset
+  fi
+  visible=$((label_w + 1 + bar_width))
+  usage_print_limit_cell_reset "$reset_label" "$reset_prefix" visible
+  pad=$((cell_w - visible))
+  (( pad > 0 )) && printf '%*s' "$pad" ''
   return 0
 }
 
