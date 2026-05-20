@@ -63,11 +63,24 @@ USAGE_RECORD_EXTRACT_JQ='
 '
 
 usage() {
-  local width
+  local width path path_w
   width="$(terminal_width)"
   USAGE_COLOR_ENABLED=0
   color_enabled && USAGE_COLOR_ENABLED=1
-  print_help_summary "$width"
+  if (( width < 32 )); then
+    if (( width < 22 )); then
+      print_palette_title_line "Auth" "Commands" "" "$width"
+    else
+      print_palette_title_line "Auth" "Commands" "" "$width"
+      print_flat_context_line "profiles auth-profiles" "$width"
+    fi
+  else
+    path_w=$((width - 9))
+    (( path_w < 1 )) && path_w=1
+    path="$(compact_display_path "$PROFILE_DIR" "$path_w")"
+    print_palette_title_line "Auth" "Commands" "" "$width"
+    print_flat_context_line "profiles $path" "$width"
+  fi
   print_help_section "daily" "$width"
   print_help_item "usage --refresh --select" "Refresh and select" "$width"
   print_help_item "usage --cached" "Cached usage" "$width"
@@ -95,27 +108,6 @@ usage() {
   print_help_item "import <name> <file>" "Import profile" "$width"
   print_help_item "export <name> <file>" "Export auth file" "$width"
   printf '\n'
-}
-
-print_help_summary() {
-  local width="$1"
-  local path path_w
-
-  if (( width < 32 )); then
-    if (( width < 22 )); then
-      print_palette_title_line "Auth" "Commands" "" "$width"
-      return 0
-    fi
-    path="profiles auth-profiles"
-  else
-    path_w=$((width - 9))
-    (( path_w < 1 )) && path_w=1
-    path="$(compact_display_path "$PROFILE_DIR" "$path_w")"
-    path="profiles $path"
-  fi
-
-  print_palette_title_line "Auth" "Commands" "" "$width"
-  print_flat_context_line "$path" "$width"
 }
 
 print_help_section() {
