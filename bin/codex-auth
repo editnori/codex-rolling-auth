@@ -5709,7 +5709,7 @@ codex_run_kill_script_for_log() {
   local run_file="$2"
   local log_file="$3"
   local signal="${4:-TERM}"
-  local child grandchild killed_child cmd
+  local child grandchild killed_child cmd arg
 
   [[ "$parent_pid" =~ ^[0-9]+$ ]] || return 0
   if ! command -v pgrep >/dev/null 2>&1; then
@@ -5718,7 +5718,10 @@ codex_run_kill_script_for_log() {
 
   while IFS= read -r child; do
     [[ "$child" =~ ^[0-9]+$ && "$child" != "${BASHPID:-}" && -r "/proc/$child/cmdline" ]] || continue
-    cmd="$(tr '\0' ' ' <"/proc/$child/cmdline" 2>/dev/null || true)"
+    cmd=""
+    while IFS= read -r -d '' arg; do
+      cmd+="$arg "
+    done <"/proc/$child/cmdline" 2>/dev/null || true
     [[ "$cmd" == *"script "* && "$cmd" == *"$run_file"* && "$cmd" == *"$log_file"* ]] || continue
     killed_child=0
     while IFS= read -r grandchild; do
