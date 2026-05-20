@@ -3075,32 +3075,6 @@ print_usage_summary_compact_line() {
   printf '\n'
 }
 
-usage_summary_initial_line() {
-  local active_summary="$1"
-  local old_summary="$2"
-  local has_active="$3"
-  local has_best="$4"
-  local ready="$5"
-  local sep="$6"
-  local active_profile="$7"
-  local active_label="$8"
-  local active_short="$9"
-
-  if (( old_summary )); then
-    printf 'old active %s %s %s' "$active_profile" "$active_label" "$active_short"
-  elif (( has_active )); then
-    printf '%s' "$active_summary"
-  elif (( has_best )); then
-    if (( ready > 0 )); then
-      printf 'ready %s%sno active' "$ready" "$sep"
-    else
-      printf 'no active'
-    fi
-  else
-    printf 'no fresh ready%sno active' "$sep"
-  fi
-}
-
 usage_summary_fallback_line() {
   local width="$1"
   local old_summary="$2"
@@ -3263,7 +3237,6 @@ print_usage_summary_line() {
   local has_best has_active active_has_usage caps login unavailable offline stale ready cache_age_label old_summary
   local show_cache=0
   local line show_week=0 show_login=0 show_unavailable=0 show_offline=0 show_ready=0 show_caps=0 show_stale=0
-  local active_summary
   local cap_label="capped"
   local fallback_used=0
   local sep
@@ -3274,8 +3247,6 @@ print_usage_summary_line() {
     <<<"$(usage_summary_scan_records "$default_profile" "$@")"
   [[ "$cache_age_label" != "__none__" ]] || cache_age_label=""
 
-  active_summary="active $active_profile"
-  (( active_has_usage )) && active_summary+=" ${active_label} $active_short"
   (( width >= 70 && login > 0 )) && show_login=1
   (( width >= 70 && unavailable > 0 )) && show_unavailable=1
   (( width >= 70 && offline > 0 )) && show_offline=1
@@ -3289,7 +3260,20 @@ print_usage_summary_line() {
     return 0
   fi
 
-  line="$(usage_summary_initial_line "$active_summary" "$old_summary" "$has_active" "$has_best" "$ready" "$sep" "$active_profile" "$active_label" "$active_short")"
+  if (( old_summary )); then
+    line="old active $active_profile ${active_label} $active_short"
+  elif (( has_active )); then
+    line="active $active_profile"
+    (( active_has_usage )) && line+=" ${active_label} $active_short"
+  elif (( has_best )); then
+    if (( ready > 0 )); then
+      line="ready $ready${sep}no active"
+    else
+      line="no active"
+    fi
+  else
+    line="no fresh ready${sep}no active"
+  fi
   if (( ! has_active && has_best )); then
     show_ready=0
   fi
