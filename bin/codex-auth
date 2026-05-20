@@ -8426,95 +8426,6 @@ cmd_remove() {
     "profile"$'\t'"$(display_path "$path")"$'\t'"bad"
 }
 
-doctor_ps_rows() {
-  if [[ -n "${CODEX_AUTH_DOCTOR_PS_FILE:-}" ]]; then
-    cat "$CODEX_AUTH_DOCTOR_PS_FILE"
-  else
-    ps -eo pid=,ppid=,pgid=,sid=,tty=,stat=,etime=,args=
-  fi
-}
-
-doctor_is_legacy_codex() {
-  local args="$1"
-
-  [[ "$args" == *"codex-auth run"* ]] && return 0
-  [[ "$args" == *"/.bun/bin/codex --yolo"* ]] && return 0
-  [[ "$args" == *"/codex/codex --yolo"* ]] && return 0
-  return 1
-}
-
-doctor_is_sidecar() {
-  local args="$1"
-
-  case "$args" in
-    *"/outlook-mcp/"*|*"/webex-mcp/"*|*"/drfirst-mcp/"*|*"/gemini_ui_mcp.mjs"*|*"/run_event_mcp.py"*|*"claude-runner-mcp"*|*"playwright-repl-mcp"*)
-      return 0
-      ;;
-  esac
-  return 1
-}
-
-doctor_collect_legacy_rows() {
-  local -n rows_ref="$1"
-  local -n legacy_pid_ref="$2"
-  local -n root_count_ref="$3"
-  local pid ppid pgid sid tty stat etime args row
-
-  while read -r pid ppid pgid sid tty stat etime args; do
-    [[ "$pid" =~ ^[0-9]+$ ]] || continue
-    args="${args:-}"
-    row="$pid"$'\t'"$ppid"$'\t'"$pgid"$'\t'"$tty"$'\t'"$etime"$'\t'"$args"
-    rows_ref+=("$row")
-    if doctor_is_legacy_codex "$args"; then
-      legacy_pid_ref["$pid"]=1
-      root_count_ref=$((root_count_ref + 1))
-    fi
-  done < <(doctor_ps_rows)
-  return 0
-}
-
-doctor_collect_sidecars() {
-  local -n rows_ref="$1"
-  local -n legacy_pid_ref="$2"
-  local -n sidecar_by_parent_ref="$3"
-  local -n sidecar_args_by_pid_ref="$4"
-  local -n sidecar_count_ref="$5"
-  local row pid ppid pgid tty etime args
-
-  for row in "${rows_ref[@]}"; do
-    IFS=$'\t' read -r pid ppid pgid tty etime args <<<"$row"
-    if [[ -n "${legacy_pid_ref["$ppid"]:-}" ]] && doctor_is_sidecar "$args"; then
-      sidecar_count_ref=$((sidecar_count_ref + 1))
-      sidecar_by_parent_ref["$ppid"]="${sidecar_by_parent_ref["$ppid"]:-} $pid"
-      sidecar_args_by_pid_ref["$pid"]="$args"
-    fi
-  done
-  return 0
-}
-
-doctor_print_legacy_rows() {
-  local -n rows_ref="$1"
-  local -n legacy_pid_ref="$2"
-  local -n sidecar_by_parent_ref="$3"
-  local root_count="$4"
-  local row pid ppid pgid tty etime args sidecars sidecar_total
-
-  (( root_count > 0 )) || return 0
-  printf '\n'
-  printf 'pid\tppid\tpgid\ttty\tetime\tsidecars\tcommand\n'
-  for row in "${rows_ref[@]}"; do
-    IFS=$'\t' read -r pid ppid pgid tty etime args <<<"$row"
-    [[ -n "${legacy_pid_ref["$pid"]:-}" ]] || continue
-    sidecars="${sidecar_by_parent_ref["$pid"]:-}"
-    if [[ -n "$sidecars" ]]; then
-      sidecar_total="$(wc -w <<<"$sidecars" | tr -d ' ')"
-    else
-      sidecar_total=0
-    fi
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$pid" "$ppid" "$pgid" "$tty" "$etime" "$sidecar_total" "$args"
-  done
-}
-
 cmd_doctor() {
   local kill_sidecars=0 yes=0
   while (( $# > 0 )); do
@@ -8536,18 +8447,59 @@ cmd_doctor() {
   fi
 
   local root_count=0 sidecar_count=0 kill_count=0 pid
+  local row ppid pgid sid tty stat etime args sidecars sidecar_total
   local -A legacy_pid=()
   local -A sidecar_by_parent=()
   local -A sidecar_args_by_pid=()
   local -a rows=()
 
-  doctor_collect_legacy_rows rows legacy_pid root_count
-  doctor_collect_sidecars rows legacy_pid sidecar_by_parent sidecar_args_by_pid sidecar_count
+  while read -r pid ppid pgid sid tty stat etime args; do
+    [[ "$pid" =~ ^[0-9]+$ ]] || continue
+    args="${args:-}"
+    row="$pid"$'\t'"$ppid"$'\t'"$pgid"$'\t'"$tty"$'\t'"$etime"$'\t'"$args"
+    rows+=("$row")
+    if [[ "$args" == *"codex-auth run"* || "$args" == *"/.bun/bin/codex --yolo"* || "$args" == *"/codex/codex --yolo"* ]]; then
+      legacy_pid["$pid"]=1
+      root_count=$((root_count + 1))
+    fi
+  done < <(
+    if [[ -n "${CODEX_AUTH_DOCTOR_PS_FILE:-}" ]]; then
+      cat "$CODEX_AUTH_DOCTOR_PS_FILE"
+    else
+      ps -eo pid=,ppid=,pgid=,sid=,tty=,stat=,etime=,args=
+    fi
+  )
+
+  for row in "${rows[@]}"; do
+    IFS=$'\t' read -r pid ppid pgid tty etime args <<<"$row"
+    [[ -n "${legacy_pid["$ppid"]:-}" ]] || continue
+    case "$args" in
+      *"/outlook-mcp/"*|*"/webex-mcp/"*|*"/drfirst-mcp/"*|*"/gemini_ui_mcp.mjs"*|*"/run_event_mcp.py"*|*"claude-runner-mcp"*|*"playwright-repl-mcp"*)
+        sidecar_count=$((sidecar_count + 1))
+        sidecar_by_parent["$ppid"]="${sidecar_by_parent["$ppid"]:-} $pid"
+        sidecar_args_by_pid["$pid"]="$args"
+        ;;
+    esac
+  done
 
   printf 'legacy codex processes: %s\n' "$root_count"
   printf 'direct sidecars under legacy codex: %s\n' "$sidecar_count"
 
-  doctor_print_legacy_rows rows legacy_pid sidecar_by_parent "$root_count"
+  if (( root_count > 0 )); then
+    printf '\n'
+    printf 'pid\tppid\tpgid\ttty\tetime\tsidecars\tcommand\n'
+    for row in "${rows[@]}"; do
+      IFS=$'\t' read -r pid ppid pgid tty etime args <<<"$row"
+      [[ -n "${legacy_pid["$pid"]:-}" ]] || continue
+      sidecars="${sidecar_by_parent["$pid"]:-}"
+      if [[ -n "$sidecars" ]]; then
+        sidecar_total="$(wc -w <<<"$sidecars" | tr -d ' ')"
+      else
+        sidecar_total=0
+      fi
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$pid" "$ppid" "$pgid" "$tty" "$etime" "$sidecar_total" "$args"
+    done
+  fi
   if (( kill_sidecars )); then
     for pid in "${!sidecar_args_by_pid[@]}"; do
       if kill "$pid" 2>/dev/null; then
