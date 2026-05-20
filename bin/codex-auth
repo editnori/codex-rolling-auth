@@ -6740,35 +6740,6 @@ find_best_ok_profile() {
   fi
 }
 
-usage_record_sort_rank() {
-  local default_profile="$1" valid="$2" mark="$3" profile="$4" status="$5"
-
-  case "$status" in
-    offline) printf '7'; return 0 ;;
-    login) printf '8'; return 0 ;;
-  esac
-  if [[ "$valid" != "0" ]]; then
-    printf '9'
-  elif [[ "$status" == "ok" ]]; then
-    if [[ -n "$default_profile" && "$profile" == "$default_profile" ]]; then
-      printf '0'
-      return 0
-    fi
-    case "$mark" in
-      '*') printf '1' ;;
-      '=') printf '4' ;;
-      *) printf '2' ;;
-    esac
-  else
-    case "$status:$mark" in
-      stale*) printf '3' ;;
-      *:'*') printf '4' ;;
-      *cap*:*) printf '5' ;;
-      *) printf '6' ;;
-    esac
-  fi
-}
-
 usage_record_sort_line() {
   local default_profile="$1"
   local record="$2"
@@ -6776,7 +6747,32 @@ usage_record_sort_line() {
   local rank coverage_rank short_score week_score
 
   IFS=$'\t' read -r valid weekly_used short_used mark profile plan weekly short status short_label weekly_reset short_reset cache_age <<<"$record"
-  rank="$(usage_record_sort_rank "$default_profile" "$valid" "$mark" "$profile" "$status")"
+  case "$status" in
+    offline) rank=7 ;;
+    login) rank=8 ;;
+    *)
+      if [[ "$valid" != "0" ]]; then
+        rank=9
+      elif [[ "$status" == "ok" ]]; then
+        if [[ -n "$default_profile" && "$profile" == "$default_profile" ]]; then
+          rank=0
+        else
+          case "$mark" in
+            '*') rank=1 ;;
+            '=') rank=4 ;;
+            *) rank=2 ;;
+          esac
+        fi
+      else
+        case "$status:$mark" in
+          stale*) rank=3 ;;
+          *:'*') rank=4 ;;
+          *cap*:*) rank=5 ;;
+          *) rank=6 ;;
+        esac
+      fi
+      ;;
+  esac
   coverage_rank="$(usage_limit_coverage_rank "$weekly" "$short")"
   short_score="$(usage_limit_sort_score "$short_used" "$short")"
   week_score="$(usage_limit_sort_score "$weekly_used" "$weekly")"
@@ -6785,27 +6781,11 @@ usage_record_sort_line() {
     "$valid" "$weekly_used" "$short_used" "$mark" "$profile" "$plan" "$weekly" "$short" "$status" "$short_label" "$weekly_reset" "$short_reset" "$cache_age"
 }
 
-usage_prepare_record_hints() {
-  local -n sorted_records_ref="$1"
-  local record valid weekly_used short_used mark profile plan weekly short status record_short_label weekly_reset short_reset cache_age
-
-  USAGE_SHORT_LABEL="5h"
-  USAGE_PROFILE_WIDTH_HINT=12
-  for record in "${sorted_records_ref[@]}"; do
-    IFS=$'\t' read -r valid weekly_used short_used mark profile plan weekly short status record_short_label weekly_reset short_reset cache_age <<<"$record"
-    if (( ${#profile} > USAGE_PROFILE_WIDTH_HINT )); then
-      USAGE_PROFILE_WIDTH_HINT="${#profile}"
-    fi
-    if [[ -n "$record_short_label" && "$record_short_label" != "short" && "$record_short_label" != "5h" ]]; then
-      USAGE_SHORT_LABEL="$record_short_label"
-    fi
-  done
-}
-
 prepare_usage_records() {
   local records="$1"
   local default_profile="${2:-}"
   local sorted_records=()
+  local record valid weekly_used short_used mark profile plan weekly short status record_short_label weekly_reset short_reset cache_age
 
   mapfile -t sorted_records < <(
     printf '%s\n' "$records" \
@@ -6817,7 +6797,17 @@ prepare_usage_records() {
       | cut -f6-
   )
 
-  usage_prepare_record_hints sorted_records
+  USAGE_SHORT_LABEL="5h"
+  USAGE_PROFILE_WIDTH_HINT=12
+  for record in "${sorted_records[@]}"; do
+    IFS=$'\t' read -r valid weekly_used short_used mark profile plan weekly short status record_short_label weekly_reset short_reset cache_age <<<"$record"
+    if (( ${#profile} > USAGE_PROFILE_WIDTH_HINT )); then
+      USAGE_PROFILE_WIDTH_HINT="${#profile}"
+    fi
+    if [[ -n "$record_short_label" && "$record_short_label" != "short" && "$record_short_label" != "5h" ]]; then
+      USAGE_SHORT_LABEL="$record_short_label"
+    fi
+  done
   SORTED_USAGE_RECORDS=("${sorted_records[@]}")
 }
 
