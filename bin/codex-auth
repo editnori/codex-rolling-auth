@@ -7872,18 +7872,6 @@ patch_codex_status() {
   return 0
 }
 
-patch_codex_background() {
-  local stock_bin="$1"
-  local quiet="$2"
-  local self log
-
-  self="$(realpath "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s\n' "${BASH_SOURCE[0]}")"
-  log="$(patch_codex_root)/build.log"
-  mkdir -p "$(dirname "$log")" "$(patch_codex_root)/.tmp"
-  nohup env CODEX_AUTH_STOCK_CODEX_BIN="$stock_bin" CODEX_AUTH_PATCH_BACKGROUND_CHILD=1 "$self" patch-codex --quiet --foreground >"$log" 2>&1 &
-  [[ "$quiet" == "1" ]] || print_status_note patch "background build started"
-}
-
 cmd_patch_codex() {
   ensure_dirs
 
@@ -7945,6 +7933,7 @@ cmd_patch_codex() {
   [[ "$profile" == "release" || "$profile" == "debug" ]] || profile=release
 
   local stock_bin stock_version stock_hash stock_key
+  local self log
   if [[ -n "${CODEX_AUTH_STOCK_CODEX_BIN:-}" && -x "${CODEX_AUTH_STOCK_CODEX_BIN:-}" ]]; then
     stock_bin="$CODEX_AUTH_STOCK_CODEX_BIN"
   else
@@ -7971,7 +7960,11 @@ cmd_patch_codex() {
     return 0
   fi
   if (( background )); then
-    patch_codex_background "$stock_bin" "$quiet"
+    self="$(realpath "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s\n' "${BASH_SOURCE[0]}")"
+    log="$(patch_codex_root)/build.log"
+    mkdir -p "$(dirname "$log")" "$(patch_codex_root)/.tmp"
+    nohup env CODEX_AUTH_STOCK_CODEX_BIN="$stock_bin" CODEX_AUTH_PATCH_BACKGROUND_CHILD=1 "$self" patch-codex --quiet --foreground >"$log" 2>&1 &
+    [[ "$quiet" == "1" ]] || print_status_note patch "background build started"
     return 0
   fi
 
