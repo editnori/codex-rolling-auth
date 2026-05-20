@@ -2162,11 +2162,7 @@ usage_display_status() {
       status="${BASH_REMATCH[2]}"
     fi
   fi
-  case "$status" in
-    "week+5h cap"|"week cap"|"5h cap")
-      exact_cap=1
-      ;;
-  esac
+  [[ "$status" == "week+5h cap" || "$status" == "week cap" || "$status" == "5h cap" ]] && exact_cap=1
 
   if (( stale_status )); then
     if [[ "$mode" == "pico" || "$mode" == "nano" ]]; then
