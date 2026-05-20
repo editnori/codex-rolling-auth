@@ -4240,9 +4240,7 @@ selector_fzf_menu() {
   local fzf_border_args=()
   local fzf_margin_args=()
   local fzf_padding_args=()
-  local fzf_ellipsis_args=()
   local fzf_header_args=()
-  local fzf_layout_args=(--layout=reverse)
   local fzf_opencode_theme=0
   local selector_controls selector_control_sep max_height
   local fzf_color_arg
@@ -4280,7 +4278,6 @@ selector_fzf_menu() {
   fi
   [[ -n "$fzf_color_arg" ]] && fzf_color_args+=(--color="$fzf_color_arg")
   fzf_height_arg="~$fzf_height"
-  fzf_ellipsis_args+=(--ellipsis='')
   selector_control_sep="$(usage_separator)"
   if usage_unicode_enabled; then
     fzf_prompt='filter ▸ '
@@ -4382,7 +4379,7 @@ selector_fzf_menu() {
     } | fzf \
       --ansi \
       --no-sort \
-      "${fzf_layout_args[@]}" \
+      --layout=reverse \
       --height="$fzf_height_arg" \
       "${fzf_border_args[@]}" \
       "${fzf_margin_args[@]}" \
@@ -4393,7 +4390,7 @@ selector_fzf_menu() {
       --info=hidden \
       --no-scrollbar \
       --no-separator \
-      "${fzf_ellipsis_args[@]}" \
+      --ellipsis='' \
       "${fzf_header_args[@]}" \
       --delimiter=$'\t' \
       --with-nth=4.. \
