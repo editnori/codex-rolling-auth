@@ -1040,10 +1040,6 @@ compact_error_message() {
   printf '%s' "$message"
 }
 
-print_error_has_body() {
-  [[ "$1" != "$2" && "$1" != "$3" ]]
-}
-
 print_error() {
   local message="$*"
   local cols prefix indent current word candidate rendered line_prefix line_width
@@ -1075,7 +1071,7 @@ print_error() {
       continue
     fi
 
-    if print_error_has_body "$current" "$prefix" "$indent"; then
+    if [[ "$current" != "$prefix" && "$current" != "$indent" ]]; then
       rendered="$(fit_text_rtrim "$current" "$cols")"
       printf '%s\n' "$rendered" >&2
       wrote_line=1
@@ -1094,7 +1090,7 @@ print_error() {
     fi
   done
 
-  if print_error_has_body "$current" "$prefix" "$indent"; then
+  if [[ "$current" != "$prefix" && "$current" != "$indent" ]]; then
     rendered="$(fit_text_rtrim "$current" "$cols")"
     printf '%s\n' "$rendered" >&2
   fi
