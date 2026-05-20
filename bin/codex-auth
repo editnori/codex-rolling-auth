@@ -3082,39 +3082,6 @@ usage_summary_note_active_record() {
   fi
 }
 
-usage_summary_count_record_status() {
-  local valid="$1"
-  local status="$2"
-  local -n caps_ref="$3"
-  local -n login_ref="$4"
-  local -n unavailable_ref="$5"
-  local -n offline_ref="$6"
-  local -n stale_ref="$7"
-  local -n ready_ref="$8"
-
-  [[ "$status" == stale* ]] && stale_ref=$((stale_ref + 1))
-  if [[ "$status" == "offline" ]]; then
-    offline_ref=$((offline_ref + 1))
-  elif [[ "$status" == "login" ]]; then
-    login_ref=$((login_ref + 1))
-  elif [[ "$valid" != "0" || "$status" == "no data" || "$status" == "no usage" ]]; then
-    unavailable_ref=$((unavailable_ref + 1))
-  elif [[ "$status" == *cap* ]]; then
-    caps_ref=$((caps_ref + 1))
-  elif [[ "$status" == "ok" ]]; then
-    ready_ref=$((ready_ref + 1))
-  fi
-}
-
-usage_summary_note_cache_age() {
-  local cache_age="$1"
-  local -n cache_age_max_ref="$2"
-
-  if [[ "$cache_age" =~ ^[0-9]+$ ]] && (( cache_age > cache_age_max_ref )); then
-    cache_age_max_ref="$cache_age"
-  fi
-}
-
 usage_summary_scan_record() {
   local record="$1"
   local -n best_profile_out="$2"
@@ -3134,11 +3101,24 @@ usage_summary_scan_record() {
 
   IFS=$'\t' read -r valid weekly_used short_used mark profile plan weekly short status short_label weekly_reset short_reset cache_age <<<"$record"
   [[ -n "$profile" ]] || return 0
-  usage_summary_note_cache_age "$cache_age" cache_age_max_out
+  if [[ "$cache_age" =~ ^[0-9]+$ ]] && (( cache_age > cache_age_max_out )); then
+    cache_age_max_out="$cache_age"
+  fi
   usage_summary_note_active_record "$valid" "$mark" "$profile" "$weekly" "$short" "$short_label" \
     active_profile_out active_short_out active_weekly_out active_label_out active_has_usage_out
   [[ -z "$best_profile_out" && "$status" == "ok" ]] && best_profile_out="$profile"
-  usage_summary_count_record_status "$valid" "$status" caps_out login_out unavailable_out offline_out stale_out ready_out
+  [[ "$status" == stale* ]] && stale_out=$((stale_out + 1))
+  if [[ "$status" == "offline" ]]; then
+    offline_out=$((offline_out + 1))
+  elif [[ "$status" == "login" ]]; then
+    login_out=$((login_out + 1))
+  elif [[ "$valid" != "0" || "$status" == "no data" || "$status" == "no usage" ]]; then
+    unavailable_out=$((unavailable_out + 1))
+  elif [[ "$status" == *cap* ]]; then
+    caps_out=$((caps_out + 1))
+  elif [[ "$status" == "ok" ]]; then
+    ready_out=$((ready_out + 1))
+  fi
 }
 
 usage_summary_normalize_scan() {
