@@ -8482,41 +8482,6 @@ first_profile_name_for_fingerprint() {
   return 1
 }
 
-profile_removal_matches_active() {
-  local name="$1"
-  local path="$2"
-  local -n active_fp_ref="$3"
-  local profile_fp active_name
-
-  active_fp_ref=""
-  [[ -f "$AUTH_FILE" ]] || return 1
-  active_fp_ref="$(credential_fingerprint "$AUTH_FILE" || true)"
-  profile_fp="$(credential_fingerprint "$path" || true)"
-  [[ -n "$active_fp_ref" && "$active_fp_ref" == "$profile_fp" ]] || return 1
-  active_name="$(first_profile_name_for_fingerprint "$active_fp_ref" || true)"
-  [[ "$active_name" == "$name" ]]
-}
-
-print_removed_active_profile() {
-  local name="$1"
-  local path="$2"
-  local remaining_name="$3"
-  local active_value="unsaved auth"
-
-  [[ -n "$remaining_name" ]] && active_value="saved $remaining_name"
-  print_result_block "removed active $name" \
-    "profile"$'\t'"$(display_path "$path")"$'\t'"bad" \
-    "active"$'\t'"$active_value"$'\t'"active"
-}
-
-print_removed_profile() {
-  local name="$1"
-  local path="$2"
-
-  print_result_block "removed $name" \
-    "profile"$'\t'"$(display_path "$path")"$'\t'"bad"
-}
-
 cmd_remove() {
   local name="$1"
   local yes="${2:-}"
@@ -8525,18 +8490,29 @@ cmd_remove() {
   ensure_dirs
   acquire_mutation_lock
 
-  local path active_matches=0 active_fp="" remaining_name=""
+  local path active_matches=0 active_fp="" profile_fp="" active_name="" remaining_name="" active_value="unsaved auth"
   path="$(profile_path "$name")"
   [[ -f "$path" ]] || die "profile not found: $name"
-  profile_removal_matches_active "$name" "$path" active_fp && active_matches=1
+  if [[ -f "$AUTH_FILE" ]]; then
+    active_fp="$(credential_fingerprint "$AUTH_FILE" || true)"
+    profile_fp="$(credential_fingerprint "$path" || true)"
+    if [[ -n "$active_fp" && "$active_fp" == "$profile_fp" ]]; then
+      active_name="$(first_profile_name_for_fingerprint "$active_fp" || true)"
+      [[ "$active_name" == "$name" ]] && active_matches=1
+    fi
+  fi
 
   rm -f "$path"
   if (( active_matches )); then
     remaining_name="$(first_profile_name_for_fingerprint "$active_fp" || true)"
-    print_removed_active_profile "$name" "$path" "$remaining_name"
+    [[ -n "$remaining_name" ]] && active_value="saved $remaining_name"
+    print_result_block "removed active $name" \
+      "profile"$'\t'"$(display_path "$path")"$'\t'"bad" \
+      "active"$'\t'"$active_value"$'\t'"active"
     return 0
   fi
-  print_removed_profile "$name" "$path"
+  print_result_block "removed $name" \
+    "profile"$'\t'"$(display_path "$path")"$'\t'"bad"
 }
 
 doctor_ps_rows() {
