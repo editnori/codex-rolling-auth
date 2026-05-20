@@ -2615,78 +2615,6 @@ EOF
   printf '\n'
 }
 
-print_usage_summary_compact_line() {
-  local width="$1"
-  local has_active="$2"
-  local active_has_usage="$3"
-  local active_profile="$4"
-  local active_label="$5"
-  local active_short="$6"
-  local caps="$7"
-  local ready="$8"
-  local has_best="$9"
-  local old_summary="${10}"
-  local sep="${11}"
-  local compact_lines=()
-  local compact_active_profile line
-
-  compact_active_profile="$(usage_display_profile_name "$active_profile" "" 6)"
-  if (( old_summary )); then
-    compact_lines+=(
-      "old $compact_active_profile ${active_label} $active_short"
-      "old $active_profile ${active_label} $active_short"
-      "old $compact_active_profile"
-      "old $active_profile"
-    )
-  fi
-  if (( has_active )); then
-    if (( active_has_usage )); then
-      if (( caps > 0 )); then
-        compact_lines+=(
-          "active $compact_active_profile ${active_label} $active_short${sep}cap $caps"
-          "act $compact_active_profile ${active_label} $active_short${sep}cap $caps"
-        )
-      fi
-      compact_lines+=(
-        "active $compact_active_profile ${active_label} $active_short"
-        "act $compact_active_profile ${active_label} $active_short"
-        "active $active_profile ${active_label} $active_short"
-        "active $compact_active_profile"
-        "active $active_profile"
-        "${active_label} $active_short"
-      )
-    else
-      compact_lines+=(
-        "no fresh ready${sep}active $compact_active_profile"
-        "no fresh ready${sep}active $active_profile"
-        "active $compact_active_profile"
-        "active $active_profile"
-        "no fresh ready"
-      )
-    fi
-  elif (( has_best )); then
-    compact_lines+=(
-      "ready $ready${sep}no active"
-      "ready $ready"
-      "no active"
-    )
-  else
-    compact_lines+=(
-      "no fresh ready${sep}no active"
-      "no active"
-    )
-  fi
-
-  for line in "${compact_lines[@]}"; do
-    if (( ${#line} <= width )); then
-      printf '%s\n' "$line"
-      return 0
-    fi
-  done
-  fit_text_rtrim "${compact_lines[-1]}" "$width"
-  printf '\n'
-}
-
 print_usage_summary_line() {
   local width="$1"
   local default_profile="${2:-}"
@@ -2761,7 +2689,63 @@ print_usage_summary_line() {
   (( caps > 0 )) && show_caps=1
 
   if (( width < 40 )); then
-    print_usage_summary_compact_line "$width" "$has_active" "$active_has_usage" "$active_profile" "$active_label" "$active_short" "$caps" "$ready" "$has_best" "$old_summary" "$sep"
+    local compact_active_profile
+    local compact_lines=()
+
+    compact_active_profile="$(usage_display_profile_name "$active_profile" "" 6)"
+    if (( old_summary )); then
+      compact_lines+=(
+        "old $compact_active_profile ${active_label} $active_short"
+        "old $active_profile ${active_label} $active_short"
+        "old $compact_active_profile"
+        "old $active_profile"
+      )
+    fi
+    if (( has_active )); then
+      if (( active_has_usage )); then
+        if (( caps > 0 )); then
+          compact_lines+=(
+            "active $compact_active_profile ${active_label} $active_short${sep}cap $caps"
+            "act $compact_active_profile ${active_label} $active_short${sep}cap $caps"
+          )
+        fi
+        compact_lines+=(
+          "active $compact_active_profile ${active_label} $active_short"
+          "act $compact_active_profile ${active_label} $active_short"
+          "active $active_profile ${active_label} $active_short"
+          "active $compact_active_profile"
+          "active $active_profile"
+          "${active_label} $active_short"
+        )
+      else
+        compact_lines+=(
+          "no fresh ready${sep}active $compact_active_profile"
+          "no fresh ready${sep}active $active_profile"
+          "active $compact_active_profile"
+          "active $active_profile"
+          "no fresh ready"
+        )
+      fi
+    elif (( has_best )); then
+      compact_lines+=(
+        "ready $ready${sep}no active"
+        "ready $ready"
+        "no active"
+      )
+    else
+      compact_lines+=(
+        "no fresh ready${sep}no active"
+        "no active"
+      )
+    fi
+    for line in "${compact_lines[@]}"; do
+      if (( ${#line} <= width )); then
+        printf '%s\n' "$line"
+        return 0
+      fi
+    done
+    fit_text_rtrim "${compact_lines[-1]}" "$width"
+    printf '\n'
     return 0
   fi
 
