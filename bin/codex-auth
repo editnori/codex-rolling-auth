@@ -1290,14 +1290,19 @@ print_status_note() {
   printf '\n'
 }
 
-profile_list_summary() {
+print_profile_list_header() {
   local count="$1"
   local active_name="$2"
   local alias_count="$3"
-  local total_w="$4"
-  local summary="profiles $count"
+  local role_w="$4"
+  local profile_w="$5"
+  local mode_w="$6"
+  local account_w="$7"
+  local total_w summary role_header profile_header
   local active_summary active_label active_short active_tiny alias_summary sep
 
+  total_w=$((role_w + 1 + profile_w + 1 + mode_w + 1 + account_w))
+  summary="profiles $count"
   if [[ -n "$active_name" ]]; then
     sep="$(usage_separator)"
     active_short="$(usage_display_profile_name "$active_name" "" 6)"
@@ -1316,22 +1321,6 @@ profile_list_summary() {
       summary="$alias_summary"
     fi
   fi
-
-  printf '%s' "$summary"
-}
-
-print_profile_list_header() {
-  local count="$1"
-  local active_name="$2"
-  local alias_count="$3"
-  local role_w="$4"
-  local profile_w="$5"
-  local mode_w="$6"
-  local account_w="$7"
-  local total_w summary role_header profile_header
-
-  total_w=$((role_w + 1 + profile_w + 1 + mode_w + 1 + account_w))
-  summary="$(profile_list_summary "$count" "$active_name" "$alias_count" "$total_w")"
   print_palette_summary_header "Auth" "Saved profiles" "$summary" "$total_w"
   role_header="$(compact_width_choice "$role_w" 2 "" "act")"
   profile_header="$(compact_width_choice "$profile_w" 7 "prof" "profile")"
