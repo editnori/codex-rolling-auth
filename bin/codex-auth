@@ -1771,8 +1771,6 @@ usage_status_tone() {
     printf 'warn'
   elif [[ "$status" == "ok" ]]; then
     printf 'good'
-  elif [[ "$status" == *cap* ]]; then
-    printf 'bad'
   else
     printf 'bad'
   fi
