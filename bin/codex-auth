@@ -7184,32 +7184,6 @@ usage_best_selection_into() {
   fi
 }
 
-usage_handle_menu_action() {
-  case "$MENU_ACTION" in
-    login)
-      local refreshed_profile="$MENU_PROFILE"
-      cmd_login "$refreshed_profile"
-      printf '\n'
-      print_status_note refresh "$refreshed_profile"
-      refresh_active_profile_state "$refreshed_profile" || true
-      USAGE_REFRESH=0
-      USAGE_CACHED=1
-      return 1
-      ;;
-    blocked)
-      print_status_note blocked "choose switch/login/skip"
-      return 0
-      ;;
-    switch)
-      cmd_use "$MENU_PROFILE"
-      return 0
-      ;;
-    skip|*)
-      return 0
-      ;;
-  esac
-}
-
 cmd_usage() {
   ensure_dirs
   command -v jq >/dev/null 2>&1 || die "jq is required for usage output"
@@ -7271,7 +7245,28 @@ cmd_usage() {
         ;;
       0:1)
         arrow_action_menu "$default_profile" "${SORTED_USAGE_RECORDS[@]}"
-        usage_handle_menu_action && return 0
+        case "$MENU_ACTION" in
+          login)
+            local refreshed_profile="$MENU_PROFILE"
+            cmd_login "$refreshed_profile"
+            printf '\n'
+            print_status_note refresh "$refreshed_profile"
+            refresh_active_profile_state "$refreshed_profile" || true
+            USAGE_REFRESH=0
+            USAGE_CACHED=1
+            ;;
+          blocked)
+            print_status_note blocked "choose switch/login/skip"
+            return 0
+            ;;
+          switch)
+            cmd_use "$MENU_PROFILE"
+            return 0
+            ;;
+          skip|*)
+            return 0
+            ;;
+        esac
         ;;
       *) return 0 ;;
     esac
