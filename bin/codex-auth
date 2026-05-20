@@ -7067,15 +7067,6 @@ profile_files_for_args_into() {
   fi
 }
 
-usage_profile_files_for_args_into() {
-  local profile_files_var="$1" quiet_missing="$2"; shift 2
-  local -n profile_files_ref="$profile_files_var"
-
-  profile_files_for_args_into "$profile_files_var" "$quiet_missing" "$@" || return 1
-  (( ${#profile_files_ref[@]} > 0 )) && return 0
-  [[ "$USAGE_QUIET" == "1" ]] || print_empty_profiles; return 1
-}
-
 active_auth_fingerprint() {
   local active_meta=()
 
@@ -7171,7 +7162,11 @@ cmd_usage() {
 
   local profile_files=()
   local refresh_lock_wait
-  usage_profile_files_for_args_into profile_files 0 "$@" || return 0
+  profile_files_for_args_into profile_files 0 "$@" || return 0
+  if (( ${#profile_files[@]} == 0 )); then
+    [[ "$USAGE_QUIET" == "1" ]] || print_empty_profiles
+    return 0
+  fi
   if [[ "$USAGE_REFRESH" == "1" && "$USAGE_QUIET" != "1" && -t 2 ]]; then
     print_status_note refresh "${#profile_files[@]} profiles" >&2
   fi
@@ -7374,7 +7369,8 @@ cmd_auto() {
   set -- "${args[@]}"
 
   local profile_files=()
-  usage_profile_files_for_args_into profile_files 1 "$@" || return 0
+  profile_files_for_args_into profile_files 1 "$@" || return 0
+  (( ${#profile_files[@]} > 0 )) || return 0
 
   local active_fp
   active_fp="$(active_auth_fingerprint)"
