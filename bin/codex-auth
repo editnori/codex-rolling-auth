@@ -6618,48 +6618,32 @@ collect_usage_records_cached() {
   return 0
 }
 
-usage_blocked_cache_payload() {
-  local profile_name="$1"
-  local fingerprint="$2"
-  local payload=""
-
-  if [[ "${CODEX_AUTH_REFRESH_BLOCKED:-0}" == "1" && -n "$fingerprint" ]]; then
-    payload="$(state_payload_for_profile "$profile_name" "$fingerprint" || true)"
-    if [[ -n "$payload" ]] && ! usage_payload_still_blocked "$payload"; then
-      payload=""
-    fi
-  fi
-  printf '%s' "$payload"
-}
-
-usage_refresh_state_fallback_payload() {
-  local profile_name="$1"
-  local fingerprint="$2"
-  local payload=""
-
-  [[ -n "$fingerprint" ]] && payload="$(state_payload_for_profile "$profile_name" "$fingerprint" || true)"
-  if [[ -n "$payload" && "${CODEX_AUTH_REFRESH_FALLBACK_CACHE:-1}" == "1" ]]; then
-    mark_stale_payload "$payload"
-  else
-    printf '%s' '{"error":{"message":"no response"}}'
-  fi
-}
-
 usage_refresh_payload_or_cache() {
   local profile_name="$1"
   local profile_file="$2"
   local fingerprint="$3"
-  local payload
+  local payload fallback_payload
 
-  payload="$(usage_blocked_cache_payload "$profile_name" "$fingerprint")"
-  [[ -n "$payload" ]] && printf '%s' "$payload" && return 0
+  if [[ "${CODEX_AUTH_REFRESH_BLOCKED:-0}" == "1" && -n "$fingerprint" ]]; then
+    payload="$(state_payload_for_profile "$profile_name" "$fingerprint" || true)"
+    if [[ -n "$payload" ]] && usage_payload_still_blocked "$payload"; then
+      printf '%s' "$payload"
+      return 0
+    fi
+  fi
 
   payload="$(usage_json_for_profile "$profile_file")"
   if [[ -n "$payload" && "$payload" != "null" ]] && usage_payload_transient_error "$payload"; then
     payload=""
   fi
   if [[ -z "$payload" || "$payload" == "null" ]]; then
-    payload="$(usage_refresh_state_fallback_payload "$profile_name" "$fingerprint")"
+    fallback_payload=""
+    [[ -n "$fingerprint" ]] && fallback_payload="$(state_payload_for_profile "$profile_name" "$fingerprint" || true)"
+    if [[ -n "$fallback_payload" && "${CODEX_AUTH_REFRESH_FALLBACK_CACHE:-1}" == "1" ]]; then
+      payload="$(mark_stale_payload "$fallback_payload")"
+    else
+      payload='{"error":{"message":"no response"}}'
+    fi
   elif [[ -n "$fingerprint" ]]; then
     state_update_profile "$profile_name" "$fingerprint" "$payload"
   fi
@@ -6747,41 +6731,6 @@ usage_record_is_best_candidate() {
   (( weekly_used < 100 && short_used < 100 ))
 }
 
-usage_best_candidate_scores() {
-  local weekly_used="$1"
-  local short_used="$2"
-  local weekly="$3"
-  local short="$4"
-  local coverage_rank
-
-  coverage_rank="$(usage_limit_coverage_rank "$weekly" "$short")"
-  (( coverage_rank < 9 )) || return 1
-  printf '%s\t%s\t%s\n' "$coverage_rank" "$(usage_limit_sort_score "$short_used" "$short")" "$(usage_limit_sort_score "$weekly_used" "$weekly")"
-}
-
-usage_best_candidate_wins() {
-  local include_active="$1"
-  local mark="$2"
-  local coverage_rank="$3"
-  local short_score="$4"
-  local week_score="$5"
-  local best_mark="$6"
-  local best_coverage="$7"
-  local best_short="$8"
-  local best_week="$9"
-
-  if (( coverage_rank < best_coverage )); then
-    return 0
-  fi
-  if (( coverage_rank == best_coverage && short_score < best_short )); then
-    return 0
-  fi
-  if (( coverage_rank == best_coverage && short_score == best_short && week_score < best_week )); then
-    return 0
-  fi
-  [[ "$include_active" == "1" && "$mark" == "*" && "$best_mark" != "*" && "$coverage_rank" == "$best_coverage" && "$short_score" == "$best_short" && "$week_score" == "$best_week" ]]
-}
-
 find_best_ok_profile() {
   local records="$1"
   local include_active="${2:-0}"
@@ -6791,15 +6740,20 @@ find_best_ok_profile() {
   local best_profile=""
   local best_mark=""
   local valid weekly_used short_used mark profile plan weekly short status short_label
-  local coverage_rank short_score week_score scores
+  local coverage_rank short_score week_score
 
   while IFS=$'\t' read -r valid weekly_used short_used mark profile plan weekly short status short_label; do
     [[ -n "$profile" ]] || continue
     usage_record_is_best_candidate "$valid" "$weekly_used" "$short_used" "$status" || continue
     [[ "$include_active" != "1" && ( "$mark" == "*" || "$mark" == "=" ) ]] && continue
-    scores="$(usage_best_candidate_scores "$weekly_used" "$short_used" "$weekly" "$short")" || continue
-    IFS=$'\t' read -r coverage_rank short_score week_score <<<"$scores"
-    if usage_best_candidate_wins "$include_active" "$mark" "$coverage_rank" "$short_score" "$week_score" "$best_mark" "$best_coverage" "$best_short" "$best_week"; then
+    coverage_rank="$(usage_limit_coverage_rank "$weekly" "$short")"
+    (( coverage_rank < 9 )) || continue
+    short_score="$(usage_limit_sort_score "$short_used" "$short")"
+    week_score="$(usage_limit_sort_score "$weekly_used" "$weekly")"
+    if (( coverage_rank < best_coverage )) \
+      || (( coverage_rank == best_coverage && short_score < best_short )) \
+      || (( coverage_rank == best_coverage && short_score == best_short && week_score < best_week )) \
+      || [[ "$include_active" == "1" && "$mark" == "*" && "$best_mark" != "*" && "$coverage_rank" == "$best_coverage" && "$short_score" == "$best_short" && "$week_score" == "$best_week" ]]; then
       best_profile="$profile"
       best_mark="$mark"
       best_coverage="$coverage_rank"
