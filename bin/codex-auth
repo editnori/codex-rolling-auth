@@ -2428,7 +2428,7 @@ usage_header_limit_label() {
 usage_metric_header_cell() {
   local text="$1"
   local width="$2"
-  local force_compact="${4:-0}"
+  local force_compact="${3:-0}"
   local display="$text" compact="$text"
 
   if (( USAGE_VERBOSE > force_compact )); then
@@ -2495,8 +2495,8 @@ print_usage_render_header() {
   short_nano_label="${short_label:0:2}"
   weekly_cell="$(usage_header_limit_label "$mode" "week" "wk")"
   short_cell="$(usage_header_limit_label "$mode" "$short_label" "$short_nano_label")"
-  weekly_cell="$(usage_metric_header_cell "$weekly_cell" "$cell_w" "$mode")"
-  short_cell="$(usage_metric_header_cell "$short_cell" "$cell_w" "$mode")"
+  weekly_cell="$(usage_metric_header_cell "$weekly_cell" "$cell_w")"
+  short_cell="$(usage_metric_header_cell "$short_cell" "$cell_w")"
   if (( status_w > 0 )); then
     status="$(fit_text_center "$status" "$status_w")"
   else
@@ -3661,12 +3661,12 @@ selector_palette_table_header() {
   printf ' '
   if (( week_w > 0 )); then
     usage_tone_color muted
-    usage_metric_header_cell "week%" "$week_w" normal 1
+    usage_metric_header_cell "week%" "$week_w" 1
     usage_tone_reset
     printf '%*s' "$metric_gap" ''
   fi
   usage_tone_color muted
-  usage_metric_header_cell "$short_label" "$short_w" normal 1
+  usage_metric_header_cell "$short_label" "$short_w" 1
   usage_tone_reset
   if (( status_w > 0 )); then
     printf '%*s' "$status_gap" ''
