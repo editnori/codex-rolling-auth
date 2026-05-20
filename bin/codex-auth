@@ -528,30 +528,6 @@ short_account_hint() {
   fi
 }
 
-profile_list_mode_label() {
-  local mode="$1"
-  local width="$2"
-
-  if (( width <= 4 )); then
-    case "$mode" in
-      chatgpt)
-        printf 'chat'
-        ;;
-      api_key)
-        printf 'api'
-        ;;
-      unknown|"")
-        printf 'n/a'
-        ;;
-      *)
-        fit_text "$mode" "$width"
-        ;;
-    esac
-  else
-    fit_text "$(auth_mode_display_label "$mode")" "$width"
-  fi
-}
-
 auth_mode_display_label() {
   local mode="$1"
 
@@ -581,6 +557,7 @@ print_profile_list_line() {
   local mode_w="$7"
   local account_w="$8"
   local role_tone="muted"
+  local mode_display
 
   if [[ "$role" == "$(usage_active_glyph)" || "$role" == "active" || "$role" == "stay" || "$role" == "s" || "$role" == "*" ]]; then
     role_tone="active"
@@ -597,7 +574,17 @@ print_profile_list_line() {
   printf ' '
   fit_profile_text "$(usage_display_profile_name "$profile" "$role" "$profile_w")" "$profile_w"
   printf ' '
-  profile_list_mode_label "$mode" "$mode_w"
+  if (( mode_w <= 4 )); then
+    case "$mode" in
+      chatgpt) mode_display="chat" ;;
+      api_key) mode_display="api" ;;
+      unknown|"") mode_display="n/a" ;;
+      *) mode_display="$(fit_text "$mode" "$mode_w")" ;;
+    esac
+  else
+    mode_display="$(fit_text "$(auth_mode_display_label "$mode")" "$mode_w")"
+  fi
+  printf '%s' "$mode_display"
   printf ' '
   fit_profile_text_rtrim "$account" "$account_w"
   printf '\n'
@@ -1457,7 +1444,12 @@ cmd_current() {
   fi
   mode_summary_display="$mode_display"
   if (( total_w < 24 )); then
-    mode_summary_display="$(profile_list_mode_label "$mode" 4)"
+    case "$mode" in
+      chatgpt) mode_summary_display="chat" ;;
+      api_key) mode_summary_display="api" ;;
+      unknown|"") mode_summary_display="n/a" ;;
+      *) mode_summary_display="$(fit_text "$mode" 4)" ;;
+    esac
   fi
   matched_display="$matched"
   if [[ -n "$matched_display" && "$total_w" -lt 22 ]]; then
