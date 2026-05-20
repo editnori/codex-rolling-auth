@@ -621,77 +621,6 @@ auth_mode_display_label() {
   esac
 }
 
-profile_alias_text() {
-  local base="$1"
-  local alias_label="$2"
-
-  if usage_unicode_enabled; then
-    printf '%s ↔ %s' "$base" "$alias_label"
-  else
-    printf '%s = %s' "$base" "$alias_label"
-  fi
-}
-
-profile_compact_alias_text() {
-  local alias_label="$1"
-
-  if usage_unicode_enabled; then
-    printf '↔ %s' "$alias_label"
-  else
-    printf '= %s' "$alias_label"
-  fi
-}
-
-profile_fit_alias_prefix() {
-  local alias_label="$1"
-  local width="$2"
-
-  if usage_unicode_enabled; then
-    printf '↔'
-  else
-    printf '='
-  fi
-  fit_profile_text "$alias_label" "$((width - 1))"
-}
-
-profile_account_alias_display() {
-  local hint="$1"
-  local width="$2"
-  local verbose="$3"
-  local alias_of="$4"
-  local alias_label base alias_text compact_alias
-
-  alias_label="$(usage_display_profile_name "$alias_of" "" "$width")"
-  if (( verbose )) && [[ -n "$hint" ]]; then
-    base="$hint"
-  else
-    base="$(short_account_hint "$hint" 13)"
-  fi
-  alias_text="$(profile_alias_text "$base" "$alias_label")"
-  compact_alias="$(profile_compact_alias_text "$alias_label")"
-  if (( ${#alias_text} > width )) && (( verbose )); then
-    base="$(short_account_hint "$hint" 13)"
-    alias_text="$(profile_alias_text "$base" "$alias_label")"
-  fi
-  if (( ${#alias_text} <= width )); then
-    printf '%s' "$alias_text"
-  elif (( ${#compact_alias} <= width )); then
-    printf '%s' "$compact_alias"
-  elif (( width >= 5 )); then
-    alias_label="$(usage_display_profile_name "$alias_of" "" "$((width - 2))")"
-    compact_alias="$(profile_compact_alias_text "$alias_label")"
-    if (( ${#compact_alias} <= width )); then
-      printf '%s' "$compact_alias"
-    else
-      profile_fit_alias_prefix "$alias_label" "$width"
-    fi
-  elif (( width >= 2 )); then
-    profile_fit_alias_prefix "$alias_label" "$width"
-  else
-    fit_text "$(short_account_hint "$hint" "$width")" "$width"
-  fi
-}
-
 print_profile_list_line() {
   local role="$1"
   local profile="$2"
@@ -1455,6 +1384,7 @@ print_profile_list_rows() {
   local -n account_count_ref="$account_count_var"
   local -n account_primary_ref="$account_primary_var"
   local path name mode hint fp action alias_of account_display account_base clean right left
+  local alias_label alias_text compact_alias alias_glyph
 
   for path in "${profiles_ref[@]}"; do
     name="$(basename "$path" .json)"
@@ -1464,7 +1394,40 @@ print_profile_list_rows() {
     alias_of="$(profile_list_alias_of "$hint" "$name" "$account_count_var" "$account_primary_var")"
     action="$(profile_list_row_action "$active_name" "$name" "$alias_of" "$active_fp" "$fp")"
     if [[ -n "$alias_of" ]]; then
-      account_display="$(profile_account_alias_display "$hint" "$account_w" "$list_verbose" "$alias_of")"
+      alias_label="$(usage_display_profile_name "$alias_of" "" "$account_w")"
+      if usage_unicode_enabled; then
+        alias_glyph="↔"
+      else
+        alias_glyph="="
+      fi
+      if (( list_verbose )) && [[ -n "$hint" ]]; then
+        account_base="$hint"
+      else
+        account_base="$(short_account_hint "$hint" 13)"
+      fi
+      alias_text="$account_base $alias_glyph $alias_label"
+      compact_alias="$alias_glyph $alias_label"
+      if (( ${#alias_text} > account_w )) && (( list_verbose )); then
+        account_base="$(short_account_hint "$hint" 13)"
+        alias_text="$account_base $alias_glyph $alias_label"
+      fi
+      if (( ${#alias_text} <= account_w )); then
+        account_display="$alias_text"
+      elif (( ${#compact_alias} <= account_w )); then
+        account_display="$compact_alias"
+      elif (( account_w >= 5 )); then
+        alias_label="$(usage_display_profile_name "$alias_of" "" "$((account_w - 2))")"
+        compact_alias="$alias_glyph $alias_label"
+        if (( ${#compact_alias} <= account_w )); then
+          account_display="$compact_alias"
+        else
+          account_display="$alias_glyph$(fit_profile_text "$alias_label" "$((account_w - 1))")"
+        fi
+      elif (( account_w >= 2 )); then
+        account_display="$alias_glyph$(fit_profile_text "$alias_label" "$((account_w - 1))")"
+      else
+        account_display="$(fit_text "$(short_account_hint "$hint" "$account_w")" "$account_w")"
+      fi
     elif [[ -n "$hint" ]]; then
       if (( list_verbose )); then
         if (( ${#hint} <= account_w )); then
