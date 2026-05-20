@@ -1896,53 +1896,6 @@ cmd_list() {
   print_profile_list_rows "$active_name" "$active_fp" "$list_verbose" "$role_w" "$profile_w" "$mode_w" "$account_w" profiles profile_mode profile_hint profile_fp account_count account_primary
 }
 
-current_meta_files_into() {
-  local -n files_ref="$1"
-  local path
-
-  shopt -s nullglob
-  files_ref+=("$AUTH_FILE")
-  for path in "$PROFILE_DIR"/*.json; do
-    files_ref+=("$path")
-  done
-}
-
-current_load_metadata() {
-  local -n files_ref="$1"
-  local -n fp_map_ref="$2"
-  local -n active_fp_ref="$3"
-  local -n active_mode_ref="$4"
-  local -n active_hint_ref="$5"
-  local fp meta_path secret meta_mode meta_hint
-
-  while IFS=$'\037' read -r meta_path meta_mode meta_hint secret; do
-    [[ -n "$meta_path" ]] || continue
-    fp="$(auth_record_fingerprint "$secret")"
-    fp_map_ref["$meta_path"]="$fp"
-    if [[ "$meta_path" == "$AUTH_FILE" ]]; then
-      active_fp_ref="$fp"
-      active_mode_ref="${meta_mode:-unknown}"
-      active_hint_ref="${meta_hint:-}"
-    fi
-  done < <(auth_metadata_records "${files_ref[@]}")
-}
-
-current_matched_profile() {
-  local active_fp="$1"
-  local -n fp_map_ref="$2"
-  local path fp
-
-  [[ -n "$active_fp" ]] || return 0
-  shopt -s nullglob
-  for path in "$PROFILE_DIR"/*.json; do
-    fp="${fp_map_ref["$path"]:-}"
-    if [[ "$fp" == "$active_fp" ]]; then
-      basename "$path" .json
-      return 0
-    fi
-  done
-}
-
 cmd_current() {
   ensure_dirs
   local cols label_w value_w total_w status_text
@@ -1970,15 +1923,38 @@ cmd_current() {
   local active_mode="" active_hint=""
   local meta_files=()
   local -A meta_fp=()
+  local fp meta_path secret meta_mode meta_hint path
 
-  current_meta_files_into meta_files
-  current_load_metadata meta_files meta_fp active_fp active_mode active_hint
+  shopt -s nullglob
+  meta_files+=("$AUTH_FILE")
+  for path in "$PROFILE_DIR"/*.json; do
+    meta_files+=("$path")
+  done
+  while IFS=$'\037' read -r meta_path meta_mode meta_hint secret; do
+    [[ -n "$meta_path" ]] || continue
+    fp="$(auth_record_fingerprint "$secret")"
+    meta_fp["$meta_path"]="$fp"
+    if [[ "$meta_path" == "$AUTH_FILE" ]]; then
+      active_fp="$fp"
+      active_mode="${meta_mode:-unknown}"
+      active_hint="${meta_hint:-}"
+    fi
+  done < <(auth_metadata_records "${meta_files[@]}")
   mode="${active_mode:-unknown}"
   mode_display="$(auth_mode_display_label "$mode")"
   hint="${active_hint:-}"
   active_fp="${active_fp:-}"
   account_display="$(short_account_hint "$hint" "$value_w")"
-  matched="$(current_matched_profile "$active_fp" meta_fp)"
+  matched=""
+  if [[ -n "$active_fp" ]]; then
+    for path in "$PROFILE_DIR"/*.json; do
+      fp="${meta_fp["$path"]:-}"
+      if [[ "$fp" == "$active_fp" ]]; then
+        matched="$(basename "$path" .json)"
+        break
+      fi
+    done
+  fi
   summary="$(current_profile_summary "$matched" "$mode" "$hint" "$account_display" "$total_w" "$mode_display")"
 
   print_palette_summary_header "Auth" "Active profile" "$summary" "$total_w" flat 0
