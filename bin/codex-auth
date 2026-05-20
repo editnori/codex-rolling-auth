@@ -1733,10 +1733,6 @@ usage_tone_reset() {
   return 0
 }
 
-usage_tone_bg() {
-  usage_tone_code 48 "${1:-}"
-}
-
 usage_limit_tone() {
   local percent="${1:-}"
   local value
@@ -3519,13 +3515,13 @@ selector_palette_metric_cell() {
     fi
     if usage_color_active && [[ "$bg_style" == "bg" ]]; then
       if (( used > 0 )); then
-        usage_tone_bg "$tone"
+        usage_tone_code 48 "$tone"
         usage_tone_color track_edge
         repeat_glyph "$bar_border_glyph" "$used"
         usage_tone_reset
       fi
       if (( bar_w > used )); then
-        usage_tone_bg track
+        usage_tone_code 48 track
         usage_tone_color track_edge
         repeat_glyph "$bar_border_glyph" "$((bar_w - used))"
         usage_tone_reset
@@ -3544,7 +3540,7 @@ selector_palette_metric_cell() {
     fi
     return 0
   elif usage_color_active && [[ "$bg_style" == "bg" ]]; then
-    usage_tone_bg track
+    usage_tone_code 48 track
     usage_tone_color track_edge
     repeat_glyph "$bar_border_glyph" "$bar_w"
     usage_tone_reset
