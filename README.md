@@ -88,6 +88,7 @@ codex-auth doctor --kill-sidecars --yes
 
 - Profiles live under `$CODEX_HOME/auth-profiles` by default.
 - The live auth file stays at `$CODEX_HOME/auth.json`.
+- `bin/codex-auth` is a thin entrypoint. Runtime code lives in `lib/codex-auth/*.sh` by area: core, profiles, usage, render, selector, patch, run, and doctor.
 - Set `CODEX_AUTH_CODEX_BIN=/path/to/codex` if the wrapper cannot find your real Codex binary.
 - Set `CODEX_AUTH_AUTO=0` to bypass automatic profile selection for one command.
 - `codex-auth run` is explicit opt-in. It can monitor a bounded session log to retry after usage-limit errors, but the normal `codex` shim does not use it.

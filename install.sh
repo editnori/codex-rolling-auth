@@ -3,10 +3,12 @@ set -euo pipefail
 
 prefix="${PREFIX:-$HOME/.local}"
 bindir="$prefix/bin"
+libdir="$prefix/lib/codex-auth"
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-mkdir -p "$bindir"
+mkdir -p "$bindir" "$libdir"
 install -m 0755 "$repo_dir/bin/codex-auth" "$bindir/codex-auth"
+install -m 0644 "$repo_dir/lib/codex-auth/"*.sh "$libdir/"
 
 is_codex_auth_shim() {
   local path="$1"

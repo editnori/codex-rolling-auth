@@ -253,6 +253,22 @@ test_install_recovers_real_from_home_bun() {
   assert_contains 'real:--yolo ping' "$log"
 }
 
+test_install_installs_codex_auth_libs() {
+  local tmp prefix home output
+  tmp="$(mktemp -d)"
+  prefix="$tmp/prefix"
+  home="$tmp/home"
+  output="$tmp/paths.txt"
+
+  PREFIX="$prefix" "$REPO_ROOT/install.sh" >/dev/null
+  [[ -r "$prefix/lib/codex-auth/core.sh" ]] || fail "core lib was not installed"
+  [[ -r "$prefix/lib/codex-auth/usage.sh" ]] || fail "usage lib was not installed"
+
+  TERM=dumb CODEX_HOME="$home" "$prefix/bin/codex-auth" paths >"$output"
+  assert_contains 'auth' "$output"
+  assert_contains 'profiles' "$output"
+}
+
 test_run_uses_cached_auto_without_app_server_refresh() {
   local tmp home log
   tmp="$(mktemp -d)"
@@ -388,8 +404,8 @@ EOF
 }
 
 test_rolling_hook_keeps_inline_auto_cached_by_default() {
-  assert_contains 'CODEX_AUTH_ROLLING_TTL_ENV_VAR' "$REPO_ROOT/bin/codex-auth"
-  assert_not_contains 'DEFAULT_ROLLING_AUTH_TTL_SECS' "$REPO_ROOT/bin/codex-auth"
+  assert_contains 'CODEX_AUTH_ROLLING_TTL_ENV_VAR' "$REPO_ROOT/lib/codex-auth/patch.sh"
+  assert_not_contains 'DEFAULT_ROLLING_AUTH_TTL_SECS' "$REPO_ROOT/lib/codex-auth/patch.sh"
 }
 
 test_doctor_reports_legacy_sidecars() {
@@ -439,6 +455,7 @@ main() {
     test_install_recovers_real_from_old_backup \
     test_install_recovers_real_from_path \
     test_install_recovers_real_from_home_bun \
+    test_install_installs_codex_auth_libs \
     test_run_uses_cached_auto_without_app_server_refresh \
     test_run_retries_usage_limit_without_leftover_logs \
     test_recover_does_not_force_yolo \
