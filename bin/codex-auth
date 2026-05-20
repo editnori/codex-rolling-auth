@@ -4683,7 +4683,7 @@ prepare_usage_records() {
   local default_profile="${2:-}"
   local sorted_records=()
   local record valid weekly_used short_used mark profile plan weekly short status record_short_label weekly_reset short_reset cache_age
-  local rank coverage_rank short_score week_score
+  local rank coverage_rank short_score week_score drop_i
 
   mapfile -t sorted_records < <(
     printf '%s\n' "$records" \
@@ -4722,7 +4722,10 @@ prepare_usage_records() {
             "$valid" "$weekly_used" "$short_used" "$mark" "$profile" "$plan" "$weekly" "$short" "$status" "$record_short_label" "$weekly_reset" "$short_reset" "$cache_age"
         done \
       | sort -t $'\t' -k1,1n -k2,2n -k3,3n -k4,4n -k5,5 \
-      | cut -f6-
+      | while IFS= read -r record; do
+          for ((drop_i = 0; drop_i < 5; drop_i++)); do record="${record#*$'\t'}"; done
+          printf '%s\n' "$record"
+        done
   )
 
   USAGE_SHORT_LABEL="5h"
