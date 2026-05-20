@@ -39,16 +39,6 @@ find_real_codex() {
   return 1
 }
 
-should_wrap_session() {
-  case "${1:-}" in
-    login|logout|update|completion|mcp|plugin|features|app-server|help|--help|-h|--version|-V)
-      return 1
-      ;;
-  esac
-
-  return 0
-}
-
 real_codex="$(find_real_codex)" || {
   printf 'codex-auth shim could not find the real codex binary\n' >&2
   exit 127
@@ -56,8 +46,14 @@ real_codex="$(find_real_codex)" || {
 
 codex_args=("$@")
 exec_codex="$real_codex"
-wrap_session=0
-should_wrap_session "$@" && wrap_session=1
+case "${1:-}" in
+  login|logout|update|completion|mcp|plugin|features|app-server|help|--help|-h|--version|-V)
+    wrap_session=0
+    ;;
+  *)
+    wrap_session=1
+    ;;
+esac
 
 if (( wrap_session )) && [[ "${CODEX_AUTH_AUTO:-1}" != "0" && "${CODEX_AUTH_RUNNER:-0}" != "1" ]] && command -v codex-auth >/dev/null 2>&1; then
   CODEX_AUTH_CODEX_BIN="$real_codex" CODEX_AUTH_NO_BACKGROUND=1 codex-auth auto --quiet --no-background || true
