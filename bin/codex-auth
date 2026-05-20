@@ -1595,52 +1595,6 @@ profile_list_row_action() {
   fi
 }
 
-current_profile_summary() {
-  local matched="$1"
-  local mode="$2"
-  local hint="$3"
-  local account_display="$4"
-  local total_w="$5"
-  local mode_display="$6"
-  local mode_summary_display="$mode_display"
-  local matched_display summary
-
-  if (( total_w < 24 )); then
-    mode_summary_display="$(profile_list_mode_label "$mode" 4)"
-  fi
-  matched_display="$matched"
-  if [[ -n "$matched_display" && "$total_w" -lt 22 ]]; then
-    matched_display="$(usage_display_profile_name "$matched_display" "" 6)"
-  fi
-  if [[ -n "$matched" ]]; then
-    summary="active $matched_display$(usage_separator)$mode_summary_display"
-  elif (( total_w < 22 )); then
-    summary="unsaved$(usage_separator)$mode_summary_display"
-  else
-    summary="active unsaved$(usage_separator)$mode_summary_display"
-  fi
-  if [[ -n "$hint" ]] && (( ${#summary} + ${#account_display} + 11 <= total_w )); then
-    summary+="$(usage_separator)account $account_display"
-  fi
-  printf '%s' "$summary"
-}
-
-current_codex_status() {
-  local mode_display="$1"
-  local value_w="$2"
-  local codex_cli status_text
-
-  codex_cli="$(codex_bin || true)"
-  [[ -n "$codex_cli" ]] || return 0
-  codex_launcher_ready "$codex_cli" || return 0
-  status_text="$(CODEX_AUTH_RUNNER=1 "$codex_cli" login status 2>&1 || true)"
-  status_text="$(printf '%s\n' "$status_text" | sed '/^WARNING: proceeding, even though we could not update PATH:/d' | tr '\n\t' '  ' | sed 's/  */ /g; s/^ //; s/ $//')"
-  status_text="$(compact_codex_status "$status_text" "$value_w")"
-  if [[ -n "$status_text" && "$status_text" != "$mode_display" ]]; then
-    printf '%s' "$status_text"
-  fi
-}
-
 profile_list_scan_profiles() {
   local active_fp="$1"
   local account_count_var="$6"
@@ -1815,11 +1769,11 @@ cmd_current() {
     return 0
   fi
 
-  local active_fp="" mode mode_display matched hint account_display summary
+  local active_fp="" mode mode_display mode_summary_display matched matched_display hint account_display summary
   local active_mode="" active_hint=""
   local meta_files=()
   local -A meta_fp=()
-  local fp meta_path secret meta_mode meta_hint path
+  local fp meta_path secret meta_mode meta_hint path codex_cli
 
   shopt -s nullglob
   meta_files+=("$AUTH_FILE")
@@ -1851,13 +1805,37 @@ cmd_current() {
       fi
     done
   fi
-  summary="$(current_profile_summary "$matched" "$mode" "$hint" "$account_display" "$total_w" "$mode_display")"
+  mode_summary_display="$mode_display"
+  if (( total_w < 24 )); then
+    mode_summary_display="$(profile_list_mode_label "$mode" 4)"
+  fi
+  matched_display="$matched"
+  if [[ -n "$matched_display" && "$total_w" -lt 22 ]]; then
+    matched_display="$(usage_display_profile_name "$matched_display" "" 6)"
+  fi
+  if [[ -n "$matched" ]]; then
+    summary="active $matched_display$(usage_separator)$mode_summary_display"
+  elif (( total_w < 22 )); then
+    summary="unsaved$(usage_separator)$mode_summary_display"
+  else
+    summary="active unsaved$(usage_separator)$mode_summary_display"
+  fi
+  if [[ -n "$hint" ]] && (( ${#summary} + ${#account_display} + 11 <= total_w )); then
+    summary+="$(usage_separator)account $account_display"
+  fi
 
   print_palette_summary_header "Auth" "Active profile" "$summary" "$total_w" flat 0
   if [[ -n "$hint" && "$summary" != *"account "* ]]; then
     print_detail_line "account" "$account_display" "$label_w" "$value_w"
   fi
-  status_text="$(current_codex_status "$mode_display" "$value_w")"
+  status_text=""
+  codex_cli="$(codex_bin || true)"
+  if [[ -n "$codex_cli" ]] && codex_launcher_ready "$codex_cli"; then
+    status_text="$(CODEX_AUTH_RUNNER=1 "$codex_cli" login status 2>&1 || true)"
+    status_text="$(printf '%s\n' "$status_text" | sed '/^WARNING: proceeding, even though we could not update PATH:/d' | tr '\n\t' '  ' | sed 's/  */ /g; s/^ //; s/ $//')"
+    status_text="$(compact_codex_status "$status_text" "$value_w")"
+    [[ "$status_text" != "$mode_display" ]] || status_text=""
+  fi
   if [[ -n "$status_text" ]]; then
     print_detail_text_line "codex" "$status_text" "$label_w" "$value_w"
   fi
