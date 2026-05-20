@@ -6534,26 +6534,6 @@ usage_refresh_job_count() {
   printf '%s' "$max_jobs"
 }
 
-collect_usage_record_file() {
-  local active_fp="$1"
-  local output_file="$2"
-  local profile_file="$3"
-  local profile_name payload fingerprint
-
-  require_auth_file "$profile_file"
-  profile_name="$(basename "$profile_file" .json)"
-  fingerprint="$(credential_fingerprint "$profile_file" || true)"
-  payload="$(usage_payload_for_profile "$profile_file" "$fingerprint")"
-  usage_record_for_profile "$profile_name" "$profile_file" "$payload" "$active_fp" "$fingerprint" > "$output_file"
-}
-
-usage_wait_for_refresh_slot() {
-  local -n active_jobs_ref="$1"
-
-  wait -n || true
-  active_jobs_ref=$((active_jobs_ref - 1))
-}
-
 collect_usage_records() {
   local active_fp="$1"
   shift
@@ -6566,15 +6546,23 @@ collect_usage_records() {
 
   for i in "${!profile_files[@]}"; do
     profile_file="${profile_files[$i]}"
-    collect_usage_record_file "$active_fp" "$records_dir/$i.record" "$profile_file" &
+    (
+      profile_name="$(basename "$profile_file" .json)"
+      require_auth_file "$profile_file"
+      fingerprint="$(credential_fingerprint "$profile_file" || true)"
+      payload="$(usage_payload_for_profile "$profile_file" "$fingerprint")"
+      usage_record_for_profile "$profile_name" "$profile_file" "$payload" "$active_fp" "$fingerprint" > "$records_dir/$i.record"
+    ) &
     active_jobs=$((active_jobs + 1))
     if (( active_jobs >= max_jobs )); then
-      usage_wait_for_refresh_slot active_jobs
+      wait -n || true
+      active_jobs=$((active_jobs - 1))
     fi
   done
 
   while (( active_jobs > 0 )); do
-    usage_wait_for_refresh_slot active_jobs
+    wait -n || true
+    active_jobs=$((active_jobs - 1))
   done
 
   for i in "${!profile_files[@]}"; do
@@ -6650,27 +6638,19 @@ usage_refresh_payload_or_cache() {
   printf '%s' "$payload"
 }
 
-collect_usage_record_synced() {
-  local active_fp="$1"
-  local profile_file="$2"
-  local profile_name fingerprint payload
-
-  require_auth_file "$profile_file"
-  profile_name="$(basename "$profile_file" .json)"
-  fingerprint="$(credential_fingerprint "$profile_file" || true)"
-  payload="$(usage_refresh_payload_or_cache "$profile_name" "$profile_file" "$fingerprint")"
-  usage_record_for_profile "$profile_name" "$profile_file" "$payload" "$active_fp" "$fingerprint"
-}
-
 collect_usage_records_synced() {
   local active_fp="$1"
   shift
   local profile_files=("$@")
   local records=""
-  local profile_file
+  local profile_file profile_name fingerprint payload
 
   for profile_file in "${profile_files[@]}"; do
-    records+="$(collect_usage_record_synced "$active_fp" "$profile_file")"$'\n'
+    require_auth_file "$profile_file"
+    profile_name="$(basename "$profile_file" .json)"
+    fingerprint="$(credential_fingerprint "$profile_file" || true)"
+    payload="$(usage_refresh_payload_or_cache "$profile_name" "$profile_file" "$fingerprint")"
+    records+="$(usage_record_for_profile "$profile_name" "$profile_file" "$payload" "$active_fp" "$fingerprint")"$'\n'
   done
 
   printf '%s' "$records" | canonical_usage_active_marks
