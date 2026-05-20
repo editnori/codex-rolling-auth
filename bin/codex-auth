@@ -4143,39 +4143,6 @@ state_payload_for_profile() {
   ' "$STATE_FILE" 2>/dev/null | tail -n 1
 }
 
-state_payload_records() {
-  local map_file="$1"
-  local now
-
-  [[ -f "$STATE_FILE" && -s "$map_file" ]] || return 0
-  now="$(now_epoch)"
-  jq -r --rawfile requested "$map_file" --argjson now "$now" '
-    . as $state
-    | $requested
-    | split("\n")[]
-    | select(length > 0)
-    | split("\u001f") as $item
-    | {
-        path: ($item[0] // ""),
-        name: ($item[1] // ""),
-        fp: ($item[2] // "")
-      } as $req
-    | ($state.profiles[$req.name] // null) as $profile
-    | select($profile != null and $profile.fingerprint == $req.fp)
-    | [
-        $req.path,
-        $req.name,
-        (($profile.payload + {
-          _codexAuthAgeSec: (if $profile.updated_at == null
-            then null
-            else ($now - ($profile.updated_at | tonumber))
-          end)
-        }) | @json)
-      ]
-    | join("\u001f")
-  ' "$STATE_FILE" 2>/dev/null
-}
-
 state_age_for_profile() {
   local profile_name="$1"
   local fingerprint="$2"
@@ -6533,7 +6500,7 @@ collect_usage_records_cached() {
   local active_fp="$1"
   shift
   local profile_files=("$@")
-  local map_file profile_file profile_name meta_path mode hint secret fp payload
+  local map_file profile_file profile_name meta_path mode hint secret fp payload now
   local -A profile_fp=()
   local -A payload_by_path=()
 
@@ -6547,10 +6514,39 @@ collect_usage_records_cached() {
     printf '%s\037%s\037%s\n' "$meta_path" "$profile_name" "$fp" >> "$map_file"
   done < <(auth_metadata_records "${profile_files[@]}")
 
-  while IFS=$'\037' read -r meta_path profile_name payload; do
-    [[ -n "$meta_path" ]] || continue
-    payload_by_path["$meta_path"]="$payload"
-  done < <(state_payload_records "$map_file")
+  if [[ -f "$STATE_FILE" && -s "$map_file" ]]; then
+    now="$(now_epoch)"
+    while IFS=$'\037' read -r meta_path profile_name payload; do
+      [[ -n "$meta_path" ]] || continue
+      payload_by_path["$meta_path"]="$payload"
+    done < <(
+      jq -r --rawfile requested "$map_file" --argjson now "$now" '
+        . as $state
+        | $requested
+        | split("\n")[]
+        | select(length > 0)
+        | split("\u001f") as $item
+        | {
+            path: ($item[0] // ""),
+            name: ($item[1] // ""),
+            fp: ($item[2] // "")
+          } as $req
+        | ($state.profiles[$req.name] // null) as $profile
+        | select($profile != null and $profile.fingerprint == $req.fp)
+        | [
+            $req.path,
+            $req.name,
+            (($profile.payload + {
+              _codexAuthAgeSec: (if $profile.updated_at == null
+                then null
+                else ($now - ($profile.updated_at | tonumber))
+              end)
+            }) | @json)
+          ]
+        | join("\u001f")
+      ' "$STATE_FILE" 2>/dev/null
+    )
+  fi
 
   for profile_file in "${profile_files[@]}"; do
     profile_name="$(basename "$profile_file" .json)"
