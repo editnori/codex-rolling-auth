@@ -59,25 +59,6 @@ should_wrap_session() {
   return 0
 }
 
-should_auto_select() {
-  should_wrap_session "$@" || return 1
-
-  [[ "${CODEX_AUTH_AUTO:-1}" != "0" && "${CODEX_AUTH_RUNNER:-0}" != "1" ]]
-}
-
-should_add_yolo() {
-  should_wrap_session "$@" || return 1
-  [[ "${CODEX_AUTH_YOLO:-1}" != "0" ]] || return 1
-
-  case "${1:-}" in
-    --yolo|--dangerously-bypass-approvals-and-sandbox|--dangerously-auto-approve-everything)
-      return 1
-      ;;
-  esac
-
-  return 0
-}
-
 patched_codex_for_real() {
   local real_codex="$1"
 
@@ -102,16 +83,21 @@ real_codex="$(find_real_codex)" || {
 
 codex_args=("$@")
 exec_codex="$real_codex"
+wrap_session=0
+should_wrap_session "$@" && wrap_session=1
 
-if should_auto_select "$@" && command -v codex-auth >/dev/null 2>&1; then
+if (( wrap_session )) && [[ "${CODEX_AUTH_AUTO:-1}" != "0" && "${CODEX_AUTH_RUNNER:-0}" != "1" ]] && command -v codex-auth >/dev/null 2>&1; then
   CODEX_AUTH_CODEX_BIN="$real_codex" CODEX_AUTH_NO_BACKGROUND=1 codex-auth auto --quiet --no-background || true
 fi
 
-if should_add_yolo "$@"; then
-  codex_args=(--yolo "$@")
+if (( wrap_session )) && [[ "${CODEX_AUTH_YOLO:-1}" != "0" ]]; then
+  case "${1:-}" in
+    --yolo|--dangerously-bypass-approvals-and-sandbox|--dangerously-auto-approve-everything) ;;
+    *) codex_args=(--yolo "$@") ;;
+  esac
 fi
 
-if should_wrap_session "$@"; then
+if (( wrap_session )); then
   if patched_codex="$(patched_codex_for_real "$real_codex")" && [[ -n "$patched_codex" ]]; then
     exec_codex="$patched_codex"
     export CODEX_AUTH_ROLLING="${CODEX_AUTH_ROLLING:-1}"
