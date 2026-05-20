@@ -8626,28 +8626,6 @@ doctor_is_sidecar() {
   return 1
 }
 
-doctor_parse_args() {
-  local -n kill_sidecars_ref="$1"
-  local -n yes_ref="$2"
-  shift 2
-
-  while (( $# > 0 )); do
-    case "$1" in
-      --kill-sidecars)
-        kill_sidecars_ref=1
-        ;;
-      --yes)
-        yes_ref=1
-        ;;
-      *)
-        die "usage: codex-auth doctor [--kill-sidecars --yes]"
-        ;;
-    esac
-    shift
-  done
-  return 0
-}
-
 doctor_collect_legacy_rows() {
   local -n rows_ref="$1"
   local -n legacy_pid_ref="$2"
@@ -8686,16 +8664,6 @@ doctor_collect_sidecars() {
   return 0
 }
 
-doctor_sidecar_total() {
-  local sidecars="$1"
-
-  if [[ -n "$sidecars" ]]; then
-    wc -w <<<"$sidecars" | tr -d ' '
-  else
-    printf '0'
-  fi
-}
-
 doctor_print_legacy_rows() {
   local -n rows_ref="$1"
   local -n legacy_pid_ref="$2"
@@ -8710,46 +8678,36 @@ doctor_print_legacy_rows() {
     IFS=$'\t' read -r pid ppid pgid tty etime args <<<"$row"
     [[ -n "${legacy_pid_ref["$pid"]:-}" ]] || continue
     sidecars="${sidecar_by_parent_ref["$pid"]:-}"
-    sidecar_total="$(doctor_sidecar_total "$sidecars")"
+    if [[ -n "$sidecars" ]]; then
+      sidecar_total="$(wc -w <<<"$sidecars" | tr -d ' ')"
+    else
+      sidecar_total=0
+    fi
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$pid" "$ppid" "$pgid" "$tty" "$etime" "$sidecar_total" "$args"
   done
 }
 
-doctor_kill_sidecars() {
-  local -n sidecar_args_by_pid_ref="$1"
-  local pid kill_count=0
-
-  for pid in "${!sidecar_args_by_pid_ref[@]}"; do
-    if kill "$pid" 2>/dev/null; then
-      kill_count=$((kill_count + 1))
-    fi
-  done
-  printf '%s' "$kill_count"
-}
-
-doctor_print_sidecar_action() {
-  local kill_sidecars="$1"
-  local sidecar_count="$2"
-  local -n sidecar_args_by_pid_ref="$3"
-  local kill_count
-
-  if (( kill_sidecars )); then
-    kill_count="$(doctor_kill_sidecars sidecar_args_by_pid_ref)"
-    printf '\nterminated sidecars: %s\n' "$kill_count"
-  elif (( sidecar_count > 0 )); then
-    printf '\nrun: codex-auth doctor --kill-sidecars --yes\n'
-  fi
-  return 0
-}
-
 cmd_doctor() {
   local kill_sidecars=0 yes=0
-  doctor_parse_args kill_sidecars yes "$@"
+  while (( $# > 0 )); do
+    case "$1" in
+      --kill-sidecars)
+        kill_sidecars=1
+        ;;
+      --yes)
+        yes=1
+        ;;
+      *)
+        die "usage: codex-auth doctor [--kill-sidecars --yes]"
+        ;;
+    esac
+    shift
+  done
   if (( kill_sidecars && ! yes )); then
     die "refusing to kill sidecars without --yes"
   fi
 
-  local root_count=0 sidecar_count=0
+  local root_count=0 sidecar_count=0 kill_count=0 pid
   local -A legacy_pid=()
   local -A sidecar_by_parent=()
   local -A sidecar_args_by_pid=()
@@ -8762,7 +8720,16 @@ cmd_doctor() {
   printf 'direct sidecars under legacy codex: %s\n' "$sidecar_count"
 
   doctor_print_legacy_rows rows legacy_pid sidecar_by_parent "$root_count"
-  doctor_print_sidecar_action "$kill_sidecars" "$sidecar_count" sidecar_args_by_pid
+  if (( kill_sidecars )); then
+    for pid in "${!sidecar_args_by_pid[@]}"; do
+      if kill "$pid" 2>/dev/null; then
+        kill_count=$((kill_count + 1))
+      fi
+    done
+    printf '\nterminated sidecars: %s\n' "$kill_count"
+  elif (( sidecar_count > 0 )); then
+    printf '\nrun: codex-auth doctor --kill-sidecars --yes\n'
+  fi
 }
 
 cmd_paths() {
