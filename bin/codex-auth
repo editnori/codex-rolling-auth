@@ -2375,32 +2375,6 @@ usage_max_profile_width() {
   printf '%s' "$(( cols - role_w - status_min - (2 * (cell_overhead + min_bar_w)) - gap_w ))"
 }
 
-usage_fit_status_widths() {
-  local -n profile_w_ref="$1"
-  local -n cell_w_ref="$2"
-  local -n bar_width_ref="$3"
-  local -n status_w_ref="$4"
-  local cols="$5"
-  local role_w="$6"
-  local profile_min="$7"
-  local status_min="$8"
-  local gap_w="$9"
-  local cell_overhead="${10}"
-  local min_bar_w="${11}"
-
-  while (( status_w_ref < status_min && bar_width_ref > min_bar_w )); do
-    bar_width_ref=$((bar_width_ref - 1))
-    cell_w_ref=$(( bar_width_ref + cell_overhead ))
-    status_w_ref=$(( cols - role_w - profile_w_ref - cell_w_ref - cell_w_ref - gap_w ))
-  done
-  while (( status_w_ref < status_min && profile_w_ref > profile_min )); do
-    profile_w_ref=$((profile_w_ref - 1))
-    status_w_ref=$(( cols - role_w - profile_w_ref - cell_w_ref - cell_w_ref - gap_w ))
-  done
-  (( status_w_ref < status_min )) && status_w_ref="$status_min"
-  return 0
-}
-
 usage_render_widths() {
   local cols="$1"
   local mode role_w
@@ -2445,7 +2419,16 @@ usage_render_widths() {
   bar_width="$(clamp_int_between "$bar_width" "$min_bar_w" "$max_bar_w")"
   cell_w=$(( bar_width + cell_overhead ))
   status_w=$(( cols - role_w - profile_w - cell_w - cell_w - gap_w ))
-  usage_fit_status_widths profile_w cell_w bar_width status_w "$cols" "$role_w" "$profile_min" "$status_min" "$gap_w" "$cell_overhead" "$min_bar_w"
+  while (( status_w < status_min && bar_width > min_bar_w )); do
+    bar_width=$((bar_width - 1))
+    cell_w=$(( bar_width + cell_overhead ))
+    status_w=$(( cols - role_w - profile_w - cell_w - cell_w - gap_w ))
+  done
+  while (( status_w < status_min && profile_w > profile_min )); do
+    profile_w=$((profile_w - 1))
+    status_w=$(( cols - role_w - profile_w - cell_w - cell_w - gap_w ))
+  done
+  (( status_w < status_min )) && status_w="$status_min"
   if [[ "$show_status" != "1" ]]; then
     status_w=0
   else
