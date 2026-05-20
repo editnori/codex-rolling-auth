@@ -1365,7 +1365,7 @@ cmd_current() {
   codex_cli="$(codex_bin || true)"
   if [[ -n "$codex_cli" ]] && { ! codex_launcher_needs_node "$codex_cli" || command -v node >/dev/null 2>&1; }; then
     status_text="$(CODEX_AUTH_RUNNER=1 "$codex_cli" login status 2>&1 || true)"
-    status_text="$(printf '%s\n' "$status_text" | sed '/^WARNING: proceeding, even though we could not update PATH:/d' | tr '\n\t' '  ' | sed 's/  */ /g; s/^ //; s/ $//')"
+    status_text="$(normalize_codex_status_text "$status_text")"
     [[ "$status_text" == "Logged in using "* ]] && status_text="${status_text#Logged in using }"
     [[ "$status_text" != "$mode_display" ]] || status_text=""
   fi
@@ -4838,6 +4838,20 @@ profile_files_for_args_into() {
 active_auth_fingerprint() {
   [[ -f "$AUTH_FILE" ]] || return 0
   credential_fingerprint "$AUTH_FILE" || true
+}
+
+normalize_codex_status_text() {
+  local text="$1" line normalized=""
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" == "WARNING: proceeding, even though we could not update PATH:"* ]] && continue
+    line="${line//$'\t'/ }"
+    normalized+=" $line"
+  done <<<"$text"
+  while [[ "$normalized" == *"  "* ]]; do normalized="${normalized//  / }"; done
+  while [[ "$normalized" == " "* ]]; do normalized="${normalized# }"; done
+  while [[ "$normalized" == *" " ]]; do normalized="${normalized% }"; done
+  printf '%s\n' "$normalized"
 }
 
 acquire_refresh_lock_into() {
