@@ -500,7 +500,7 @@ short_account_hint() {
   local width="${2:-13}"
   local length=${#hint}
   if [[ -z "$hint" ]]; then
-    usage_meta_glyph
+    usage_glyph '·' '.'
   elif (( width < 13 && length > width )); then
     fit_profile_text "$hint" "$width"
   elif (( length > 13 )); then
@@ -1023,7 +1023,7 @@ print_status_note() {
       tone="warn"
       ;;
     *)
-      glyph="$(usage_meta_glyph)"
+      glyph="$(usage_glyph '·' '.')"
       line="$glyph $kind"
       ;;
   esac
@@ -1646,10 +1646,6 @@ usage_glyph() {
   fi
 }
 
-usage_meta_glyph() {
-  usage_glyph '·' '.'
-}
-
 usage_separator() {
   usage_glyph ' · ' ' | '
 }
@@ -2025,8 +2021,8 @@ print_usage_limit_cell() {
   fi
   (( USAGE_VERBOSE )) || reset_label=""
   if [[ "$percent" == "-" ]]; then
-    percent_label="$(usage_meta_glyph)"
-    [[ "$mode" == "micro" || "$mode" == "nano" ]] || reset_label="$(usage_meta_glyph)"
+    percent_label="$(usage_glyph '·' '.')"
+    [[ "$mode" == "micro" || "$mode" == "nano" ]] || reset_label="$(usage_glyph '·' '.')"
   elif (( USAGE_VERBOSE )) && [[ ! "$mode" =~ ^(pico|nano|micro|tiny|tight)$ && "$used_percent" =~ ^[0-9]+$ ]]; then
     percent_label="${percent%\%}/${used_percent}%"
     label_w=6
@@ -2042,7 +2038,7 @@ print_usage_limit_cell() {
   fi
   tone="$(usage_limit_tone "$percent")"
   if usage_mode_is_pico_or_nano "$mode"; then
-    [[ "$percent" == "-" ]] && percent_label="$(usage_meta_glyph)"
+    [[ "$percent" == "-" ]] && percent_label="$(usage_glyph '·' '.')"
     usage_tone_color "$tone"
     fit_text_center "$percent_label" "$cell_w"
     usage_tone_reset
@@ -3826,7 +3822,7 @@ selector_action_role() {
       cap) printf 'c' ;;
       login) printf 'l' ;;
       stay) usage_glyph '●' '*' ;;
-      *) usage_meta_glyph ;;
+      *) usage_glyph '·' '.' ;;
     esac
   elif (( role_w < 6 )); then
     case "$action" in
