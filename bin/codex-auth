@@ -1687,12 +1687,11 @@ usage_tone_code() {
   case "$tone" in
     good) color="166;227;161" ;;
     warn|accent) color="250;178;131" ;;
-    active|secondary) color="157;124;216" ;;
+    active) color="157;124;216" ;;
     bad) color="224;108;117" ;;
     track_edge) color="16;16;16" ;;
   esac
   case "$mode:$tone" in
-    38:border) color="50;50;50" ;;
     38:muted) color="128;128;128" ;;
     48:track) color="35;35;35" ;;
   esac
