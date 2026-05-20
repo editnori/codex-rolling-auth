@@ -5446,22 +5446,6 @@ selector_menu_row_for_record() {
   printf '%s\037action\037%s\037%s\037%s\n' "$active_row" "$row_action" "$row_profile_field" "$display"
 }
 
-selector_current_menu_row() {
-  local selector_palette_mode="$1"
-  local total_w="$2"
-  local selector_profile_w="$3"
-  local action_w="$4"
-  local display palette_profile
-
-  if (( selector_palette_mode )); then
-    palette_profile="$(selector_palette_profile_label "current" "$total_w" "$selector_profile_w")"
-    display="$(print_selector_palette_table_row "stay $palette_profile" "-" "-" "same" "ok" "1" "$total_w")"
-  else
-    display="$(print_selector_row "stay" "current" "same" "$action_w" "$selector_profile_w" "$total_w")"
-  fi
-  printf 'action\tskip\t-\t%s\n' "$display"
-}
-
 selector_menu_rows() {
   local -n rows_ref="$1"
   local -n has_active_ref="$2"
@@ -5505,6 +5489,7 @@ arrow_action_menu() {
   local use_fzf=0
   local selector_palette_mode=0
   local render_cols
+  local display palette_profile
 
   if command -v fzf >/dev/null 2>&1 && [[ "${CODEX_AUTH_NO_FZF:-}" != "1" ]]; then
     use_fzf=1
@@ -5543,7 +5528,13 @@ arrow_action_menu() {
 
   selector_menu_rows rows has_active_row "$default_profile" "$selector_palette_mode" "$mode" "$role_w" "$profile_w" "$cell_w" "$status_w" "$bar_width" "$total_w" "$selector_profile_w" "$action_w" "${records[@]}"
   if (( ! has_active_row )) && [[ -f "$AUTH_FILE" ]]; then
-    rows+=("$(selector_current_menu_row "$selector_palette_mode" "$total_w" "$selector_profile_w" "$action_w")")
+    if (( selector_palette_mode )); then
+      palette_profile="$(selector_palette_profile_label "current" "$total_w" "$selector_profile_w")"
+      display="$(print_selector_palette_table_row "stay $palette_profile" "-" "-" "same" "ok" "1" "$total_w")"
+    else
+      display="$(print_selector_row "stay" "current" "same" "$action_w" "$selector_profile_w" "$total_w")"
+    fi
+    rows+=("action"$'\t'"skip"$'\t'"-"$'\t'"$display")
   fi
 
   if (( use_fzf )); then
