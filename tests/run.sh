@@ -340,7 +340,7 @@ test_dumb_selector_renders_without_fzf_prompt() {
 }
 
 test_selector_uses_fzf_by_default_when_available() {
-  local tmp home output fzf_input fzf_args
+  local tmp home output fzf_input fzf_args fp now primary_reset secondary_reset
   tmp="$(mktemp -d)"
   home="$tmp/home"
   output="$tmp/out.txt"
@@ -348,6 +348,14 @@ test_selector_uses_fzf_by_default_when_available() {
   fzf_args="$tmp/fzf-args.txt"
   mkdir -p "$home/auth-profiles" "$tmp/bin"
   printf '%s\n' '{"OPENAI_API_KEY":"test"}' > "$home/auth-profiles/a.json"
+  fp="$(printf '%s\n' 'api:test' | sha256sum)"
+  fp="${fp%% *}"
+  now="$(date +%s)"
+  primary_reset=$((now + 604800))
+  secondary_reset=$((now + 18000))
+  cat > "$home/auth-state.json" <<EOF
+{"version":1,"updated_at":$now,"profiles":{"a":{"updated_at":$now,"fingerprint":"$fp","payload":{"rateLimitsByLimitId":{"codex":{"planType":"pro","primary":{"usedPercent":30,"windowDurationMins":10080,"resetsAt":$primary_reset},"secondary":{"usedPercent":70,"windowDurationMins":300,"resetsAt":$secondary_reset}}}}}}}
+EOF
   cat > "$tmp/bin/fzf" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$@" > "$CODEX_TEST_FZF_ARGS"
@@ -361,13 +369,14 @@ EOF
     return 0
   fi
 
-  env -u NO_COLOR PATH="$tmp/bin:$PATH" CODEX_TEST_FZF_INPUT="$fzf_input" CODEX_TEST_FZF_ARGS="$fzf_args" TERM=xterm CODEX_HOME="$home" timeout 2 script -qec "$REPO_ROOT/bin/codex-auth usage --cached --select" /dev/null >"$output"
+  env -u NO_COLOR PATH="$tmp/bin:$PATH" CODEX_TEST_FZF_INPUT="$fzf_input" CODEX_TEST_FZF_ARGS="$fzf_args" TERM=xterm COLUMNS=120 CODEX_HOME="$home" timeout 2 script -qec "$REPO_ROOT/bin/codex-auth usage --cached --select" /dev/null >"$output"
 
   assert_contains '--with-nth=4..' "$fzf_args"
   assert_contains '--height=~' "$fzf_args"
   assert_not_contains '--height=100%' "$fzf_args"
   assert_contains $'action\tswitch\ta' "$fzf_input"
   assert_contains $'\033[' "$fzf_input"
+  assert_contains $'\033[48;2;' "$fzf_input"
   assert_not_contains '1. ' "$fzf_input"
   assert_contains 'active a' "$output"
 }

@@ -366,6 +366,128 @@ selector_fast_tone_text_into() {
   out_ref="${prefix}${text}${reset}"
 }
 
+selector_fast_repeat_glyph_into() {
+  local -n out_ref="$1"
+  local glyph="$2"
+  local width="${3:-0}"
+  local i value=""
+
+  for ((i = 0; i < width; i++)); do
+    value+="$glyph"
+  done
+  out_ref="$value"
+}
+
+selector_fast_clamped_percent_into() {
+  local -n out_ref="$1"
+  local percent="$2"
+  local percent_value
+
+  percent="${percent%\%}"
+  [[ "$percent" =~ ^-?[0-9]+$ ]] || return 1
+  percent_value="$percent"
+  (( percent_value < 0 )) && percent_value=0
+  (( percent_value > 100 )) && percent_value=100
+  out_ref="$percent_value"
+}
+
+selector_fast_metric_cell_into() {
+  local -n out_ref="$1"
+  local percent="$2"
+  local width="$3"
+  local tone label label_w=4 bar_w value units full partial used bg_style
+  local bar_border_glyph="▁"
+  local partial_glyphs=("" "▏" "▎" "▍" "▌" "▋" "▊" "▉")
+  local label_cell bar_cell spaces prefix edge reset=""
+
+  out_ref=""
+  (( width <= 0 )) && return 0
+  [[ -n "$percent" ]] || percent="-"
+  label="${percent%\%}"
+  selector_fast_limit_tone_into tone "$percent"
+
+  if [[ "$percent" == "-" ]]; then
+    if (( width < 8 )); then
+      selector_fast_fit_into label_cell "-" "$width" center
+    else
+      printf -v label_cell '%3s' "-"
+      printf -v spaces '%*s' "$((width - 3))" ''
+      label_cell+="$spaces"
+    fi
+    selector_fast_tone_text_into out_ref "$label_cell" muted
+    return 0
+  fi
+
+  if (( width < 8 )); then
+    selector_fast_fit_into label_cell "$label" "$width" center
+    selector_fast_tone_text_into out_ref "$label_cell" "$tone"
+    return 0
+  fi
+
+  (( width >= 18 )) && label_w=5
+  selector_fast_fit_into label_cell "$label" "$label_w" center
+  selector_fast_tone_text_into label_cell "$label_cell" "$tone"
+  bar_w=$((width - label_w - 1))
+  (( bar_w < 0 )) && bar_w=0
+  bg_style="${CODEX_AUTH_SELECTOR_BAR_STYLE:-bg}"
+
+  if selector_fast_clamped_percent_into value "$percent"; then
+    if usage_unicode_enabled; then
+      units=$(((value * bar_w * 8 + 50) / 100))
+      full=$((units / 8))
+      partial=$((units % 8))
+      if (( full >= bar_w )); then
+        full="$bar_w"
+        partial=0
+      fi
+      used="$full"
+      (( partial > 0 && used < bar_w )) && used=$((used + 1))
+    else
+      full=$(((value * bar_w + 50) / 100))
+      (( full > bar_w )) && full="$bar_w"
+      partial=0
+      used="$full"
+    fi
+
+    if usage_color_active && [[ "$bg_style" == "bg" ]]; then
+      usage_color_active && reset=$'\033[0m'
+      bar_cell=""
+      if (( used > 0 )); then
+        selector_fast_tone_code_into prefix 48 "$tone"
+        selector_fast_tone_code_into edge 38 track_edge
+        selector_fast_repeat_glyph_into spaces "$bar_border_glyph" "$used"
+        bar_cell+="${prefix}${edge}${spaces}${reset}"
+      fi
+      if (( bar_w > used )); then
+        selector_fast_tone_code_into prefix 48 track
+        selector_fast_tone_code_into edge 38 track_edge
+        selector_fast_repeat_glyph_into spaces "$bar_border_glyph" "$((bar_w - used))"
+        bar_cell+="${prefix}${edge}${spaces}${reset}"
+      fi
+    elif usage_unicode_enabled; then
+      selector_fast_repeat_glyph_into bar_cell "█" "$full"
+      (( partial > 0 && full < bar_w )) && bar_cell+="${partial_glyphs[$partial]}"
+      selector_fast_tone_text_into bar_cell "$bar_cell" "$tone"
+      if (( bar_w > used )); then
+        printf -v spaces '%*s' "$((bar_w - used))" ''
+        bar_cell+="$spaces"
+      fi
+    else
+      selector_fast_repeat_glyph_into bar_cell "#" "$full"
+      selector_fast_tone_text_into bar_cell "$bar_cell" "$tone"
+      if (( bar_w > used )); then
+        printf -v spaces '%*s' "$((bar_w - used))" ''
+        bar_cell+="$spaces"
+      fi
+    fi
+    out_ref="${label_cell} ${bar_cell}"
+    return 0
+  fi
+
+  printf -v spaces '%*s' "$bar_w" ''
+  out_ref="${label_cell} ${spaces}"
+}
+
 selector_fast_compact_status_into() {
   local -n out_ref="$1"
   local status="$2"
@@ -410,7 +532,7 @@ selector_palette_row_into() {
   local total_w="$8"
   local primary_w week_w short_w status_w status_gap metric_gap
   local action raw_action profile action_cell profile_cell primary_cell week_cell short_cell status_cell compact_status spaces
-  local action_tone week_tone short_tone status_tone
+  local action_tone status_tone
 
   selector_palette_table_widths_into primary_w week_w short_w status_w status_gap metric_gap "$total_w"
   raw_action="${primary%% *}"
@@ -431,18 +553,12 @@ selector_palette_row_into() {
   fi
 
   if [[ "$valid" == "0" ]]; then
-    selector_fast_fit_into week_cell "${weekly:--}" "$week_w" center
-    selector_fast_fit_into short_cell "${short:--}" "$short_w" center
-    selector_fast_limit_tone_into week_tone "$weekly"
-    selector_fast_limit_tone_into short_tone "$short"
+    selector_fast_metric_cell_into week_cell "${weekly:--}" "$week_w"
+    selector_fast_metric_cell_into short_cell "${short:--}" "$short_w"
   else
-    selector_fast_fit_into week_cell "-" "$week_w" center
-    selector_fast_fit_into short_cell "-" "$short_w" center
-    week_tone="muted"
-    short_tone="muted"
+    selector_fast_metric_cell_into week_cell "-" "$week_w"
+    selector_fast_metric_cell_into short_cell "-" "$short_w"
   fi
-  selector_fast_tone_text_into week_cell "$week_cell" "$week_tone"
-  selector_fast_tone_text_into short_cell "$short_cell" "$short_tone"
   selector_fast_compact_status_into compact_status "$status" "$status_w"
   selector_fast_fit_into status_cell "$compact_status" "$status_w" left
   selector_fast_status_tone_into status_tone "$_raw_status" "$valid"
