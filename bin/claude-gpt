@@ -1,0 +1,654 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+umask 077
+
+CLAUDE_GPT_PROXY_VERSION="0.1.10-codex-auth.2"
+CLAUDE_GPT_DEFAULT_COMPACT_WINDOW="372000"
+# Dynamic model lanes. Claude Code keeps /model and /effort live; these only set
+# which GPT model each Claude tier maps to. The proxy translates every id and the
+# per-turn effort, so the launcher never pins a global effort.
+CLAUDE_GPT_DEFAULT_MODEL="gpt-5.6-sol"
+CLAUDE_GPT_DEFAULT_OPUS_MODEL="gpt-5.6-sol"
+CLAUDE_GPT_DEFAULT_OPUS_MODEL_NAME="GPT-5.6 Sol Deep"
+CLAUDE_GPT_DEFAULT_OPUS_MODEL_DESCRIPTION="Flagship quality lane for hard coding and reasoning"
+CLAUDE_GPT_DEFAULT_SONNET_MODEL="gpt-5.6-terra"
+CLAUDE_GPT_DEFAULT_SONNET_MODEL_NAME="GPT-5.6 Terra Balanced"
+CLAUDE_GPT_DEFAULT_SONNET_MODEL_DESCRIPTION="Balanced intelligence and latency lane"
+CLAUDE_GPT_DEFAULT_SMALL_MODEL="gpt-5.6-luna"
+CLAUDE_GPT_DEFAULT_HAIKU_MODEL_NAME="GPT-5.6 Luna Light"
+CLAUDE_GPT_DEFAULT_HAIKU_MODEL_DESCRIPTION="Lightweight lane for simple and background work"
+CLAUDE_GPT_DEFAULT_FAST_MODEL="gpt-5.6-sol-fast"
+CLAUDE_GPT_DEFAULT_FAST_MODEL_NAME="GPT-5.6 Sol Ultra Fast"
+CLAUDE_GPT_DEFAULT_FAST_MODEL_DESCRIPTION="Sol priority lane; requires available fast-mode quota"
+CLAUDE_GPT_DEFAULT_MODEL_CAPABILITIES="effort,xhigh_effort,max_effort"
+CLAUDE_GPT_PROXY_LEASE_EXPIRES=4102444800000
+
+die() {
+  printf 'claude-gpt: %s\n' "$*" >&2
+  exit 1
+}
+
+usage() {
+  cat <<'EOF'
+Usage: claude-gpt [launcher options] [--] [claude arguments...]
+
+Run the normal Claude Code harness with GPT backed by a saved ChatGPT/Codex
+subscription profile. This does not use OPENAI_API_KEY or change the active
+codex-auth profile.
+
+Launcher options:
+  --profile NAME       use and pin a saved profile (default: follow active profile)
+  --model MODEL        starting model (default: gpt-5.6-sol)
+  --opus-model MODEL   Opus deep lane (default: gpt-5.6-sol)
+  --sonnet-model MODEL Sonnet balanced lane (default: gpt-5.6-terra)
+  --haiku-model MODEL  Haiku light/background lane (default: gpt-5.6-luna)
+  --small-model MODEL  alias of --haiku-model
+  --fast-model MODEL   custom "GPT-5.6 Sol Ultra Fast" picker option
+                       (default: gpt-5.6-sol-fast; set CLAUDE_GPT_FAST_MODEL=
+                       to drop it)
+  --compact-window N   auto-compact ceiling, 100000-372000 tokens
+                       (default: 372000; env: CLAUDE_GPT_COMPACT_WINDOW)
+  --effort LEVEL       starting effort: low, medium, high, xhigh, max,
+                       ultracode (or ultra), or auto
+                       (still changeable with /effort; ultracode is xhigh plus
+                       Claude's dynamic workflow orchestration)
+  --bare               pass --bare to Claude Code
+  -h, --help           show this help
+
+/model in Claude Code switches between the Opus, Sonnet, and Haiku lanes plus
+the one custom Sol Ultra Fast option; /effort still picks the reasoning level
+per turn. The launcher advertises effort support but never forces a level.
+
+Use -- before a Claude Code argument that has the same name as a launcher
+option. Every other argument is forwarded unchanged.
+EOF
+}
+
+resolve_command() {
+  local override="$1"
+  local name="$2"
+  local sibling="${3:-}"
+
+  if [[ -n "$override" ]]; then
+    [[ -x "$override" ]] || die "$name is not executable: $override"
+    printf '%s\n' "$override"
+  elif [[ -n "$sibling" && -x "$sibling" ]]; then
+    printf '%s\n' "$sibling"
+  elif command -v "$name" >/dev/null 2>&1; then
+    command -v "$name"
+  else
+    die "$name was not found"
+  fi
+}
+
+metadata_field() {
+  local metadata="$1"
+  local field="$2"
+  jq -er --arg field "$field" '.[$field] | select(. != null and . != "")' <<<"$metadata"
+}
+
+active_marker_state() {
+  local marker="$1"
+  jq -c '
+    select(.version == 2)
+    | {profile, account_identity, profile_revision, profile_fingerprint}
+  ' "$marker" 2>/dev/null || printf '%s\n' unavailable
+}
+
+metadata_marker_state() {
+  local metadata="$1"
+  jq -c '
+    {
+      profile,
+      account_identity,
+      profile_revision,
+      profile_fingerprint: .credential_fingerprint
+    }
+  ' <<<"$metadata"
+}
+
+proxy_lease_file_is_safe() {
+  local lease_file="$1"
+  jq -e --argjson lease_expires "$CLAUDE_GPT_PROXY_LEASE_EXPIRES" '
+    .refresh == ""
+    and .expires == $lease_expires
+    and ((.access // "") | type == "string" and length > 0)
+    and ((.accountId // "") | type == "string" and length > 0)
+  ' "$lease_file" >/dev/null 2>&1
+}
+
+claude_context_model() {
+  local model="$1"
+  if [[ -z "$model" || "${model,,}" == *'[1m]' ]]; then
+    printf '%s\n' "$model"
+  else
+    # Claude Code otherwise treats custom GPT ids as unknown 200K models. The
+    # proxy removes this local context hint before sending the id to Codex.
+    printf '%s[1m]\n' "$model"
+  fi
+}
+
+process_alive() {
+  local pid="${1:-}"
+  local state=""
+  [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null || return 1
+  if [[ -r "/proc/$pid/stat" ]]; then
+    state="$(awk '{print $3}' "/proc/$pid/stat" 2>/dev/null || true)"
+    [[ "$state" != "Z" ]] || return 1
+  fi
+}
+
+wait_for_exit() {
+  local pid="$1"
+  local attempts="$2"
+  local attempt
+  for (( attempt=0; attempt<attempts; attempt++ )); do
+    process_alive "$pid" || return 0
+    sleep 0.1
+  done
+  return 1
+}
+
+signal_process_tree() {
+  local pid="${1:-}"
+  local signal="${2:-TERM}"
+  local child
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 0
+  if command -v pgrep >/dev/null 2>&1; then
+    while IFS= read -r child; do
+      [[ "$child" =~ ^[0-9]+$ && "$child" != "$pid" ]] || continue
+      signal_process_tree "$child" "$signal"
+    done < <(pgrep -P "$pid" 2>/dev/null || true)
+  fi
+  kill "-$signal" "$pid" 2>/dev/null || true
+}
+
+main() {
+  if (( BASH_VERSINFO[0] < 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] < 1) )); then
+    die "Bash 5.1 or newer is required (the launcher uses wait -n -p)"
+  fi
+  local profile="--active"
+  local follow_active=1
+  local model="${CLAUDE_GPT_MODEL:-$CLAUDE_GPT_DEFAULT_MODEL}"
+  local opus_model="${CLAUDE_GPT_OPUS_MODEL:-$CLAUDE_GPT_DEFAULT_OPUS_MODEL}"
+  local opus_model_name="${CLAUDE_GPT_OPUS_MODEL_NAME:-$CLAUDE_GPT_DEFAULT_OPUS_MODEL_NAME}"
+  local opus_model_description="${CLAUDE_GPT_OPUS_MODEL_DESCRIPTION:-$CLAUDE_GPT_DEFAULT_OPUS_MODEL_DESCRIPTION}"
+  local sonnet_model="${CLAUDE_GPT_SONNET_MODEL:-$CLAUDE_GPT_DEFAULT_SONNET_MODEL}"
+  local sonnet_model_name="${CLAUDE_GPT_SONNET_MODEL_NAME:-$CLAUDE_GPT_DEFAULT_SONNET_MODEL_NAME}"
+  local sonnet_model_description="${CLAUDE_GPT_SONNET_MODEL_DESCRIPTION:-$CLAUDE_GPT_DEFAULT_SONNET_MODEL_DESCRIPTION}"
+  local small_model="${CLAUDE_GPT_SMALL_MODEL:-$CLAUDE_GPT_DEFAULT_SMALL_MODEL}"
+  local haiku_model_name="${CLAUDE_GPT_HAIKU_MODEL_NAME:-$CLAUDE_GPT_DEFAULT_HAIKU_MODEL_NAME}"
+  local haiku_model_description="${CLAUDE_GPT_HAIKU_MODEL_DESCRIPTION:-$CLAUDE_GPT_DEFAULT_HAIKU_MODEL_DESCRIPTION}"
+  local model_capabilities="${CLAUDE_GPT_MODEL_CAPABILITIES:-$CLAUDE_GPT_DEFAULT_MODEL_CAPABILITIES}"
+  # ${VAR-default}, not ${VAR:-default}: an exported CLAUDE_GPT_FAST_MODEL= drops
+  # the single custom picker option; leaving it unset keeps the default.
+  local fast_model="${CLAUDE_GPT_FAST_MODEL-$CLAUDE_GPT_DEFAULT_FAST_MODEL}"
+  local fast_model_name="${CLAUDE_GPT_FAST_MODEL_NAME:-$CLAUDE_GPT_DEFAULT_FAST_MODEL_NAME}"
+  local fast_model_description="${CLAUDE_GPT_FAST_MODEL_DESCRIPTION:-$CLAUDE_GPT_DEFAULT_FAST_MODEL_DESCRIPTION}"
+  local fast_model_capabilities="${CLAUDE_GPT_FAST_MODEL_CAPABILITIES:-$model_capabilities}"
+  local compact_window="${CLAUDE_GPT_COMPACT_WINDOW:-${CLAUDE_CODE_AUTO_COMPACT_WINDOW:-$CLAUDE_GPT_DEFAULT_COMPACT_WINDOW}}"
+  local effort="" bare=0
+  local script_dir codex_auth proxy_bin claude_bin curl_bin
+  local codex_home session_dir config_dir auth_file active_lease_candidate active_profile_file
+  local state_dir proxy_log proxy_state_log stop_file
+  local metadata initial_expires expires profile_name identity now requested_port port proxy_version
+  local initial_profile_name initial_identity active_state=""
+  local renew_margin_secs parent_death_code
+  local proxy_pid="" lease_pid="" claude_pid="" wrapper_pid="$BASHPID" status=0
+  local -a claude_args=()
+
+  while (( $# > 0 )); do
+    case "$1" in
+      --profile)
+        [[ $# -ge 2 && -n "$2" ]] || die "--profile needs a name"
+        profile="$2"
+        [[ "$profile" == "--active" ]] || follow_active=0
+        shift 2
+        ;;
+      --model)
+        [[ $# -ge 2 && -n "$2" ]] || die "--model needs a model id"
+        model="$2"
+        shift 2
+        ;;
+      --opus-model)
+        [[ $# -ge 2 && -n "$2" ]] || die "--opus-model needs a model id"
+        opus_model="$2"
+        shift 2
+        ;;
+      --sonnet-model)
+        [[ $# -ge 2 && -n "$2" ]] || die "--sonnet-model needs a model id"
+        sonnet_model="$2"
+        shift 2
+        ;;
+      --haiku-model|--small-model)
+        [[ $# -ge 2 && -n "$2" ]] || die "$1 needs a model id"
+        small_model="$2"
+        shift 2
+        ;;
+      --fast-model)
+        [[ $# -ge 2 && -n "$2" ]] || die "--fast-model needs a model id"
+        fast_model="$2"
+        shift 2
+        ;;
+      --compact-window)
+        [[ $# -ge 2 && -n "$2" ]] || die "--compact-window needs a token count"
+        compact_window="$2"
+        shift 2
+        ;;
+      --effort)
+        [[ $# -ge 2 && -n "$2" ]] || die "--effort needs a level"
+        case "$2" in
+          low|medium|high|xhigh|max|auto) effort="$2" ;;
+          ultra|ultracode) effort="ultracode" ;;
+          *) die "--effort must be low, medium, high, xhigh, max, ultracode (or ultra), or auto" ;;
+        esac
+        shift 2
+        ;;
+      --bare)
+        bare=1
+        shift
+        ;;
+      -h|--help)
+        usage
+        return 0
+        ;;
+      --)
+        shift
+        claude_args+=("$@")
+        break
+        ;;
+      *)
+        claude_args+=("$@")
+        break
+        ;;
+    esac
+  done
+
+  [[ "$compact_window" =~ ^[1-9][0-9]{5}$ ]] \
+    && (( compact_window >= 100000 && compact_window <= CLAUDE_GPT_DEFAULT_COMPACT_WINDOW )) \
+    || die "--compact-window must be between 100000 and $CLAUDE_GPT_DEFAULT_COMPACT_WINDOW"
+
+  command -v jq >/dev/null 2>&1 || die "jq is required"
+  command -v python3 >/dev/null 2>&1 || die "python3 is required for child-process containment"
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  codex_auth="$(resolve_command "${CODEX_AUTH_BIN:-}" codex-auth "$script_dir/codex-auth")"
+  proxy_bin="$(resolve_command "${CLAUDE_GPT_PROXY_BIN:-}" claude-code-proxy "$script_dir/claude-code-proxy")"
+  claude_bin="$(resolve_command "${CLAUDE_GPT_CLAUDE_BIN:-}" claude)"
+  curl_bin="$(resolve_command "${CLAUDE_GPT_CURL_BIN:-}" curl)"
+
+  proxy_version="$("$proxy_bin" --version 2>/dev/null || true)"
+  if [[ "$proxy_version" != "claude-code-proxy $CLAUDE_GPT_PROXY_VERSION" \
+    && "${CLAUDE_GPT_ALLOW_PROXY_VERSION_MISMATCH:-0}" != "1" ]]; then
+    die "expected claude-code-proxy $CLAUDE_GPT_PROXY_VERSION, found ${proxy_version:-unknown}"
+  fi
+
+  codex_home="${CODEX_HOME:-$HOME/.codex}"
+  mkdir -p "$codex_home/.tmp"
+  chmod 700 "$codex_home/.tmp"
+  session_dir="$(mktemp -d "$codex_home/.tmp/claude-gpt.XXXXXX")"
+  config_dir="$session_dir/config"
+  auth_file="$config_dir/codex/auth.json"
+  active_lease_candidate="$config_dir/codex/auth.active-next.json"
+  active_profile_file="${CODEX_AUTH_ACTIVE_PROFILE_FILE:-$codex_home/active-profile.json}"
+  state_dir="$session_dir/state"
+  proxy_log="$session_dir/proxy.log"
+  proxy_state_log="$state_dir/claude-code-proxy/proxy.log"
+  stop_file="$session_dir/stop"
+  mkdir -p "${auth_file%/*}" "$state_dir"
+  chmod 700 "$session_dir" "$config_dir" "${auth_file%/*}" "$state_dir"
+
+  cleanup() {
+    trap - EXIT HUP INT TERM
+    touch "$stop_file" 2>/dev/null || true
+    process_alive "$claude_pid" && signal_process_tree "$claude_pid" TERM || true
+    process_alive "$proxy_pid" && signal_process_tree "$proxy_pid" TERM || true
+    if process_alive "$lease_pid" && ! wait_for_exit "$lease_pid" 200; then
+      signal_process_tree "$lease_pid" TERM
+      wait_for_exit "$lease_pid" 20 || signal_process_tree "$lease_pid" KILL
+    fi
+    if process_alive "$claude_pid" && ! wait_for_exit "$claude_pid" 30; then
+      signal_process_tree "$claude_pid" KILL
+    fi
+    if process_alive "$proxy_pid" && ! wait_for_exit "$proxy_pid" 30; then
+      signal_process_tree "$proxy_pid" KILL
+    fi
+    [[ -z "$lease_pid" ]] || wait "$lease_pid" 2>/dev/null || true
+    [[ -z "$claude_pid" ]] || wait "$claude_pid" 2>/dev/null || true
+    [[ -z "$proxy_pid" ]] || wait "$proxy_pid" 2>/dev/null || true
+    rm -rf "$session_dir"
+  }
+  on_signal() {
+    local signal_status="$1"
+    cleanup
+    exit "$signal_status"
+  }
+  trap cleanup EXIT
+  trap 'on_signal 129' HUP
+  trap 'on_signal 130' INT
+  trap 'on_signal 143' TERM
+
+  metadata="$("$codex_auth" claude-gpt-export "$profile" "$auth_file")" \
+    || die "could not pin the selected subscription profile"
+  profile_name="$(metadata_field "$metadata" profile)" \
+    || die "auth export did not return a profile"
+  identity="$(metadata_field "$metadata" account_identity)" \
+    || die "auth export did not return a stable account identity"
+  initial_expires="$(metadata_field "$metadata" expires)" \
+    || die "auth export did not return the access-token expiry"
+  initial_profile_name="$profile_name"
+  initial_identity="$identity"
+
+  # Opening Codex app-server against an isolated copy makes official Codex own
+  # any refresh-token rotation. codex-auth safely merges the result back into
+  # this one saved profile without switching the active profile name.
+  if (( follow_active )); then
+    # A watch/auto switch can retire the original account while this refresh is
+    # starting.  Its failure must not hide a newly valid active profile; the
+    # locked --active export below is the authoritative startup decision.
+    "$codex_auth" refresh --quiet --fast "$profile_name" >/dev/null 2>&1 || true
+    # The active profile may have changed while its predecessor refreshed.
+    # Resolve it again under codex-auth's mutation lock instead of putting the
+    # predecessor back into the session lease.
+    metadata="$("$codex_auth" claude-gpt-export --active "$auth_file")" \
+      || die "could not renew the active subscription profile"
+  else
+    "$codex_auth" refresh --quiet --fast "$profile_name" >/dev/null
+    metadata="$("$codex_auth" claude-gpt-export "$profile_name" "$auth_file" "$identity")" \
+      || die "could not renew the selected subscription profile"
+  fi
+  profile_name="$(metadata_field "$metadata" profile)" \
+    || die "renewed auth export did not return a profile"
+  identity="$(metadata_field "$metadata" account_identity)" \
+    || die "renewed auth export did not return a stable account identity"
+  expires="$(metadata_field "$metadata" expires)" \
+    || die "renewed auth export did not return an expiry"
+  if (( follow_active )); then
+    active_state="$(metadata_marker_state "$metadata")" \
+      || die "renewed auth export did not return active-profile metadata"
+  fi
+  now="$(date +%s)"
+  if (( expires / 1000 <= now + 90 )); then
+    die "the selected access token is about to expire; run: codex-auth reauth $profile_name"
+  fi
+  if [[ "$profile_name" == "$initial_profile_name" && "$identity" == "$initial_identity" ]] \
+    && (( initial_expires / 1000 <= now + 300 && expires <= initial_expires )); then
+    die "Codex could not refresh the selected access token; run: codex-auth reauth $profile_name"
+  fi
+  [[ "$(jq -r '.refresh' "$auth_file")" == "" ]] \
+    || die "refusing to start: proxy auth unexpectedly contains a refresh token"
+  [[ "$(jq -r '.expires' "$auth_file")" == "$CLAUDE_GPT_PROXY_LEASE_EXPIRES" ]] \
+    || die "refusing to start: proxy auth is not lease managed"
+
+  requested_port="${CLAUDE_GPT_PORT:-0}"
+  if [[ -n "${CLAUDE_GPT_PORT:-}" ]]; then
+    [[ "$requested_port" =~ ^[0-9]+$ && "$requested_port" -ge 1024 && "$requested_port" -le 65535 ]] \
+      || die "CLAUDE_GPT_PORT must be between 1024 and 65535"
+  fi
+  port="$requested_port"
+  parent_death_code=$'import ctypes, os, signal, sys\nexpected = int(sys.argv[1])\nlibc = ctypes.CDLL(None, use_errno=True)\nif libc.prctl(1, signal.SIGTERM) != 0:\n    raise OSError(ctypes.get_errno(), "prctl(PR_SET_PDEATHSIG) failed")\nif os.getppid() != expected:\n    raise SystemExit(125)\nos.execvpe(sys.argv[2], sys.argv[2:], os.environ)'
+  env \
+    -u CCP_ALIAS_PROVIDER \
+    -u CCP_CODEX_BASE_URL \
+    -u CCP_CODEX_EFFORT \
+    -u CCP_CODEX_MODEL \
+    -u CCP_CODEX_SERVICE_TIER \
+    -u CCP_CODEX_TRANSPORT \
+    -u CCP_LOG_STDERR \
+    -u CCP_LOG_VERBOSE \
+    -u CCP_TRAFFIC_LOG \
+    CCP_CONFIG_DIR="$config_dir" \
+    XDG_STATE_HOME="$state_dir" \
+    python3 -c "$parent_death_code" "$wrapper_pid" \
+      "$proxy_bin" serve --port "$requested_port" --no-monitor >"$proxy_log" 2>&1 &
+  proxy_pid=$!
+
+  local health_ready=0 attempt parsed_port
+  for (( attempt=0; attempt<100; attempt++ )); do
+    if [[ "$requested_port" == "0" && -s "$proxy_state_log" ]]; then
+      parsed_port="$(jq -r 'select(.msg == "server listening") | .fields.port // empty' "$proxy_state_log" 2>/dev/null | tail -n 1)"
+      if [[ "$parsed_port" =~ ^[0-9]+$ && "$parsed_port" -ge 1024 && "$parsed_port" -le 65535 ]]; then
+        port="$parsed_port"
+      fi
+    fi
+    if [[ "$port" != "0" ]] && process_alive "$proxy_pid" \
+      && "$curl_bin" --noproxy '*' -fsS --max-time 1 "http://127.0.0.1:$port/healthz" >/dev/null 2>&1 \
+      && process_alive "$proxy_pid"
+    then
+      sleep 0.05
+      process_alive "$proxy_pid" || break
+      "$curl_bin" --noproxy '*' -fsS --max-time 1 "http://127.0.0.1:$port/healthz" >/dev/null 2>&1 || continue
+      health_ready=1
+      break
+    fi
+    process_alive "$proxy_pid" || break
+    sleep 0.05
+  done
+  if (( ! health_ready )); then
+    tail -n 20 "$proxy_log" >&2 2>/dev/null || true
+    tail -n 20 "$proxy_state_log" >&2 2>/dev/null || true
+    die "local proxy did not become ready on 127.0.0.1:$port"
+  fi
+
+  renew_lease() {
+    local current_profile="$profile_name" current_identity="$identity" current_expires="$expires"
+    local current_active_state="$active_state" marker_state previous_profile previous_identity
+    local next_metadata next_profile next_identity next_expires next_active_state
+    local target sleep_for lease_now
+    renew_margin_secs="${CLAUDE_GPT_RENEW_MARGIN_SECS:-290}"
+    [[ "$renew_margin_secs" =~ ^[0-9]+$ && "$renew_margin_secs" -ge 1 ]] || renew_margin_secs=290
+    while [[ ! -e "$stop_file" ]] \
+      && process_alive "$wrapper_pid" \
+      && process_alive "$claude_pid" \
+      && process_alive "$proxy_pid"
+    do
+      if (( follow_active )); then
+        marker_state="$(active_marker_state "$active_profile_file")"
+        if [[ "$marker_state" != "$current_active_state" ]] \
+          && next_metadata="$("$codex_auth" claude-gpt-export --active "$active_lease_candidate" 2>/dev/null)" \
+          && next_profile="$(metadata_field "$next_metadata" profile 2>/dev/null)" \
+          && next_identity="$(metadata_field "$next_metadata" account_identity 2>/dev/null)" \
+          && next_expires="$(metadata_field "$next_metadata" expires 2>/dev/null)" \
+          && next_active_state="$(metadata_marker_state "$next_metadata" 2>/dev/null)" \
+          && proxy_lease_file_is_safe "$active_lease_candidate"
+        then
+          lease_now="$(date +%s)"
+          if (( next_expires / 1000 > lease_now + 90 )) \
+            && mv -f "$active_lease_candidate" "$auth_file"
+          then
+            previous_profile="$current_profile"
+            previous_identity="$current_identity"
+            current_profile="$next_profile"
+            current_identity="$next_identity"
+            current_expires="$next_expires"
+            current_active_state="$next_active_state"
+            if [[ "$current_profile" != "$previous_profile" || "$current_identity" != "$previous_identity" ]]; then
+              printf 'claude-gpt: active subscription profile changed: %s -> %s\n' \
+                "$previous_profile" "$current_profile" >&2
+            fi
+          else
+            rm -f "$active_lease_candidate"
+            # Keep the current, still-valid lease live while official Codex
+            # refreshes the newly selected profile. The next poll stages it
+            # again and only promotes a validated access-only replacement.
+            "$codex_auth" refresh --quiet --fast "$next_profile" >/dev/null 2>&1 || true
+          fi
+        else
+          rm -f "$active_lease_candidate"
+        fi
+      fi
+
+      lease_now="$(date +%s)"
+      # Official Codex refreshes access tokens inside its final five minutes.
+      # Enter that window with ten seconds of headroom, then retry briefly if a
+      # clock boundary leaves the token unchanged.
+      target=$(( current_expires / 1000 - renew_margin_secs ))
+      if (( lease_now < target )); then
+        sleep_for=$(( target - lease_now ))
+        (( sleep_for > 1 )) && sleep_for=1
+        sleep "$sleep_for"
+        continue
+      fi
+
+      next_metadata=""
+      if "$codex_auth" refresh --quiet --fast "$current_profile" >/dev/null 2>&1; then
+        if (( follow_active )); then
+          next_metadata="$("$codex_auth" claude-gpt-export --active "$active_lease_candidate" 2>/dev/null)" \
+            || next_metadata=""
+          lease_now="$(date +%s)"
+          if [[ -z "$next_metadata" ]] \
+            || ! next_expires="$(metadata_field "$next_metadata" expires 2>/dev/null)" \
+            || (( next_expires / 1000 <= lease_now + 90 )) \
+            || ! proxy_lease_file_is_safe "$active_lease_candidate" \
+            || ! mv -f "$active_lease_candidate" "$auth_file"
+          then
+            rm -f "$active_lease_candidate"
+            next_metadata=""
+          fi
+        else
+          next_metadata="$("$codex_auth" claude-gpt-export "$current_profile" "$auth_file" "$current_identity" 2>/dev/null)" \
+            || next_metadata=""
+        fi
+      fi
+      if [[ -n "$next_metadata" ]] \
+        && next_profile="$(metadata_field "$next_metadata" profile 2>/dev/null)" \
+        && next_identity="$(metadata_field "$next_metadata" account_identity 2>/dev/null)" \
+        && next_expires="$(metadata_field "$next_metadata" expires 2>/dev/null)"
+      then
+        previous_profile="$current_profile"
+        previous_identity="$current_identity"
+        current_profile="$next_profile"
+        current_identity="$next_identity"
+        if (( follow_active )); then
+          current_active_state="$(metadata_marker_state "$next_metadata")"
+        fi
+        if [[ "$current_profile" != "$previous_profile" || "$current_identity" != "$previous_identity" ]] \
+          || (( next_expires > current_expires )); then
+          if [[ "$current_profile" != "$previous_profile" || "$current_identity" != "$previous_identity" ]]; then
+            printf 'claude-gpt: active subscription profile changed: %s -> %s\n' \
+              "$previous_profile" "$current_profile" >&2
+          fi
+          current_expires="$next_expires"
+          continue
+        fi
+        current_expires="$next_expires"
+      fi
+
+      lease_now="$(date +%s)"
+      if (( lease_now >= current_expires / 1000 - 60 )); then
+        printf 'claude-gpt: subscription lease could not be renewed for profile %s\n' "$current_profile" >&2
+        process_alive "$claude_pid" && kill -TERM "$claude_pid" 2>/dev/null || true
+        process_alive "$wrapper_pid" && kill -TERM "$wrapper_pid" 2>/dev/null || true
+        return 1
+      fi
+      sleep 15
+    done
+    if ! process_alive "$wrapper_pid"; then
+      process_alive "$claude_pid" && signal_process_tree "$claude_pid" TERM || true
+      process_alive "$proxy_pid" && signal_process_tree "$proxy_pid" TERM || true
+      rm -rf "$session_dir"
+    elif process_alive "$claude_pid" && ! process_alive "$proxy_pid"; then
+      return 2
+    fi
+  }
+
+  if [[ -n "$effort" ]]; then
+    claude_args=(--effort "$effort" "${claude_args[@]}")
+  fi
+  if (( bare )); then
+    claude_args=(--bare "${claude_args[@]}")
+  fi
+
+  # Map the Claude tiers to their GPT lanes. ANTHROPIC_MODEL is the starting
+  # model; /model switches between these lanes without restarting the launcher.
+  local claude_model claude_opus_model claude_sonnet_model claude_small_model claude_fast_model
+  claude_model="$(claude_context_model "$model")"
+  claude_opus_model="$(claude_context_model "$opus_model")"
+  claude_sonnet_model="$(claude_context_model "$sonnet_model")"
+  claude_small_model="$(claude_context_model "$small_model")"
+  claude_fast_model="$(claude_context_model "$fast_model")"
+
+  local -a claude_env=(
+    -u ANTHROPIC_API_KEY
+    -u ANTHROPIC_BEDROCK_BASE_URL
+    -u ANTHROPIC_VERTEX_BASE_URL
+    -u CLAUDE_CODE_USE_BEDROCK
+    -u CLAUDE_CODE_USE_FOUNDRY
+    -u CLAUDE_CODE_USE_VERTEX
+    ANTHROPIC_BASE_URL="http://127.0.0.1:$port"
+    ANTHROPIC_AUTH_TOKEN=unused
+    ANTHROPIC_MODEL="$claude_model"
+    ANTHROPIC_DEFAULT_OPUS_MODEL="$claude_opus_model"
+    ANTHROPIC_DEFAULT_OPUS_MODEL_NAME="$opus_model_name"
+    ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION="$opus_model_description"
+    ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES="$model_capabilities"
+    ANTHROPIC_DEFAULT_SONNET_MODEL="$claude_sonnet_model"
+    ANTHROPIC_DEFAULT_SONNET_MODEL_NAME="$sonnet_model_name"
+    ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION="$sonnet_model_description"
+    ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES="$model_capabilities"
+    ANTHROPIC_DEFAULT_HAIKU_MODEL="$claude_small_model"
+    ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME="$haiku_model_name"
+    ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION="$haiku_model_description"
+    ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES="$model_capabilities"
+    ANTHROPIC_SMALL_FAST_MODEL="$claude_small_model"
+    CLAUDE_CODE_AUTO_COMPACT_WINDOW="$compact_window"
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+    CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK=1
+  )
+  # One bounded custom picker option. Its SUPPORTED_CAPABILITIES only advertise
+  # the effort levels the proxy already translates (effort/xhigh_effort/max_effort);
+  # the launcher still leaves CCP_CODEX_EFFORT unset so /effort stays dynamic.
+  if [[ -n "$fast_model" ]]; then
+    claude_env+=(
+      ANTHROPIC_CUSTOM_MODEL_OPTION="$claude_fast_model"
+      ANTHROPIC_CUSTOM_MODEL_OPTION_NAME="$fast_model_name"
+      ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION="$fast_model_description"
+      ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES="$fast_model_capabilities"
+    )
+  fi
+
+  env "${claude_env[@]}" \
+    python3 -c "$parent_death_code" "$wrapper_pid" \
+      "$claude_bin" "${claude_args[@]}" <&0 &
+  claude_pid=$!
+  renew_lease &
+  lease_pid=$!
+
+  local finished_pid="" child_status=0
+  set +e
+  wait -n -p finished_pid "$claude_pid" "$proxy_pid" "$lease_pid"
+  child_status=$?
+  set -e
+  case "$finished_pid" in
+    "$claude_pid")
+      status="$child_status"
+      claude_pid=""
+      ;;
+    "$proxy_pid")
+      proxy_pid=""
+      printf 'claude-gpt: local proxy stopped before Claude Code exited\n' >&2
+      status=1
+      ;;
+    "$lease_pid")
+      lease_pid=""
+      if process_alive "$claude_pid"; then
+        printf 'claude-gpt: subscription lease stopped before Claude Code exited\n' >&2
+        status=1
+      else
+        set +e
+        wait "$claude_pid"
+        status=$?
+        set -e
+        claude_pid=""
+      fi
+      ;;
+    *)
+      printf 'claude-gpt: child supervision failed\n' >&2
+      status=1
+      ;;
+  esac
+  cleanup
+  return "$status"
+}
+
+main "$@"

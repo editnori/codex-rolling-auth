@@ -9,6 +9,7 @@ codex_home="${CODEX_HOME:-$HOME/.codex}"
 standalone_root="$codex_home/packages/standalone"
 tui_source="$repo_dir/tui"
 tui_dir="$libdir/tui"
+claude_gpt_proxy_version="0.1.10-codex-auth.2"
 
 mkdir -p "$bindir" "$libdir"
 if [[ ! -f "$tui_source/pyproject.toml" || ! -f "$tui_source/uv.lock" || ! -d "$tui_source/src/codex_auth_tui" ]]; then
@@ -64,8 +65,98 @@ if [[ "${CODEX_AUTH_TUI_SKIP_BOOTSTRAP:-0}" != "1" ]]; then
   fi
 fi
 
+install_claude_gpt_proxy() {
+  local platform archive_name checksum_name release_base download_dir
+  local archive checksum extracted staged_binary actual_version
+
+  [[ "${CODEX_AUTH_INSTALL_CLAUDE_GPT_PROXY:-1}" != "0" ]] || return 0
+  if [[ -x "$bindir/claude-code-proxy" ]] \
+    && [[ "$("$bindir/claude-code-proxy" --version 2>/dev/null || true)" == "claude-code-proxy $claude_gpt_proxy_version" ]]; then
+    return 0
+  fi
+
+  case "$(uname -s):$(uname -m)" in
+    Linux:x86_64|Linux:amd64) platform="linux-amd64" ;;
+    Linux:aarch64|Linux:arm64) platform="linux-arm64" ;;
+    *)
+      printf 'unsupported platform for claude-code-proxy: %s %s\n' "$(uname -s)" "$(uname -m)" >&2
+      printf 'set CODEX_AUTH_INSTALL_CLAUDE_GPT_PROXY=0 to install codex-auth without claude-gpt support\n' >&2
+      return 1
+      ;;
+  esac
+
+  archive_name="claude-code-proxy-$platform.tar.gz"
+  checksum_name="claude-code-proxy-$platform.sha256"
+  release_base="https://github.com/editnori/claude-code-proxy/releases/download/v$claude_gpt_proxy_version"
+  download_dir="$install_stage/claude-code-proxy"
+  archive="$download_dir/$archive_name"
+  checksum="$download_dir/$checksum_name"
+  mkdir -p "$download_dir"
+
+  if [[ -n "${CODEX_AUTH_CLAUDE_GPT_PROXY_ARCHIVE:-}" ]]; then
+    [[ -f "$CODEX_AUTH_CLAUDE_GPT_PROXY_ARCHIVE" ]] || {
+      printf 'claude-code-proxy archive not found: %s\n' "$CODEX_AUTH_CLAUDE_GPT_PROXY_ARCHIVE" >&2
+      return 1
+    }
+    cp "$CODEX_AUTH_CLAUDE_GPT_PROXY_ARCHIVE" "$archive"
+  elif command -v curl >/dev/null 2>&1; then
+    curl -fsSL --retry 3 --retry-connrefused --connect-timeout 10 --max-time 120 \
+      "$release_base/$archive_name" -o "$archive"
+  elif command -v wget >/dev/null 2>&1; then
+    wget --tries=3 --timeout=120 -qO "$archive" "$release_base/$archive_name"
+  else
+    printf 'curl or wget is required to install claude-code-proxy\n' >&2
+    return 1
+  fi
+
+  if [[ -n "${CODEX_AUTH_CLAUDE_GPT_PROXY_CHECKSUM:-}" ]]; then
+    [[ -f "$CODEX_AUTH_CLAUDE_GPT_PROXY_CHECKSUM" ]] || {
+      printf 'claude-code-proxy checksum not found: %s\n' "$CODEX_AUTH_CLAUDE_GPT_PROXY_CHECKSUM" >&2
+      return 1
+    }
+    cp "$CODEX_AUTH_CLAUDE_GPT_PROXY_CHECKSUM" "$checksum"
+  elif command -v curl >/dev/null 2>&1; then
+    curl -fsSL --retry 3 --retry-connrefused --connect-timeout 10 --max-time 30 \
+      "$release_base/$checksum_name" -o "$checksum"
+  elif command -v wget >/dev/null 2>&1; then
+    wget --tries=3 --timeout=30 -qO "$checksum" "$release_base/$checksum_name"
+  fi
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    (cd "$download_dir" && sha256sum -c "$checksum_name" >/dev/null)
+  elif command -v shasum >/dev/null 2>&1; then
+    (cd "$download_dir" && shasum -a 256 -c "$checksum_name" >/dev/null)
+  else
+    printf 'sha256sum or shasum is required to verify claude-code-proxy\n' >&2
+    return 1
+  fi
+
+  tar -xzf "$archive" -C "$download_dir"
+  extracted="$download_dir/claude-code-proxy"
+  [[ -f "$extracted" ]] || {
+    printf 'verified claude-code-proxy archive did not contain its binary\n' >&2
+    return 1
+  }
+  chmod 0755 "$extracted"
+  actual_version="$("$extracted" --version 2>/dev/null || true)"
+  [[ "$actual_version" == "claude-code-proxy $claude_gpt_proxy_version" ]] || {
+    printf 'verified proxy reported an unexpected version: %s\n' "${actual_version:-unknown}" >&2
+    return 1
+  }
+  staged_binary="$(mktemp "$bindir/.claude-code-proxy.XXXXXX")"
+  if ! install -m 0755 "$extracted" "$staged_binary" \
+    || ! mv -f "$staged_binary" "$bindir/claude-code-proxy"
+  then
+    rm -f "$staged_binary"
+    return 1
+  fi
+}
+
+install_claude_gpt_proxy
+
 install -m 0755 "$repo_dir/bin/codex-auth" "$bindir/codex-auth"
 install -m 0755 "$repo_dir/bin/codex-auth-tui" "$bindir/codex-auth-tui"
+install -m 0755 "$repo_dir/bin/claude-gpt" "$bindir/claude-gpt"
 install -m 0755 "$repo_dir/bin/codex" "$libdir/codex-shim"
 install -m 0644 "$repo_dir/lib/codex-auth/"*.sh "$libdir/"
 shopt -s nullglob
@@ -249,6 +340,10 @@ fi
 
 printf 'installed %s\n' "$bindir/codex-auth"
 printf 'installed %s\n' "$bindir/codex-auth-tui"
+printf 'installed %s\n' "$bindir/claude-gpt"
+if [[ -x "$bindir/claude-code-proxy" ]]; then
+  printf 'installed %s\n' "$bindir/claude-code-proxy"
+fi
 if [[ "${1:-}" == "--wrap-codex" ]]; then
   printf 'installed %s\n' "$bindir/codex"
   if [[ -x "$bindir/codex-real" ]]; then

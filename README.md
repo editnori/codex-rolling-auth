@@ -30,9 +30,12 @@ All captures use the real Textual app with an in-memory synthetic backend.
 ## Requirements
 
 - Linux or WSL with Bash, `jq`, `flock`, Git, and the official Codex CLI.
+  `claude-gpt` specifically requires Bash 5.1 or newer for supervised child waiting.
 - [`uv`](https://docs.astral.sh/uv/) for the isolated Textual environment.
 - `crontab` is optional; without it, run `codex-auth maintain` after a direct curl update.
 - Building the patched Codex generation also needs a Rust/Cargo toolchain and normal native build dependencies.
+- Running GPT inside Claude Code also needs Claude Code. The installer supplies
+  the pinned [`claude-code-proxy` compatibility build](https://github.com/editnori/claude-code-proxy/releases/tag/v0.1.10-codex-auth.2).
 
 ## Install
 
@@ -54,6 +57,7 @@ That installs:
 
 - `codex-auth`, the profile manager and rolling runner
 - `codex-auth-tui`, the full-screen watcher in a private project `.venv`
+- `claude-gpt`, an opt-in Claude Code launcher backed by a saved ChatGPT/Codex subscription profile
 - `codex`, an optional shim that runs `codex-auth auto --quiet --no-background` and then starts the real Codex binary
 - patched-Codex selection: when a matching generation exists, the shim uses it with in-process rolling auth enabled; when Codex updates, the shim immediately runs stock Codex and starts one detached patch build
 - a marked, idempotent cron entry that runs `codex-auth maintain --quiet` once per minute without replacing existing cron jobs
@@ -66,7 +70,152 @@ If you only want the manager and not the `codex` shim:
 ./install.sh
 ```
 
+`claude-code-proxy` is a separate MIT-licensed third-party dependency.
+`install.sh` downloads the pinned `0.1.10-codex-auth.2` compatibility build,
+verifies its published SHA-256 checksum, and installs it beside `claude-gpt`.
+That build stays source-visible in the
+[`editnori/claude-code-proxy` fork](https://github.com/editnori/claude-code-proxy)
+and contains two focused fixes submitted upstream: true Sol `max` effort
+([PR #28](https://github.com/raine/claude-code-proxy/pull/28)) and terminal
+context-window responses that activate Claude compaction
+([PR #29](https://github.com/raine/claude-code-proxy/pull/29)), plus immediate
+rate-limit classification and isolated-auth reloads
+([PR #30](https://github.com/raine/claude-code-proxy/pull/30)). The launcher
+prefers the sibling binary and refuses a different version by default. Set
+`CODEX_AUTH_INSTALL_CLAUDE_GPT_PROXY=0` only if you do not want GPT-in-Claude
+support or will install the exact proxy version yourself.
+
 ## Usage
+
+### Run GPT in the Claude Code harness
+
+Start normal Claude Code with the currently active saved Codex profile:
+
+```bash
+claude-gpt
+```
+
+Pin a different saved profile without switching the active Codex profile:
+
+```bash
+claude-gpt --profile work
+```
+
+Claude Code arguments are forwarded unchanged. `--bare` is opt-in; without it,
+your normal Claude Code hooks, plugins, skills, and project instructions still
+load:
+
+```bash
+claude-gpt --profile work --model gpt-5.6-sol -- -p "summarize this repository"
+claude-gpt --bare
+```
+
+### Model lanes and effort
+
+[`/model` in Claude Code](https://code.claude.com/docs/en/model-config) switches
+lanes without restarting the launcher. Each Claude tier maps to one GPT model:
+
+- Opus / deep → `gpt-5.6-sol` (also the starting model)
+- Sonnet / balanced → `gpt-5.6-terra`
+- Haiku / light / background → `gpt-5.6-luna`
+
+The picker labels those lanes `GPT-5.6 Sol Deep`, `GPT-5.6 Terra Balanced`,
+and `GPT-5.6 Luna Light`. It also carries one custom option,
+`GPT-5.6 Sol Ultra Fast`
+(`gpt-5.6-sol-fast`), which routes Sol through the proxy's priority service
+tier. Every lane advertises `effort,xhigh_effort,max_effort`, so `/effort`
+offers low through max plus Claude Code's `ultracode` mode when dynamic
+workflows are available. `ultracode` means xhigh effort plus Claude's workflow
+orchestration; it is not another Sol reasoning-effort value. Start it with
+`claude-gpt --effort ultracode` (or the `ultra` alias). The launcher never sets
+`CCP_CODEX_EFFORT`, so `/effort` stays live and can still change the level
+inside the session.
+
+GPT-5.6 Sol's highest direct reasoning effort is `max`. The pinned compatibility
+build preserves that value as true Sol `reasoning.effort: "max"`. `ultracode`
+remains a separate Claude Code workflow mode whose underlying effort is xhigh.
+
+Sol Ultra Fast uses the selected subscription profile's separate Codex
+fast-mode quota. If that quota is unavailable, the backend can return `usage
+limit reached`; switch `/model` back to `GPT-5.6 Sol Deep`. The launcher does
+not retry a partially started tool turn on another lane because that could
+duplicate tool calls.
+
+Override a lane by flag or environment variable:
+
+```bash
+claude-gpt --sonnet-model gpt-5.6-terra --haiku-model gpt-5.6-luna
+CLAUDE_GPT_OPUS_MODEL=gpt-5.6-sol CLAUDE_GPT_FAST_MODEL= claude-gpt
+```
+
+Flags: `--model`, `--opus-model`, `--sonnet-model`, `--haiku-model`
+(`--small-model` is its alias), and `--fast-model`. Environment overrides:
+`CLAUDE_GPT_MODEL`, `CLAUDE_GPT_OPUS_MODEL`, `CLAUDE_GPT_SONNET_MODEL`,
+`CLAUDE_GPT_SMALL_MODEL`, and `CLAUDE_GPT_FAST_MODEL` with its
+`CLAUDE_GPT_FAST_MODEL_NAME`, `CLAUDE_GPT_FAST_MODEL_DESCRIPTION`, and
+`CLAUDE_GPT_FAST_MODEL_CAPABILITIES` companions. Set `CLAUDE_GPT_FAST_MODEL=`
+(empty) to drop the custom option.
+
+`CLAUDE_GPT_MODEL_CAPABILITIES` controls the capability declaration shared by
+the Opus, Sonnet, and Haiku lanes. Their picker labels can be overridden with
+`CLAUDE_GPT_OPUS_MODEL_NAME`, `CLAUDE_GPT_SONNET_MODEL_NAME`, and
+`CLAUDE_GPT_HAIKU_MODEL_NAME` (plus matching `_DESCRIPTION` variables).
+
+### Context and compaction
+
+The launcher gives Claude Code child-facing model ids such as
+`gpt-5.6-sol[1m]`, then the proxy removes `[1m]` before sending the request to
+Codex. The hint stops Claude from silently applying its 200K unknown-model cap.
+An explicit 372K auto-compact ceiling still matches the Codex subscription
+metadata, so the hint does not claim that the gateway accepts a 1M prompt.
+
+When a resumed Claude session is already over that limit, the compatibility
+proxy returns the upstream context-window failure as terminal HTTP 413
+`request_too_large`. Claude Code recognizes that response, trims the oldest
+message groups, compacts the session, and retries the interrupted turn. It no
+longer retries the same oversized request as a 502 server failure.
+
+Codex rate-limit events also stop immediately. Normal quota exhaustion returns
+HTTP 429 with its retry delay instead of becoming two nested ten-attempt retry
+loops. If the same event arrives for an estimated input at or above 372K, the
+proxy returns 413 so Claude can trim the oversized compaction request first.
+
+Lower the ceiling when you want earlier compaction:
+
+```bash
+claude-gpt --compact-window 300000
+CLAUDE_GPT_COMPACT_WINDOW=300000 claude-gpt --continue
+```
+
+The accepted range is 100000-372000. The launcher also honors an existing
+`CLAUDE_CODE_AUTO_COMPACT_WINDOW` when the launcher-specific variable and flag
+are absent. A proxy already running in another terminal must be exited and
+relaunched before a newly installed compatibility build takes effect.
+
+This path uses the selected profile's ChatGPT/Codex subscription, not
+`OPENAI_API_KEY`. `codex-auth` remains the only refresh owner. The proxy receives
+an access-only lease in a private temporary directory, never the refresh token;
+each lease snapshot contains one account identity, and the proxy, lease, and
+temporary files are removed when Claude Code exits. Ordinary `claude`, `codex`,
+and `cswap` configuration is not rewritten by the launcher. Claude Code still
+runs its normal harness and may update its own history or credential metadata as
+it would on an ordinary launch. The launcher never changes which Codex profile
+is active. A default `claude-gpt` session follows changes made by `codex-auth`
+watch/auto mode: it stages and validates a new access-only lease, then the proxy
+reloads that lease on the next request without restarting Claude. An explicit
+`claude-gpt --profile NAME` remains pinned to that account, requires renewals to
+retain its hashed identity, and ignores active profile changes. Official Codex
+remains the only refresh-token owner in both modes.
+
+The proxy binds a kernel-selected loopback port for one Claude Code process. Its
+HTTP routes do not have their own local authorization layer, so this assumes
+other processes running as your local user are trusted while the session is
+open.
+
+This is an experimental compatibility route implemented by a third-party
+Anthropic-to-Codex protocol translator. Anthropic does not support using
+non-Claude models in Claude Code, so keep normal `claude` available as the
+[supported path](https://code.claude.com/docs/en/llm-gateway).
 
 Open the persistent account monitor without changing auth:
 
@@ -240,8 +389,10 @@ crontab -l 2>/dev/null \
   | awk '$0 == "# BEGIN codex-auth maintain" {skip=1; next} $0 == "# END codex-auth maintain" {skip=0; next} !skip' \
   | crontab -
 curl -fsSL https://chatgpt.com/codex/install.sh | sh
-rm -f ~/.local/bin/codex-auth ~/.local/bin/codex-auth-tui ~/.local/bin/codex-real
-rm -rf ~/.local/lib/codex-auth
+prefix="${PREFIX:-$HOME/.local}"
+rm -f "$prefix/bin/codex-auth" "$prefix/bin/codex-auth-tui" "$prefix/bin/codex-real" \
+  "$prefix/bin/claude-gpt" "$prefix/bin/claude-code-proxy"
+rm -rf "$prefix/lib/codex-auth"
 ```
 
 This intentionally leaves `$CODEX_HOME/auth-profiles` and other account state in place.
