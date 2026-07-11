@@ -3,7 +3,8 @@ set -euo pipefail
 
 umask 077
 
-CLAUDE_GPT_PROXY_VERSION="0.1.10"
+CLAUDE_GPT_PROXY_VERSION="0.1.10-codex-auth.1"
+CLAUDE_GPT_DEFAULT_COMPACT_WINDOW="372000"
 # Dynamic model lanes. Claude Code keeps /model and /effort live; these only set
 # which GPT model each Claude tier maps to. The proxy translates every id and the
 # per-turn effort, so the launcher never pins a global effort.
@@ -46,6 +47,8 @@ Launcher options:
   --fast-model MODEL   custom "GPT-5.6 Sol Ultra Fast" picker option
                        (default: gpt-5.6-sol-fast; set CLAUDE_GPT_FAST_MODEL=
                        to drop it)
+  --compact-window N   auto-compact ceiling, 100000-372000 tokens
+                       (default: 372000; env: CLAUDE_GPT_COMPACT_WINDOW)
   --effort LEVEL       starting effort: low, medium, high, xhigh, max,
                        ultracode (or ultra), or auto
                        (still changeable with /effort; ultracode is xhigh plus
@@ -83,6 +86,17 @@ metadata_field() {
   local metadata="$1"
   local field="$2"
   jq -er --arg field "$field" '.[$field] | select(. != null and . != "")' <<<"$metadata"
+}
+
+claude_context_model() {
+  local model="$1"
+  if [[ -z "$model" || "${model,,}" == *'[1m]' ]]; then
+    printf '%s\n' "$model"
+  else
+    # Claude Code otherwise treats custom GPT ids as unknown 200K models. The
+    # proxy removes this local context hint before sending the id to Codex.
+    printf '%s[1m]\n' "$model"
+  fi
 }
 
 process_alive() {
@@ -139,6 +153,7 @@ main() {
   local fast_model_name="${CLAUDE_GPT_FAST_MODEL_NAME:-$CLAUDE_GPT_DEFAULT_FAST_MODEL_NAME}"
   local fast_model_description="${CLAUDE_GPT_FAST_MODEL_DESCRIPTION:-$CLAUDE_GPT_DEFAULT_FAST_MODEL_DESCRIPTION}"
   local fast_model_capabilities="${CLAUDE_GPT_FAST_MODEL_CAPABILITIES:-$model_capabilities}"
+  local compact_window="${CLAUDE_GPT_COMPACT_WINDOW:-${CLAUDE_CODE_AUTO_COMPACT_WINDOW:-$CLAUDE_GPT_DEFAULT_COMPACT_WINDOW}}"
   local effort="" bare=0
   local script_dir codex_auth proxy_bin claude_bin curl_bin
   local codex_home session_dir config_dir auth_file state_dir proxy_log proxy_state_log stop_file
@@ -179,6 +194,11 @@ main() {
         fast_model="$2"
         shift 2
         ;;
+      --compact-window)
+        [[ $# -ge 2 && -n "$2" ]] || die "--compact-window needs a token count"
+        compact_window="$2"
+        shift 2
+        ;;
       --effort)
         [[ $# -ge 2 && -n "$2" ]] || die "--effort needs a level"
         case "$2" in
@@ -207,6 +227,10 @@ main() {
         ;;
     esac
   done
+
+  [[ "$compact_window" =~ ^[1-9][0-9]{5}$ ]] \
+    && (( compact_window >= 100000 && compact_window <= CLAUDE_GPT_DEFAULT_COMPACT_WINDOW )) \
+    || die "--compact-window must be between 100000 and $CLAUDE_GPT_DEFAULT_COMPACT_WINDOW"
 
   command -v jq >/dev/null 2>&1 || die "jq is required"
   command -v python3 >/dev/null 2>&1 || die "python3 is required for child-process containment"
@@ -402,6 +426,13 @@ main() {
 
   # Map the Claude tiers to their GPT lanes. ANTHROPIC_MODEL is the starting
   # model; /model switches between these lanes without restarting the launcher.
+  local claude_model claude_opus_model claude_sonnet_model claude_small_model claude_fast_model
+  claude_model="$(claude_context_model "$model")"
+  claude_opus_model="$(claude_context_model "$opus_model")"
+  claude_sonnet_model="$(claude_context_model "$sonnet_model")"
+  claude_small_model="$(claude_context_model "$small_model")"
+  claude_fast_model="$(claude_context_model "$fast_model")"
+
   local -a claude_env=(
     -u ANTHROPIC_API_KEY
     -u ANTHROPIC_BEDROCK_BASE_URL
@@ -411,21 +442,21 @@ main() {
     -u CLAUDE_CODE_USE_VERTEX
     ANTHROPIC_BASE_URL="http://127.0.0.1:$port"
     ANTHROPIC_AUTH_TOKEN=unused
-    ANTHROPIC_MODEL="$model"
-    ANTHROPIC_DEFAULT_OPUS_MODEL="$opus_model"
+    ANTHROPIC_MODEL="$claude_model"
+    ANTHROPIC_DEFAULT_OPUS_MODEL="$claude_opus_model"
     ANTHROPIC_DEFAULT_OPUS_MODEL_NAME="$opus_model_name"
     ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION="$opus_model_description"
     ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES="$model_capabilities"
-    ANTHROPIC_DEFAULT_SONNET_MODEL="$sonnet_model"
+    ANTHROPIC_DEFAULT_SONNET_MODEL="$claude_sonnet_model"
     ANTHROPIC_DEFAULT_SONNET_MODEL_NAME="$sonnet_model_name"
     ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION="$sonnet_model_description"
     ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES="$model_capabilities"
-    ANTHROPIC_DEFAULT_HAIKU_MODEL="$small_model"
+    ANTHROPIC_DEFAULT_HAIKU_MODEL="$claude_small_model"
     ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME="$haiku_model_name"
     ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION="$haiku_model_description"
     ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES="$model_capabilities"
-    ANTHROPIC_SMALL_FAST_MODEL="$small_model"
-    CLAUDE_CODE_AUTO_COMPACT_WINDOW="${CLAUDE_CODE_AUTO_COMPACT_WINDOW:-372000}"
+    ANTHROPIC_SMALL_FAST_MODEL="$claude_small_model"
+    CLAUDE_CODE_AUTO_COMPACT_WINDOW="$compact_window"
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
     CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK=1
   )
@@ -434,7 +465,7 @@ main() {
   # the launcher still leaves CCP_CODEX_EFFORT unset so /effort stays dynamic.
   if [[ -n "$fast_model" ]]; then
     claude_env+=(
-      ANTHROPIC_CUSTOM_MODEL_OPTION="$fast_model"
+      ANTHROPIC_CUSTOM_MODEL_OPTION="$claude_fast_model"
       ANTHROPIC_CUSTOM_MODEL_OPTION_NAME="$fast_model_name"
       ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION="$fast_model_description"
       ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES="$fast_model_capabilities"

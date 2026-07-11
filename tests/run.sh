@@ -204,7 +204,7 @@ write_fake_claude_gpt_proxy() {
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ "${1:-}" == "--version" ]]; then
-  printf 'claude-code-proxy 0.1.10\n'
+  printf 'claude-code-proxy 0.1.10-codex-auth.1\n'
   exit 0
 fi
 printf 'proxy-arg=<%s>\n' "$@" >> "$CODEX_TEST_LOG"
@@ -274,6 +274,7 @@ printf 'claude-custom=<%s>\n' "${ANTHROPIC_CUSTOM_MODEL_OPTION-unset}" >> "$CODE
 printf 'claude-custom-name=<%s>\n' "${ANTHROPIC_CUSTOM_MODEL_OPTION_NAME-unset}" >> "$CODEX_TEST_LOG"
 printf 'claude-custom-desc=<%s>\n' "${ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION-unset}" >> "$CODEX_TEST_LOG"
 printf 'claude-custom-caps=<%s>\n' "${ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES-unset}" >> "$CODEX_TEST_LOG"
+printf 'claude-compact-window=<%s>\n' "${CLAUDE_CODE_AUTO_COMPACT_WINDOW-unset}" >> "$CODEX_TEST_LOG"
 printf 'claude-api-key=<%s>\n' "${ANTHROPIC_API_KEY-unset}" >> "$CODEX_TEST_LOG"
 printf 'claude-nonstream=<%s>\n' "$CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK" >> "$CODEX_TEST_LOG"
 printf 'claude-arg=<%s>\n' "$@" >> "$CODEX_TEST_LOG"
@@ -999,7 +1000,7 @@ test_install_fetches_verified_claude_gpt_proxy() {
   mkdir -p "$payload"
   printf '%s\n' \
     '#!/usr/bin/env bash' \
-    'printf "claude-code-proxy 0.1.10\\n"' > "$payload/claude-code-proxy"
+    'printf "claude-code-proxy 0.1.10-codex-auth.1\\n"' > "$payload/claude-code-proxy"
   chmod 0755 "$payload/claude-code-proxy"
   tar -czf "$archive" -C "$payload" claude-code-proxy
   (cd "$tmp" && sha256sum "${archive##*/}" > "${checksum##*/}")
@@ -1011,7 +1012,7 @@ test_install_fetches_verified_claude_gpt_proxy() {
     "$REPO_ROOT/install.sh" >/dev/null
 
   [[ -x "$prefix/bin/claude-code-proxy" ]] || fail "verified Claude GPT proxy was not installed"
-  [[ "$("$prefix/bin/claude-code-proxy" --version)" == "claude-code-proxy 0.1.10" ]] \
+  [[ "$("$prefix/bin/claude-code-proxy" --version)" == "claude-code-proxy 0.1.10-codex-auth.1" ]] \
     || fail "installed Claude GPT proxy reported the wrong version"
 }
 
@@ -2417,6 +2418,19 @@ test_claude_gpt_export_is_access_only_and_identity_pinned() {
   assert_contains 'identity changed' "$tmp/wrong.err"
 }
 
+test_claude_gpt_rejects_unsafe_compact_windows() {
+  local tmp value
+  tmp="$(mktemp -d)"
+  for value in 99999 372001 invalid 18446744073709651616; do
+    if "$REPO_ROOT/bin/claude-gpt" --compact-window "$value" \
+      >"$tmp/$value.out" 2>"$tmp/$value.err"
+    then
+      fail "Claude GPT accepted unsafe compact window: $value"
+    fi
+    assert_contains '--compact-window must be between 100000 and 372000' "$tmp/$value.err"
+  done
+}
+
 test_claude_gpt_launcher_is_ephemeral_and_preserves_harness_args() {
   local tmp home log proxy_pid_file
   tmp="$(mktemp -d)"
@@ -2458,9 +2472,10 @@ test_claude_gpt_launcher_is_ephemeral_and_preserves_harness_args() {
   assert_contains 'proxy-traffic=<unset>' "$log"
   assert_contains 'claude-base=<http://127.0.0.1:18888>' "$log"
   assert_contains 'claude-token=<unused>' "$log"
-  assert_contains 'claude-model=<gpt-5.6-sol>' "$log"
-  assert_contains 'claude-small=<gpt-5.6-luna>' "$log"
-  assert_contains 'claude-haiku=<gpt-5.6-luna>' "$log"
+  assert_contains 'claude-model=<gpt-5.6-sol[1m]>' "$log"
+  assert_contains 'claude-small=<gpt-5.6-luna[1m]>' "$log"
+  assert_contains 'claude-haiku=<gpt-5.6-luna[1m]>' "$log"
+  assert_contains 'claude-compact-window=<372000>' "$log"
   assert_contains 'claude-api-key=<unset>' "$log"
   assert_contains 'claude-nonstream=<1>' "$log"
   assert_contains 'claude-arg=<--bare>' "$log"
@@ -2498,18 +2513,18 @@ test_claude_gpt_maps_model_lanes_and_advertises_effort() {
     CLAUDE_GPT_PORT=18890 \
     "$REPO_ROOT/bin/claude-gpt" --profile work -- -p lanes
 
-  assert_contains 'claude-model=<gpt-5.6-sol>' "$log"
-  assert_contains 'claude-opus=<gpt-5.6-sol>' "$log"
+  assert_contains 'claude-model=<gpt-5.6-sol[1m]>' "$log"
+  assert_contains 'claude-opus=<gpt-5.6-sol[1m]>' "$log"
   assert_contains 'claude-opus-name=<GPT-5.6 Sol Deep>' "$log"
   assert_contains 'claude-opus-caps=<effort,xhigh_effort,max_effort>' "$log"
-  assert_contains 'claude-sonnet=<gpt-5.6-terra>' "$log"
+  assert_contains 'claude-sonnet=<gpt-5.6-terra[1m]>' "$log"
   assert_contains 'claude-sonnet-name=<GPT-5.6 Terra Balanced>' "$log"
   assert_contains 'claude-sonnet-caps=<effort,xhigh_effort,max_effort>' "$log"
-  assert_contains 'claude-haiku=<gpt-5.6-luna>' "$log"
+  assert_contains 'claude-haiku=<gpt-5.6-luna[1m]>' "$log"
   assert_contains 'claude-haiku-name=<GPT-5.6 Luna Light>' "$log"
   assert_contains 'claude-haiku-caps=<effort,xhigh_effort,max_effort>' "$log"
-  assert_contains 'claude-small=<gpt-5.6-luna>' "$log"
-  assert_contains 'claude-custom=<gpt-5.6-sol-fast>' "$log"
+  assert_contains 'claude-small=<gpt-5.6-luna[1m]>' "$log"
+  assert_contains 'claude-custom=<gpt-5.6-sol-fast[1m]>' "$log"
   assert_contains 'claude-custom-name=<GPT-5.6 Sol Ultra Fast>' "$log"
   assert_contains 'claude-custom-desc=<Sol priority lane; requires available fast-mode quota>' "$log"
   assert_contains 'claude-custom-caps=<effort,xhigh_effort,max_effort>' "$log"
@@ -2542,21 +2557,23 @@ test_claude_gpt_lane_flags_and_env_override_models() {
     CLAUDE_GPT_FAST_MODEL_CAPABILITIES=effort \
     "$REPO_ROOT/bin/claude-gpt" \
       --profile work \
-      --model gpt-flag-main \
+      --model 'gpt-flag-main[1m]' \
       --sonnet-model gpt-flag-sonnet \
       --haiku-model gpt-flag-haiku \
       --fast-model gpt-flag-fast \
+      --compact-window 300000 \
       --effort high \
       -- -p overrides
 
-  assert_contains 'claude-model=<gpt-flag-main>' "$log"
-  assert_contains 'claude-opus=<gpt-env-opus>' "$log"
-  assert_contains 'claude-sonnet=<gpt-flag-sonnet>' "$log"
-  assert_contains 'claude-haiku=<gpt-flag-haiku>' "$log"
-  assert_contains 'claude-small=<gpt-flag-haiku>' "$log"
-  assert_contains 'claude-custom=<gpt-flag-fast>' "$log"
+  assert_contains 'claude-model=<gpt-flag-main[1m]>' "$log"
+  assert_contains 'claude-opus=<gpt-env-opus[1m]>' "$log"
+  assert_contains 'claude-sonnet=<gpt-flag-sonnet[1m]>' "$log"
+  assert_contains 'claude-haiku=<gpt-flag-haiku[1m]>' "$log"
+  assert_contains 'claude-small=<gpt-flag-haiku[1m]>' "$log"
+  assert_contains 'claude-custom=<gpt-flag-fast[1m]>' "$log"
   assert_contains 'claude-custom-name=<Env Fast Name>' "$log"
   assert_contains 'claude-custom-caps=<effort>' "$log"
+  assert_contains 'claude-compact-window=<300000>' "$log"
   assert_contains 'claude-arg=<--effort>' "$log"
   assert_contains 'claude-arg=<high>' "$log"
 }
@@ -2613,9 +2630,9 @@ test_claude_gpt_custom_option_can_be_dropped() {
     CLAUDE_GPT_FAST_MODEL= \
     "$REPO_ROOT/bin/claude-gpt" --profile work -- -p no-custom
 
-  assert_contains 'claude-opus=<gpt-5.6-sol>' "$log"
-  assert_contains 'claude-sonnet=<gpt-5.6-terra>' "$log"
-  assert_contains 'claude-haiku=<gpt-5.6-luna>' "$log"
+  assert_contains 'claude-opus=<gpt-5.6-sol[1m]>' "$log"
+  assert_contains 'claude-sonnet=<gpt-5.6-terra[1m]>' "$log"
+  assert_contains 'claude-haiku=<gpt-5.6-luna[1m]>' "$log"
   assert_contains 'claude-custom=<unset>' "$log"
   assert_contains 'claude-custom-name=<unset>' "$log"
   assert_contains 'claude-custom-caps=<unset>' "$log"
@@ -2839,6 +2856,7 @@ main() {
     test_doctor_reports_legacy_sidecars \
     test_doctor_refuses_kill_without_yes \
     test_claude_gpt_export_is_access_only_and_identity_pinned \
+    test_claude_gpt_rejects_unsafe_compact_windows \
     test_claude_gpt_launcher_is_ephemeral_and_preserves_harness_args \
     test_claude_gpt_maps_model_lanes_and_advertises_effort \
     test_claude_gpt_lane_flags_and_env_override_models \

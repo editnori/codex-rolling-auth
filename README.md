@@ -33,7 +33,8 @@ All captures use the real Textual app with an in-memory synthetic backend.
 - [`uv`](https://docs.astral.sh/uv/) for the isolated Textual environment.
 - `crontab` is optional; without it, run `codex-auth maintain` after a direct curl update.
 - Building the patched Codex generation also needs a Rust/Cargo toolchain and normal native build dependencies.
-- Running GPT inside Claude Code also needs Claude Code and [`claude-code-proxy` 0.1.10](https://github.com/raine/claude-code-proxy/releases/tag/v0.1.10).
+- Running GPT inside Claude Code also needs Claude Code. The installer supplies
+  the pinned [`claude-code-proxy` compatibility build](https://github.com/editnori/claude-code-proxy/releases/tag/v0.1.10-codex-auth.1).
 
 ## Install
 
@@ -68,10 +69,16 @@ If you only want the manager and not the `codex` shim:
 ./install.sh
 ```
 
-`claude-code-proxy` is a separate third-party dependency. `install.sh` downloads
-the pinned 0.1.10 release artifact, verifies its published SHA-256 checksum, and
-installs it beside `claude-gpt`. The launcher prefers that sibling binary and
-refuses a different version by default. Set
+`claude-code-proxy` is a separate MIT-licensed third-party dependency.
+`install.sh` downloads the pinned `0.1.10-codex-auth.1` compatibility build,
+verifies its published SHA-256 checksum, and installs it beside `claude-gpt`.
+That build stays source-visible in the
+[`editnori/claude-code-proxy` fork](https://github.com/editnori/claude-code-proxy)
+and contains two focused fixes submitted upstream: true Sol `max` effort
+([PR #28](https://github.com/raine/claude-code-proxy/pull/28)) and terminal
+context-window responses that activate Claude compaction
+([PR #29](https://github.com/raine/claude-code-proxy/pull/29)). The launcher
+prefers the sibling binary and refuses a different version by default. Set
 `CODEX_AUTH_INSTALL_CLAUDE_GPT_PROXY=0` only if you do not want GPT-in-Claude
 support or will install the exact proxy version yourself.
 
@@ -121,11 +128,9 @@ orchestration; it is not another Sol reasoning-effort value. Start it with
 `CCP_CODEX_EFFORT`, so `/effort` stays live and can still change the level
 inside the session.
 
-GPT-5.6 Sol's highest direct reasoning effort is `max`. The pinned upstream
-proxy 0.1.10 predates that Sol behavior and maps Claude's `max` to `xhigh`;
-`ultracode` still works as designed because its underlying effort is xhigh.
-Until the proxy's max-effort correction ships, do not treat its `max` picker
-entry as true Sol `reasoning.effort: "max"`.
+GPT-5.6 Sol's highest direct reasoning effort is `max`. The pinned compatibility
+build preserves that value as true Sol `reasoning.effort: "max"`. `ultracode`
+remains a separate Claude Code workflow mode whose underlying effort is xhigh.
 
 Sol Ultra Fast uses the selected subscription profile's separate Codex
 fast-mode quota. If that quota is unavailable, the backend can return `usage
@@ -152,6 +157,32 @@ Flags: `--model`, `--opus-model`, `--sonnet-model`, `--haiku-model`
 the Opus, Sonnet, and Haiku lanes. Their picker labels can be overridden with
 `CLAUDE_GPT_OPUS_MODEL_NAME`, `CLAUDE_GPT_SONNET_MODEL_NAME`, and
 `CLAUDE_GPT_HAIKU_MODEL_NAME` (plus matching `_DESCRIPTION` variables).
+
+### Context and compaction
+
+The launcher gives Claude Code child-facing model ids such as
+`gpt-5.6-sol[1m]`, then the proxy removes `[1m]` before sending the request to
+Codex. The hint stops Claude from silently applying its 200K unknown-model cap.
+An explicit 372K auto-compact ceiling still matches the Codex subscription
+metadata, so the hint does not claim that the gateway accepts a 1M prompt.
+
+When a resumed Claude session is already over that limit, the compatibility
+proxy returns the upstream context-window failure as terminal HTTP 413
+`request_too_large`. Claude Code recognizes that response, trims the oldest
+message groups, compacts the session, and retries the interrupted turn. It no
+longer retries the same oversized request as a 502 server failure.
+
+Lower the ceiling when you want earlier compaction:
+
+```bash
+claude-gpt --compact-window 300000
+CLAUDE_GPT_COMPACT_WINDOW=300000 claude-gpt --continue
+```
+
+The accepted range is 100000-372000. The launcher also honors an existing
+`CLAUDE_CODE_AUTO_COMPACT_WINDOW` when the launcher-specific variable and flag
+are absent. A proxy already running in another terminal must be exited and
+relaunched before a newly installed compatibility build takes effect.
 
 This path uses the selected profile's ChatGPT/Codex subscription, not
 `OPENAI_API_KEY`. `codex-auth` remains the only refresh owner. The proxy receives

@@ -9,7 +9,7 @@ codex_home="${CODEX_HOME:-$HOME/.codex}"
 standalone_root="$codex_home/packages/standalone"
 tui_source="$repo_dir/tui"
 tui_dir="$libdir/tui"
-claude_gpt_proxy_version="0.1.10"
+claude_gpt_proxy_version="0.1.10-codex-auth.1"
 
 mkdir -p "$bindir" "$libdir"
 if [[ ! -f "$tui_source/pyproject.toml" || ! -f "$tui_source/uv.lock" || ! -d "$tui_source/src/codex_auth_tui" ]]; then
@@ -87,7 +87,7 @@ install_claude_gpt_proxy() {
 
   archive_name="claude-code-proxy-$platform.tar.gz"
   checksum_name="claude-code-proxy-$platform.sha256"
-  release_base="https://github.com/raine/claude-code-proxy/releases/download/v$claude_gpt_proxy_version"
+  release_base="https://github.com/editnori/claude-code-proxy/releases/download/v$claude_gpt_proxy_version"
   download_dir="$install_stage/claude-code-proxy"
   archive="$download_dir/$archive_name"
   checksum="$download_dir/$checksum_name"
