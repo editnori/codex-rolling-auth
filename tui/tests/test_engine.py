@@ -56,6 +56,39 @@ def _account(
     return AccountSnapshot(name, active, kind, switchable, usage)
 
 
+def _with_generation(
+    account: AccountSnapshot, generation: str | None
+) -> AccountSnapshot:
+    return dataclasses.replace(
+        account,
+        usage=dataclasses.replace(
+            account.usage, refresh_generation=generation
+        ),
+    )
+
+
+def _error_account(
+    name: str,
+    message: str,
+    *,
+    active: bool = False,
+    generation: str | None = None,
+) -> AccountSnapshot:
+    return AccountSnapshot(
+        name,
+        active,
+        "chatgpt",
+        True,
+        AccountUsage(
+            age_s=0,
+            fetched_at=NOW,
+            last_error=message,
+            fingerprint_match=True,
+            refresh_generation=generation,
+        ),
+    )
+
+
 def _snapshot(
     current_pct: float | None = 50.0,
     *candidates: AccountSnapshot,
@@ -416,31 +449,157 @@ def test_missing_backend_result_fails_closed(codex_home):
     assert not any(call.startswith("switch:") for call in backend.calls)
 
 
-def test_engine_requires_one_successful_refresh_generation_for_the_pool(codex_home):
+def test_current_generation_profiles_can_switch_with_unrelated_old_generation(
+    codex_home,
+):
     generation = "run-1"
-    current = _account("work", 50, active=True)
-    target = _account("alt", 10)
-    current = AccountSnapshot(
-        current.name,
-        current.is_active,
-        current.kind,
-        current.switchable,
-        dataclasses.replace(current.usage, refresh_generation=generation),
+    current = _with_generation(_account("work", 50, active=True), generation)
+    target = _with_generation(_account("fresh", 10), generation)
+    unrelated = _with_generation(_account("unrelated", 80), "older")
+    backend = FakeBackend(
+        codex_home,
+        AccountsSnapshot("work", (current, unrelated, target), NOW),
     )
-    target = AccountSnapshot(
-        target.name,
-        target.is_active,
-        target.kind,
-        target.switchable,
-        dataclasses.replace(target.usage, refresh_generation="older"),
+
+    def refresh():
+        backend.calls.append("refresh")
+        return OperationResult(True, generation=generation)
+
+    backend.refresh = refresh
+    events = []
+    engine = AutoSwitchEngine(
+        backend,
+        AutoSettings(threshold=0),
+        events.append,
+        dry_run=False,
+        clock=lambda: NOW,
     )
-    backend = FakeBackend(codex_home, AccountsSnapshot("work", (current, target), NOW))
-    backend.refresh = lambda: OperationResult(True, generation=generation)
-    engine = AutoSwitchEngine(backend, AutoSettings(threshold=0), dry_run=False)
 
     decision = engine.tick()
 
+    assert decision.action == "switch"
+    assert decision.target == "fresh"
+    assert backend.calls[-1] == (
+        "switch:fresh:expected=work:generation=run-1"
+    )
+    assert "refresh_partial" in [event.kind for event in events]
+    assert "refresh_incomplete" not in [event.kind for event in events]
+
+
+def test_old_generation_best_candidate_is_excluded(codex_home):
+    generation = "run-1"
+    current = _with_generation(_account("work", 50, active=True), generation)
+    old_best = _with_generation(_account("old-best", 1), "older")
+    fresh_next = _with_generation(_account("fresh-next", 20), generation)
+    backend = FakeBackend(
+        codex_home,
+        AccountsSnapshot("work", (current, old_best, fresh_next), NOW),
+    )
+
+    def refresh():
+        backend.calls.append("refresh")
+        return OperationResult(True, generation=generation)
+
+    backend.refresh = refresh
+    decision = AutoSwitchEngine(
+        backend, AutoSettings(threshold=0), dry_run=False, clock=lambda: NOW
+    ).tick()
+
+    assert decision.action == "switch"
+    assert decision.target == "fresh-next"
+    assert backend.calls[-1] == (
+        "switch:fresh-next:expected=work:generation=run-1"
+    )
+
+
+def test_active_profile_missing_refresh_generation_holds(codex_home):
+    generation = "run-1"
+    # Even a cached definitive login error cannot authorize recovery unless
+    # this refresh run actually produced it.
+    current = _error_account(
+        "work",
+        "Your access token could not be refreshed because you have since "
+        "logged out or signed in to another account. Please sign in again.",
+        active=True,
+        generation="older",
+    )
+    target = _with_generation(_account("fresh", 10), generation)
+    backend = FakeBackend(
+        codex_home, AccountsSnapshot("work", (current, target), NOW)
+    )
+    backend.refresh = lambda: OperationResult(True, generation=generation)
+
+    decision = AutoSwitchEngine(
+        backend, AutoSettings(threshold=0), dry_run=False, clock=lambda: NOW
+    ).tick()
+
+    assert decision.action == "hold"
     assert decision.reason == "refresh_incomplete"
+    assert not any(call.startswith("switch:") for call in backend.calls)
+
+
+def test_fresh_login_required_error_recovers_even_during_cooldown(codex_home):
+    generation = "run-1"
+    current = _error_account(
+        "work",
+        "Your access token could not be refreshed because you have since "
+        "logged out or signed in to another account. Please sign in again.",
+        active=True,
+        generation=generation,
+    )
+    target = _with_generation(_account("fresh", 10), generation)
+    backend = FakeBackend(
+        codex_home, AccountsSnapshot("work", (current, target), NOW)
+    )
+
+    def refresh():
+        backend.calls.append("refresh")
+        return OperationResult(True, generation=generation)
+
+    backend.refresh = refresh
+    assert record_switch_state(
+        codex_home.autoswitch_state_file,
+        NOW - 30,
+        "prior",
+        reason="better_candidate",
+    )
+
+    decision = AutoSwitchEngine(
+        backend,
+        AutoSettings(threshold=90, cooldown_s=300),
+        dry_run=False,
+        clock=lambda: NOW,
+    ).tick()
+
+    assert decision.action == "switch"
+    assert decision.reason == "active_login_required"
+    assert decision.current == "work"
+    assert decision.target == "fresh"
+    assert backend.calls[-1] == (
+        "switch:fresh:expected=work:generation=run-1"
+    )
+
+
+def test_generic_unknown_active_still_holds(codex_home):
+    generation = "run-1"
+    current = _error_account(
+        "work",
+        "access token could not be refreshed after a network error",
+        active=True,
+        generation=generation,
+    )
+    target = _with_generation(_account("fresh", 10), generation)
+    backend = FakeBackend(
+        codex_home, AccountsSnapshot("work", (current, target), NOW)
+    )
+    backend.refresh = lambda: OperationResult(True, generation=generation)
+
+    decision = AutoSwitchEngine(
+        backend, AutoSettings(threshold=0), dry_run=False, clock=lambda: NOW
+    ).tick()
+
+    assert decision.action == "hold"
+    assert decision.reason == "active_usage_unknown"
     assert not any(call.startswith("switch:") for call in backend.calls)
 
 

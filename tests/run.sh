@@ -72,6 +72,7 @@ if [[ "${1:-}" == "app-server" ]]; then
   reset_credits="${CODEX_TEST_RESET_CREDITS:-2}"
   reset_credits_after="${CODEX_TEST_RESET_CREDITS_AFTER:-1}"
   reset_outcome="${CODEX_TEST_RESET_OUTCOME:-reset}"
+  rate_error="${CODEX_TEST_RATE_ERROR:-}"
   rate_sleep="${CODEX_TEST_RATE_SLEEP:-0}"
   now="$(date +%s)"
   primary_reset=$((now + 604800))
@@ -89,6 +90,13 @@ if [[ "${1:-}" == "app-server" ]]; then
     elif [[ "$line" == *'"method":"account/rateLimits/read"'* ]]; then
       [[ "$rate_sleep" == "0" ]] || sleep "$rate_sleep"
       response_id="$(jq -r '.id' <<<"$line")"
+      if [[ -n "$rate_error" ]]; then
+        jq -cn --argjson id "$response_id" --arg message "$rate_error" \
+          '{id:$id,error:{code:-32000,message:$message}}'
+        sleep "${CODEX_TEST_RESPONSE_HOLD:-0.05}"
+        [[ "$response_id" == "2" ]] && exit 0
+        continue
+      fi
       response_credits="$reset_credits"
       [[ "$response_id" == "3" ]] && response_credits="$reset_credits_after"
       printf '{"id":%s,"result":{"rateLimitsByLimitId":{"codex":{"planType":"pro","primary":{"usedPercent":%s,"windowDurationMins":10080,"resetsAt":%s},"secondary":{"usedPercent":%s,"windowDurationMins":300,"resetsAt":%s}}},"rateLimitResetCredits":{"availableCount":%s,"credits":null}}}\n' \
@@ -1330,6 +1338,64 @@ EOF
   assert_not_contains 'app-server' "$log"
 }
 
+test_fast_refresh_persists_definitive_auth_error_generation() {
+  local tmp home log profile fingerprint now error_message
+  tmp="$(mktemp -d)"
+  home="$tmp/home"
+  log="$tmp/calls.log"
+  profile="$home/auth-profiles/work.json"
+  error_message='Your access token could not be refreshed because you have since logged out or signed in to another account. Please sign in again.'
+  write_chatgpt_auth "$profile" rt-work at-work acct-work
+  write_rate_limit_codex "$tmp/real-codex"
+  fingerprint="$(printf '%s\n' 'chatgpt:rt-work' | sha256sum)"
+  fingerprint="${fingerprint%% *}"
+  now="$(date +%s)"
+  cat > "$home/auth-state.json" <<EOF
+{"version":1,"updated_at":$now,"profiles":{"work":{"updated_at":$now,"fingerprint":"$fingerprint","refresh_generation":"old-generation","payload":{"rateLimitsByLimitId":{"codex":{"planType":"pro","primary":{"usedPercent":31,"windowDurationMins":10080,"resetsAt":$((now + 604800))},"secondary":{"usedPercent":22,"windowDurationMins":300,"resetsAt":$((now + 18000))}}}}}}}
+EOF
+
+  CODEX_AUTH_REFRESH_GENERATION=invalidated-generation \
+    CODEX_AUTH_REFRESH_JOBS=1 \
+    CODEX_TEST_RATE_ERROR="$error_message" \
+    CODEX_TEST_LOG="$log" \
+    CODEX_HOME="$home" \
+    CODEX_AUTH_CODEX_BIN="$tmp/real-codex" \
+    "$REPO_ROOT/bin/codex-auth" refresh --quiet --fast work
+
+  [[ "$(jq -r '.profiles.work.refresh_generation // empty' "$home/auth-state.json")" == "invalidated-generation" ]] \
+    || fail "definitive auth error did not stamp the requested refresh generation"
+  [[ "$(jq -r '.profiles.work.payload.error.message // empty' "$home/auth-state.json")" == "$error_message" ]] \
+    || fail "definitive auth error retained stale cached usage"
+  [[ "$(jq -r '.profiles.work.payload.rateLimitsByLimitId // empty' "$home/auth-state.json")" == "" ]] \
+    || fail "definitive auth error left stale rate-limit data in state"
+}
+
+test_default_usage_timeout_accepts_delayed_rate_limit_response() {
+  local tmp home log profile
+  tmp="$(mktemp -d)"
+  home="$tmp/home"
+  log="$tmp/calls.log"
+  profile="$home/auth-profiles/work.json"
+  write_chatgpt_auth "$profile" rt-work at-work acct-work
+  write_rate_limit_codex "$tmp/real-codex"
+
+  env -u CODEX_AUTH_USAGE_TIMEOUT \
+    CODEX_AUTH_REFRESH_GENERATION=delayed-generation \
+    CODEX_AUTH_REFRESH_JOBS=1 \
+    CODEX_TEST_RATE_SLEEP=4.5 \
+    CODEX_TEST_LOG="$log" \
+    CODEX_HOME="$home" \
+    CODEX_AUTH_CODEX_BIN="$tmp/real-codex" \
+    "$REPO_ROOT/bin/codex-auth" refresh --quiet --fast work
+
+  [[ "$(jq -r '.profiles.work.refresh_generation // empty' "$home/auth-state.json")" == "delayed-generation" ]] \
+    || fail "default usage timeout rejected a rate-limit response after 4.5 seconds"
+  [[ "$(jq -r '.profiles.work.payload.rateLimitsByLimitId.codex.primary.usedPercent // empty' "$home/auth-state.json")" == "31" ]] \
+    || fail "delayed rate-limit response was not persisted"
+  [[ "$(jq -r '.profiles.work.payload.error.message // empty' "$home/auth-state.json")" == "" ]] \
+    || fail "delayed rate-limit response was persisted as an error"
+}
+
 test_reset_credit_count_and_confirmed_consume() {
   local tmp home log output profile
   tmp="$(mktemp -d)"
@@ -1936,6 +2002,8 @@ main() {
     test_refresh_select_uses_cached_selector_without_blocking \
     test_failed_usage_rows_offer_login \
     test_account_switch_refresh_errors_require_login \
+    test_fast_refresh_persists_definitive_auth_error_generation \
+    test_default_usage_timeout_accepts_delayed_rate_limit_response \
     test_reset_credit_count_and_confirmed_consume \
     test_reset_credit_retry_reuses_idempotency_key \
     test_reset_credit_non_consuming_outcomes_fail_closed \

@@ -202,6 +202,26 @@ class AccountUsage:
         """Whether a real utilization measurement is present."""
         return self.sentinel is None and bool(self.windows)
 
+    @property
+    def requires_login(self) -> bool:
+        """Whether a completed probe says this saved session is unusable."""
+
+        if not self.last_error:
+            return False
+        error = self.last_error.lower()
+        return any(
+            phrase in error
+            for phrase in (
+                "token has been invalidated",
+                "token_invalidated",
+                "invalidated oauth token",
+                "token_revoked",
+                "access token could not be refreshed because you have since "
+                "logged out or signed in to another account",
+                "please sign in again",
+            )
+        )
+
     def binding_pct(self) -> float | None:
         """Utilization of the worst (binding) window, or None if unknown."""
         if self.sentinel is not None or not self.windows:

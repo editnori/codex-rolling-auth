@@ -8,4 +8,5 @@
 - Added generation-bound in-session auth reload support for patched Codex.
 - Added automatic patch rebuilds after official curl-installed Codex updates.
 - Added token-rotation lineage checks, atomic profile writes, and idempotent reset retries.
+- Fixed auto mode treating an invalid or slow unrelated profile as a failed full-pool refresh.
 - Added deterministic synthetic screenshots, GIF/video demos, and Linux CI.

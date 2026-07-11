@@ -309,7 +309,8 @@ usage_sync_probed_auth() {
 usage_payload_for_profile() {
   local profile_file="$1"
   local fingerprint="$2"
-  local profile_name payload cached_payload age probe_fingerprint_file probe_fingerprint=""
+  local profile_name payload cached_payload age error_text
+  local probe_fingerprint_file probe_fingerprint=""
 
   profile_name="$(basename "$profile_file" .json)"
   cached_payload=""
@@ -377,8 +378,22 @@ usage_payload_for_profile() {
     return 0
   fi
 
-  if [[ -n "$probe_fingerprint" ]] && ! jq -e '.error? != null' >/dev/null 2>&1 <<<"$payload"; then
-    state_update_profile "$profile_name" "$probe_fingerprint" "$payload"
+  if [[ -n "$probe_fingerprint" ]]; then
+    if ! jq -e '.error? != null' >/dev/null 2>&1 <<<"$payload"; then
+      state_update_profile "$profile_name" "$probe_fingerprint" "$payload"
+    else
+      # A revoked/invalidated session is an authoritative probe result, not a
+      # transport failure. Persist it so consumers stop presenting an old
+      # usage bar as though the refresh never happened. Transient failures
+      # above continue to serve stale cache without advancing the generation.
+      error_text="$(jq -r '
+        .error.message // .error.data.message // .error.data.error.message // .error // ""
+        | if type == "string" then . else tostring end
+      ' <<<"$payload" 2>/dev/null || true)"
+      if usage_error_requires_login "$error_text"; then
+        state_update_profile "$profile_name" "$probe_fingerprint" "$payload"
+      fi
+    fi
   fi
   printf '%s\n' "$payload"
 }
@@ -447,8 +462,11 @@ usage_json_from_home() {
   if codex_launcher_needs_node "$codex_cli" && ! command -v node >/dev/null 2>&1; then
     return 0
   fi
-  timeout_sec="${CODEX_AUTH_USAGE_TIMEOUT:-4}"
-  [[ "$timeout_sec" =~ ^[0-9]+$ && "$timeout_sec" -gt 0 ]] || timeout_sec=4
+  # Current Codex may spend several seconds completing the reset-credit part
+  # of account/rateLimits/read. Keep headroom for that response before
+  # treating the probe as unavailable and falling back to cached usage.
+  timeout_sec="${CODEX_AUTH_USAGE_TIMEOUT:-12}"
+  [[ "$timeout_sec" =~ ^[0-9]+$ && "$timeout_sec" -gt 0 ]] || timeout_sec=12
 
   if ! coproc CODEX_RATE { CODEX_AUTH_RUNNER=1 CODEX_HOME="$home_dir" "$codex_cli" app-server --listen stdio:// 2>/dev/null; }; then
     printf '%s\n' '{"error":{"message":"refresh unavailable"}}'

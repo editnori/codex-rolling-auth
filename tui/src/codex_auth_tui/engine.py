@@ -128,6 +128,18 @@ def decide(
     if current.kind != "chatgpt" or not current.switchable:
         return Decision("hold", "active_not_switchable", current.name)
 
+    if not current.usage.known and current.usage.requires_login:
+        candidates = rank_candidates(snapshot, current.name, moment)
+        if not candidates:
+            return Decision("blocked", "no_viable_target", current.name)
+        target = candidates[0]
+        return Decision(
+            "switch",
+            "active_login_required",
+            current.name,
+            target.name,
+            target_pct=_trusted_pct(target, moment),
+        )
     if not current.usage.known:
         return Decision("hold", "active_usage_unknown", current.name)
     if current.usage.stale:
@@ -281,14 +293,22 @@ class AutoSwitchEngine:
         now = self.clock()
         snapshot = self.backend.snapshot(now=now)
         if refresh_result.generation:
-            missing = _missing_generation(snapshot, refresh_result.generation)
-            if missing:
+            snapshot, missing, active_missing = _scope_refresh_generation(
+                snapshot, refresh_result.generation
+            )
+            if active_missing:
                 self._emit(
                     "refresh_incomplete",
-                    "refresh did not produce fresh usage for every profile",
-                    profiles=missing,
+                    "active profile did not return current usage",
+                    profiles=[snapshot.active_name],
                 )
                 return Decision("hold", "refresh_incomplete")
+            if missing:
+                self._emit(
+                    "refresh_partial",
+                    "some profiles did not return current usage; skipping them this tick",
+                    profiles=missing,
+                )
         # Manual and automatic switches share this transaction lock.  It keeps
         # the cooldown receipt ordered with the credential CAS and prevents an
         # older auto receipt from overwriting a newer manual one.
@@ -493,16 +513,28 @@ def _decision_message(decision: Decision, settings: AutoSettings) -> str:
     return f"{prefix}: {detail}"
 
 
-def _missing_generation(
+def _scope_refresh_generation(
     snapshot: AccountsSnapshot, generation: str
-) -> list[str]:
-    return [
+) -> tuple[AccountsSnapshot, list[str], bool]:
+    """Exclude incomplete candidates while keeping the active CAS strict."""
+
+    missing = [
         account.name
         for account in snapshot.accounts
         if account.kind == "chatgpt"
         and account.switchable
         and account.usage.refresh_generation != generation
     ]
+    active_missing = snapshot.active_name in missing
+    if active_missing or not missing:
+        return snapshot, missing, active_missing
+    scoped = replace(
+        snapshot,
+        accounts=tuple(
+            account for account in snapshot.accounts if account.name not in missing
+        ),
+    )
+    return scoped, missing, False
 
 
 def _event_output(output: str, limit: int = 500) -> str:

@@ -123,7 +123,12 @@ def account_card_text(
         text.append("\n    ")
         text.append("usage unavailable", style=MUTED)
         if acc.usage.last_error:
-            text.append(f" · {acc.usage.last_error}", style=MUTED)
+            error = (
+                "sign in again"
+                if acc.usage.requires_login
+                else acc.usage.last_error
+            )
+            text.append(f" · {error}", style=MUTED)
         return text
 
     stale = acc.usage.stale

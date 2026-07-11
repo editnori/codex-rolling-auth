@@ -84,6 +84,8 @@ codex-auth watch --auto --live
 
 `codex-auth tui` is an alias for `codex-auth watch`. `--threshold 0` means proactively prefer any strictly better ready account. In that mode cooldown is the anti-flap guard; hysteresis applies when the threshold is above zero.
 
+Each auto tick trusts only usage returned by that refresh generation. A profile that needs a new sign-in is marked unavailable instead of keeping an old bar, and an unrelated unavailable profile does not block fresh profiles from being evaluated. If the active session itself is invalidated, live auto can recover to a fresh ready profile through the same generation-bound switch guard.
+
 Watcher keys:
 
 - `s` arms or disarms manual selection.
