@@ -313,6 +313,7 @@ main() {
     refresh) source_codex_auth_libs "${CODEX_AUTH_USAGE_LIB_FILES[@]}" profiles.sh; cmd_refresh "$@" ;;
     reset|use-reset) source_codex_auth_libs "${CODEX_AUTH_USAGE_LIB_FILES[@]}" profiles.sh; require_arg_count_between "$#" 2 2 "usage: codex-auth reset <profile> --yes"; cmd_reset "$@" ;;
     doctor) source_codex_auth_libs doctor.sh; cmd_doctor "$@" ;;
+    claude-gpt-export) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}" claude-gpt.sh; require_arg_count_between "$#" 2 3 "usage: codex-auth claude-gpt-export <profile|--active> <dest> [expected-identity]"; cmd_claude_gpt_export "$@" ;;
     export) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; require_arg_count_between "$#" 2 2 "usage: codex-auth export <name> <file>"; cmd_export "$@" ;;
     remove|rm) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; require_arg_count_between "$#" 1 2 "usage: codex-auth remove <name> --yes"; cmd_remove "$@" ;;
     paths) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; cmd_paths ;;

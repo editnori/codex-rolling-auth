@@ -5,6 +5,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 unset CODEX_AUTH_RUNNER CODEX_AUTH_CODEX_BIN
 export CODEX_AUTH_TUI_SKIP_BOOTSTRAP=1
 export CODEX_AUTH_INSTALL_MAINTAIN_CRON=0
+export CODEX_AUTH_INSTALL_CLAUDE_GPT_PROXY=0
 
 fail() {
   printf 'not ok - %s\n' "$*" >&2
@@ -135,6 +136,156 @@ write_chatgpt_auth() {
     '{auth_mode:"chatgpt",tokens:{refresh_token:$refresh,access_token:$access,account_id:$account,id_token:$id_token},last_refresh:$last_refresh}' \
     > "$path"
   chmod 0600 "$path"
+}
+
+write_expiring_chatgpt_auth() {
+  local path="$1"
+  local refresh_token="$2"
+  local account_id="$3"
+  local expires_epoch="$4"
+  local user_id="user-$account_id"
+  local payload access_token
+
+  mkdir -p "$(dirname "$path")"
+  payload="$(jq -cn \
+    --arg account "$account_id" \
+    --arg user "$user_id" \
+    --argjson exp "$expires_epoch" \
+    '{sub:$user,exp:$exp,"https://api.openai.com/auth":{chatgpt_account_id:$account,chatgpt_user_id:$user}}' \
+    | base64 -w0 | tr '+/' '-_' | tr -d '=')"
+  access_token="eyJhbGciOiJub25lIn0.$payload."
+  jq -cn \
+    --arg refresh "$refresh_token" \
+    --arg access "$access_token" \
+    --arg account "$account_id" \
+    '{auth_mode:"chatgpt",tokens:{refresh_token:$refresh,access_token:$access,account_id:$account,id_token:$access}}' \
+    > "$path"
+  chmod 0600 "$path"
+}
+
+write_fake_claude_gpt_auth() {
+  local path="$1"
+  mkdir -p "$(dirname "$path")"
+  cat > "$path" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'auth-arg=<%s>\n' "$@" >> "$CODEX_TEST_LOG"
+case "${1:-}" in
+  claude-gpt-export)
+    destination="$3"
+    expected_identity="${4:-}"
+    [[ -z "$expected_identity" || "$expected_identity" == "identity-pinned" ]] || exit 65
+    mkdir -p "${destination%/*}"
+    chmod 700 "${destination%/*}"
+    jq -cn \
+      --arg access "access-only-test-token" \
+      '{access:$access,refresh:"",expires:4102444800000,accountId:"acct-work"}' \
+      > "$destination"
+    chmod 600 "$destination"
+    expires=$(( $(date +%s) * 1000 + 3600000 ))
+    jq -cn --arg profile work --arg identity identity-pinned --argjson expires "$expires" \
+      '{profile:$profile,account_identity:$identity,profile_revision:"revision",credential_fingerprint:"fingerprint",expires:$expires}'
+    ;;
+  refresh)
+    [[ "${2:-}" == "--quiet" && "${3:-}" == "--fast" && "${4:-}" == "work" ]] || exit 66
+    ;;
+  *)
+    exit 64
+    ;;
+esac
+EOF
+  chmod 0755 "$path"
+}
+
+write_fake_claude_gpt_proxy() {
+  local path="$1"
+  mkdir -p "$(dirname "$path")"
+  cat > "$path" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "--version" ]]; then
+  printf 'claude-code-proxy 0.1.10\n'
+  exit 0
+fi
+printf 'proxy-arg=<%s>\n' "$@" >> "$CODEX_TEST_LOG"
+printf 'proxy-config=<%s>\n' "$CCP_CONFIG_DIR" >> "$CODEX_TEST_LOG"
+printf 'proxy-state=<%s>\n' "$XDG_STATE_HOME" >> "$CODEX_TEST_LOG"
+printf 'proxy-base=<%s>\n' "${CCP_CODEX_BASE_URL-unset}" >> "$CODEX_TEST_LOG"
+printf 'proxy-traffic=<%s>\n' "${CCP_TRAFFIC_LOG-unset}" >> "$CODEX_TEST_LOG"
+printf 'proxy-effort=<%s>\n' "${CCP_CODEX_EFFORT-unset}" >> "$CODEX_TEST_LOG"
+jq -e '.refresh == "" and .expires == 4102444800000 and (.access | length > 0)' \
+  "$CCP_CONFIG_DIR/codex/auth.json" >/dev/null
+requested_port=""
+previous=""
+for argument in "$@"; do
+  if [[ "$previous" == "--port" ]]; then
+    requested_port="$argument"
+    break
+  fi
+  previous="$argument"
+done
+if [[ "$requested_port" == "0" ]]; then
+  mkdir -p "$XDG_STATE_HOME/claude-code-proxy"
+  jq -cn '{fields:{port:18892},level:"info",msg:"server listening",service:"server"}' \
+    > "$XDG_STATE_HOME/claude-code-proxy/proxy.log"
+fi
+printf '%s\n' "$BASHPID" > "$CODEX_TEST_PROXY_PID"
+if [[ "${CODEX_TEST_PROXY_EXIT_EARLY:-0}" == "1" ]]; then
+  sleep 0.2
+  exit 42
+fi
+trap 'exit 0' TERM INT HUP
+while true; do sleep 1; done
+EOF
+  chmod 0755 "$path"
+}
+
+write_fake_claude_gpt_curl() {
+  local path="$1"
+  mkdir -p "$(dirname "$path")"
+  cat > "$path" <<'EOF'
+#!/usr/bin/env bash
+printf 'curl-arg=<%s>\n' "$@" >> "$CODEX_TEST_LOG"
+exit 0
+EOF
+  chmod 0755 "$path"
+}
+
+write_fake_claude_harness() {
+  local path="$1"
+  mkdir -p "$(dirname "$path")"
+  cat > "$path" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'claude-base=<%s>\n' "$ANTHROPIC_BASE_URL" >> "$CODEX_TEST_LOG"
+printf 'claude-token=<%s>\n' "$ANTHROPIC_AUTH_TOKEN" >> "$CODEX_TEST_LOG"
+printf 'claude-model=<%s>\n' "$ANTHROPIC_MODEL" >> "$CODEX_TEST_LOG"
+printf 'claude-opus=<%s>\n' "${ANTHROPIC_DEFAULT_OPUS_MODEL-unset}" >> "$CODEX_TEST_LOG"
+printf 'claude-opus-name=<%s>\n' "${ANTHROPIC_DEFAULT_OPUS_MODEL_NAME-unset}" >> "$CODEX_TEST_LOG"
+printf 'claude-opus-caps=<%s>\n' "${ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES-unset}" >> "$CODEX_TEST_LOG"
+printf 'claude-sonnet=<%s>\n' "${ANTHROPIC_DEFAULT_SONNET_MODEL-unset}" >> "$CODEX_TEST_LOG"
+printf 'claude-sonnet-name=<%s>\n' "${ANTHROPIC_DEFAULT_SONNET_MODEL_NAME-unset}" >> "$CODEX_TEST_LOG"
+printf 'claude-sonnet-caps=<%s>\n' "${ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES-unset}" >> "$CODEX_TEST_LOG"
+printf 'claude-small=<%s>\n' "$ANTHROPIC_SMALL_FAST_MODEL" >> "$CODEX_TEST_LOG"
+printf 'claude-haiku=<%s>\n' "$ANTHROPIC_DEFAULT_HAIKU_MODEL" >> "$CODEX_TEST_LOG"
+printf 'claude-haiku-name=<%s>\n' "${ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME-unset}" >> "$CODEX_TEST_LOG"
+printf 'claude-haiku-caps=<%s>\n' "${ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES-unset}" >> "$CODEX_TEST_LOG"
+printf 'claude-custom=<%s>\n' "${ANTHROPIC_CUSTOM_MODEL_OPTION-unset}" >> "$CODEX_TEST_LOG"
+printf 'claude-custom-name=<%s>\n' "${ANTHROPIC_CUSTOM_MODEL_OPTION_NAME-unset}" >> "$CODEX_TEST_LOG"
+printf 'claude-custom-desc=<%s>\n' "${ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION-unset}" >> "$CODEX_TEST_LOG"
+printf 'claude-custom-caps=<%s>\n' "${ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES-unset}" >> "$CODEX_TEST_LOG"
+printf 'claude-api-key=<%s>\n' "${ANTHROPIC_API_KEY-unset}" >> "$CODEX_TEST_LOG"
+printf 'claude-nonstream=<%s>\n' "$CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK" >> "$CODEX_TEST_LOG"
+printf 'claude-arg=<%s>\n' "$@" >> "$CODEX_TEST_LOG"
+if [[ -n "${CODEX_TEST_CLAUDE_PID:-}" ]]; then
+  printf '%s\n' "$BASHPID" > "$CODEX_TEST_CLAUDE_PID"
+fi
+if [[ "${CODEX_TEST_CLAUDE_SLEEP:-0}" != "0" ]]; then
+  trap 'exit 0' TERM INT HUP
+  sleep "$CODEX_TEST_CLAUDE_SLEEP"
+fi
+EOF
+  chmod 0755 "$path"
 }
 
 write_reauth_codex() {
@@ -826,7 +977,9 @@ test_install_installs_codex_auth_libs() {
   [[ -r "$prefix/lib/codex-auth/core.sh" ]] || fail "core lib was not installed"
   [[ -r "$prefix/lib/codex-auth/usage.sh" ]] || fail "usage lib was not installed"
   [[ -r "$prefix/lib/codex-auth/rolling-auth-v2.patch" ]] || fail "rolling auth source patch was not installed"
+  [[ -r "$prefix/lib/codex-auth/claude-gpt.sh" ]] || fail "Claude GPT auth exporter was not installed"
   [[ -x "$prefix/bin/codex-auth-tui" ]] || fail "TUI launcher was not installed"
+  [[ -x "$prefix/bin/claude-gpt" ]] || fail "Claude GPT launcher was not installed"
   [[ -r "$prefix/lib/codex-auth/tui/pyproject.toml" ]] || fail "TUI project was not installed"
   [[ -r "$prefix/lib/codex-auth/tui/src/codex_auth_tui/__init__.py" ]] || fail "TUI package was not installed"
   [[ ! -d "$prefix/lib/codex-auth/tui/.venv" ]] || fail "TUI bootstrap opt-out created a venv"
@@ -834,6 +987,32 @@ test_install_installs_codex_auth_libs() {
   TERM=dumb CODEX_HOME="$home" "$prefix/bin/codex-auth" paths >"$output"
   assert_contains 'auth' "$output"
   assert_contains 'profiles' "$output"
+}
+
+test_install_fetches_verified_claude_gpt_proxy() {
+  local tmp prefix payload archive checksum
+  tmp="$(mktemp -d)"
+  prefix="$tmp/prefix"
+  payload="$tmp/payload"
+  archive="$tmp/claude-code-proxy-linux-amd64.tar.gz"
+  checksum="$tmp/claude-code-proxy-linux-amd64.sha256"
+  mkdir -p "$payload"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'printf "claude-code-proxy 0.1.10\\n"' > "$payload/claude-code-proxy"
+  chmod 0755 "$payload/claude-code-proxy"
+  tar -czf "$archive" -C "$payload" claude-code-proxy
+  (cd "$tmp" && sha256sum "${archive##*/}" > "${checksum##*/}")
+
+  CODEX_AUTH_INSTALL_CLAUDE_GPT_PROXY=1 \
+    CODEX_AUTH_CLAUDE_GPT_PROXY_ARCHIVE="$archive" \
+    CODEX_AUTH_CLAUDE_GPT_PROXY_CHECKSUM="$checksum" \
+    PREFIX="$prefix" \
+    "$REPO_ROOT/install.sh" >/dev/null
+
+  [[ -x "$prefix/bin/claude-code-proxy" ]] || fail "verified Claude GPT proxy was not installed"
+  [[ "$("$prefix/bin/claude-code-proxy" --version)" == "claude-code-proxy 0.1.10" ]] \
+    || fail "installed Claude GPT proxy reported the wrong version"
 }
 
 test_install_bootstraps_tui_with_private_uv_project() {
@@ -2199,6 +2378,363 @@ test_doctor_refuses_kill_without_yes() {
   assert_contains 'refusing to kill sidecars without --yes' "$output"
 }
 
+test_claude_gpt_export_is_access_only_and_identity_pinned() {
+  local tmp home source destination metadata expected_access expected_identity expires now sentinel
+  tmp="$(mktemp -d)"
+  home="$tmp/home"
+  source="$home/auth-profiles/work.json"
+  destination="$tmp/private/codex/auth.json"
+  metadata="$tmp/metadata.json"
+  expires=$(( $(date +%s) + 3600 ))
+  mkdir -p "$home/auth-profiles"
+  write_expiring_chatgpt_auth "$source" refresh-secret acct-work "$expires"
+  CODEX_HOME="$home" "$REPO_ROOT/bin/codex-auth" use work >/dev/null
+
+  CODEX_HOME="$home" "$REPO_ROOT/bin/codex-auth" \
+    claude-gpt-export --active "$destination" > "$metadata"
+
+  expected_access="$(jq -r '.tokens.access_token' "$source")"
+  expected_identity="$(jq -r '.account_identity' "$metadata")"
+  [[ -n "$expected_identity" ]] || fail "Claude GPT export omitted the stable identity"
+  [[ "$(jq -r '.access' "$destination")" == "$expected_access" ]] || fail "Claude GPT export changed the access token"
+  [[ "$(jq -r '.refresh' "$destination")" == "" ]] || fail "Claude GPT export leaked the refresh token"
+  [[ "$(jq -r '.expires' "$destination")" == "4102444800000" ]] || fail "Claude GPT export did not disable proxy refresh"
+  [[ "$(jq -r '.accountId' "$destination")" == "acct-work" ]] || fail "Claude GPT export omitted the raw account id"
+  [[ "$(jq -r 'has("realExpires")' "$destination")" == "false" ]] || fail "Claude GPT export leaked internal lease metadata"
+  now="$(date +%s)"
+  (( $(jq -r '.expires' "$metadata") / 1000 >= now + 3500 )) || fail "Claude GPT metadata omitted the real JWT expiry"
+  [[ "$(stat -c '%a' "$destination")" == "600" ]] || fail "Claude GPT access lease was not private"
+  assert_not_contains 'refresh-secret' "$metadata"
+  assert_not_contains "$expected_access" "$metadata"
+
+  sentinel="$tmp/sentinel.json"
+  printf '%s\n' '{"kept":true}' > "$sentinel"
+  if CODEX_HOME="$home" "$REPO_ROOT/bin/codex-auth" \
+    claude-gpt-export work "$sentinel" wrong-identity >"$tmp/wrong.out" 2>"$tmp/wrong.err"; then
+    fail "Claude GPT export accepted a changed account identity"
+  fi
+  [[ "$(jq -r '.kept' "$sentinel")" == "true" ]] || fail "failed identity pin changed the destination"
+  assert_contains 'identity changed' "$tmp/wrong.err"
+}
+
+test_claude_gpt_launcher_is_ephemeral_and_preserves_harness_args() {
+  local tmp home log proxy_pid_file
+  tmp="$(mktemp -d)"
+  home="$tmp/home"
+  log="$tmp/calls.log"
+  proxy_pid_file="$tmp/proxy.pid"
+  mkdir -p "$home"
+  printf '%s\n' '{"profile":"untouched"}' > "$home/active-profile.json"
+  write_fake_claude_gpt_auth "$tmp/bin/codex-auth"
+  write_fake_claude_gpt_proxy "$tmp/bin/claude-code-proxy"
+  write_fake_claude_gpt_curl "$tmp/bin/curl"
+  write_fake_claude_harness "$tmp/bin/claude"
+
+  CODEX_TEST_LOG="$log" \
+    CODEX_TEST_PROXY_PID="$proxy_pid_file" \
+    CODEX_HOME="$home" \
+    CODEX_AUTH_BIN="$tmp/bin/codex-auth" \
+    CLAUDE_GPT_PROXY_BIN="$tmp/bin/claude-code-proxy" \
+    CLAUDE_GPT_CURL_BIN="$tmp/bin/curl" \
+    CLAUDE_GPT_CLAUDE_BIN="$tmp/bin/claude" \
+    CLAUDE_GPT_PORT=18888 \
+    CCP_CODEX_BASE_URL=https://wrong.example.invalid \
+    CCP_TRAFFIC_LOG=1 \
+    ANTHROPIC_API_KEY=must-not-leak \
+    "$REPO_ROOT/bin/claude-gpt" \
+      --profile work \
+      --model gpt-5.6-sol \
+      --small-model gpt-5.6-luna \
+      --bare -- -p 'hello with spaces' --allowedTools Read
+
+  [[ "$(jq -r '.profile' "$home/active-profile.json")" == "untouched" ]] || fail "Claude GPT launcher switched the active profile"
+  assert_contains 'auth-arg=<refresh>' "$log"
+  assert_not_contains 'auth-arg=<use>' "$log"
+  assert_contains 'proxy-arg=<serve>' "$log"
+  assert_contains 'proxy-arg=<--port>' "$log"
+  assert_contains 'proxy-arg=<18888>' "$log"
+  assert_contains 'proxy-arg=<--no-monitor>' "$log"
+  assert_contains 'proxy-base=<unset>' "$log"
+  assert_contains 'proxy-traffic=<unset>' "$log"
+  assert_contains 'claude-base=<http://127.0.0.1:18888>' "$log"
+  assert_contains 'claude-token=<unused>' "$log"
+  assert_contains 'claude-model=<gpt-5.6-sol>' "$log"
+  assert_contains 'claude-small=<gpt-5.6-luna>' "$log"
+  assert_contains 'claude-haiku=<gpt-5.6-luna>' "$log"
+  assert_contains 'claude-api-key=<unset>' "$log"
+  assert_contains 'claude-nonstream=<1>' "$log"
+  assert_contains 'claude-arg=<--bare>' "$log"
+  assert_contains 'claude-arg=<-p>' "$log"
+  assert_contains 'claude-arg=<hello with spaces>' "$log"
+  assert_contains 'claude-arg=<--allowedTools>' "$log"
+  assert_contains 'claude-arg=<Read>' "$log"
+  if find "$home/.tmp" -maxdepth 1 -type d -name 'claude-gpt.*' | grep -q .; then
+    fail "Claude GPT launcher left a subscription lease on disk"
+  fi
+  if [[ -s "$proxy_pid_file" ]] && kill -0 "$(cat "$proxy_pid_file")" 2>/dev/null; then
+    fail "Claude GPT launcher left its proxy running"
+  fi
+}
+
+test_claude_gpt_maps_model_lanes_and_advertises_effort() {
+  local tmp home log proxy_pid_file
+  tmp="$(mktemp -d)"
+  home="$tmp/home"
+  log="$tmp/calls.log"
+  proxy_pid_file="$tmp/proxy.pid"
+  mkdir -p "$home"
+  write_fake_claude_gpt_auth "$tmp/bin/codex-auth"
+  write_fake_claude_gpt_proxy "$tmp/bin/claude-code-proxy"
+  write_fake_claude_gpt_curl "$tmp/bin/curl"
+  write_fake_claude_harness "$tmp/bin/claude"
+
+  CODEX_TEST_LOG="$log" \
+    CODEX_TEST_PROXY_PID="$proxy_pid_file" \
+    CODEX_HOME="$home" \
+    CODEX_AUTH_BIN="$tmp/bin/codex-auth" \
+    CLAUDE_GPT_PROXY_BIN="$tmp/bin/claude-code-proxy" \
+    CLAUDE_GPT_CURL_BIN="$tmp/bin/curl" \
+    CLAUDE_GPT_CLAUDE_BIN="$tmp/bin/claude" \
+    CLAUDE_GPT_PORT=18890 \
+    "$REPO_ROOT/bin/claude-gpt" --profile work -- -p lanes
+
+  assert_contains 'claude-model=<gpt-5.6-sol>' "$log"
+  assert_contains 'claude-opus=<gpt-5.6-sol>' "$log"
+  assert_contains 'claude-opus-name=<GPT-5.6 Sol Deep>' "$log"
+  assert_contains 'claude-opus-caps=<effort,xhigh_effort,max_effort>' "$log"
+  assert_contains 'claude-sonnet=<gpt-5.6-terra>' "$log"
+  assert_contains 'claude-sonnet-name=<GPT-5.6 Terra Balanced>' "$log"
+  assert_contains 'claude-sonnet-caps=<effort,xhigh_effort,max_effort>' "$log"
+  assert_contains 'claude-haiku=<gpt-5.6-luna>' "$log"
+  assert_contains 'claude-haiku-name=<GPT-5.6 Luna Light>' "$log"
+  assert_contains 'claude-haiku-caps=<effort,xhigh_effort,max_effort>' "$log"
+  assert_contains 'claude-small=<gpt-5.6-luna>' "$log"
+  assert_contains 'claude-custom=<gpt-5.6-sol-fast>' "$log"
+  assert_contains 'claude-custom-name=<GPT-5.6 Sol Ultra Fast>' "$log"
+  assert_contains 'claude-custom-desc=<Sol priority lane; requires available fast-mode quota>' "$log"
+  assert_contains 'claude-custom-caps=<effort,xhigh_effort,max_effort>' "$log"
+  # /effort stays dynamic: the launcher must never pin a proxy effort level.
+  assert_contains 'proxy-effort=<unset>' "$log"
+}
+
+test_claude_gpt_lane_flags_and_env_override_models() {
+  local tmp home log proxy_pid_file
+  tmp="$(mktemp -d)"
+  home="$tmp/home"
+  log="$tmp/calls.log"
+  proxy_pid_file="$tmp/proxy.pid"
+  mkdir -p "$home"
+  write_fake_claude_gpt_auth "$tmp/bin/codex-auth"
+  write_fake_claude_gpt_proxy "$tmp/bin/claude-code-proxy"
+  write_fake_claude_gpt_curl "$tmp/bin/curl"
+  write_fake_claude_harness "$tmp/bin/claude"
+
+  CODEX_TEST_LOG="$log" \
+    CODEX_TEST_PROXY_PID="$proxy_pid_file" \
+    CODEX_HOME="$home" \
+    CODEX_AUTH_BIN="$tmp/bin/codex-auth" \
+    CLAUDE_GPT_PROXY_BIN="$tmp/bin/claude-code-proxy" \
+    CLAUDE_GPT_CURL_BIN="$tmp/bin/curl" \
+    CLAUDE_GPT_CLAUDE_BIN="$tmp/bin/claude" \
+    CLAUDE_GPT_PORT=18891 \
+    CLAUDE_GPT_OPUS_MODEL=gpt-env-opus \
+    CLAUDE_GPT_FAST_MODEL_NAME='Env Fast Name' \
+    CLAUDE_GPT_FAST_MODEL_CAPABILITIES=effort \
+    "$REPO_ROOT/bin/claude-gpt" \
+      --profile work \
+      --model gpt-flag-main \
+      --sonnet-model gpt-flag-sonnet \
+      --haiku-model gpt-flag-haiku \
+      --fast-model gpt-flag-fast \
+      --effort high \
+      -- -p overrides
+
+  assert_contains 'claude-model=<gpt-flag-main>' "$log"
+  assert_contains 'claude-opus=<gpt-env-opus>' "$log"
+  assert_contains 'claude-sonnet=<gpt-flag-sonnet>' "$log"
+  assert_contains 'claude-haiku=<gpt-flag-haiku>' "$log"
+  assert_contains 'claude-small=<gpt-flag-haiku>' "$log"
+  assert_contains 'claude-custom=<gpt-flag-fast>' "$log"
+  assert_contains 'claude-custom-name=<Env Fast Name>' "$log"
+  assert_contains 'claude-custom-caps=<effort>' "$log"
+  assert_contains 'claude-arg=<--effort>' "$log"
+  assert_contains 'claude-arg=<high>' "$log"
+}
+
+test_claude_gpt_custom_option_can_be_dropped() {
+  local tmp home log proxy_pid_file
+  tmp="$(mktemp -d)"
+  home="$tmp/home"
+  log="$tmp/calls.log"
+  proxy_pid_file="$tmp/proxy.pid"
+  mkdir -p "$home"
+  write_fake_claude_gpt_auth "$tmp/bin/codex-auth"
+  write_fake_claude_gpt_proxy "$tmp/bin/claude-code-proxy"
+  write_fake_claude_gpt_curl "$tmp/bin/curl"
+  write_fake_claude_harness "$tmp/bin/claude"
+
+  CODEX_TEST_LOG="$log" \
+    CODEX_TEST_PROXY_PID="$proxy_pid_file" \
+    CODEX_HOME="$home" \
+    CODEX_AUTH_BIN="$tmp/bin/codex-auth" \
+    CLAUDE_GPT_PROXY_BIN="$tmp/bin/claude-code-proxy" \
+    CLAUDE_GPT_CURL_BIN="$tmp/bin/curl" \
+    CLAUDE_GPT_CLAUDE_BIN="$tmp/bin/claude" \
+    CLAUDE_GPT_PORT=18893 \
+    CLAUDE_GPT_FAST_MODEL= \
+    "$REPO_ROOT/bin/claude-gpt" --profile work -- -p no-custom
+
+  assert_contains 'claude-opus=<gpt-5.6-sol>' "$log"
+  assert_contains 'claude-sonnet=<gpt-5.6-terra>' "$log"
+  assert_contains 'claude-haiku=<gpt-5.6-luna>' "$log"
+  assert_contains 'claude-custom=<unset>' "$log"
+  assert_contains 'claude-custom-name=<unset>' "$log"
+  assert_contains 'claude-custom-caps=<unset>' "$log"
+}
+
+test_claude_gpt_launcher_reads_kernel_selected_port() {
+  local tmp home log proxy_pid_file
+  tmp="$(mktemp -d)"
+  home="$tmp/home"
+  log="$tmp/calls.log"
+  proxy_pid_file="$tmp/proxy.pid"
+  mkdir -p "$home"
+  write_fake_claude_gpt_auth "$tmp/bin/codex-auth"
+  write_fake_claude_gpt_proxy "$tmp/bin/claude-code-proxy"
+  write_fake_claude_gpt_curl "$tmp/bin/curl"
+  write_fake_claude_harness "$tmp/bin/claude"
+
+  CODEX_TEST_LOG="$log" \
+    CODEX_TEST_PROXY_PID="$proxy_pid_file" \
+    CODEX_HOME="$home" \
+    CODEX_AUTH_BIN="$tmp/bin/codex-auth" \
+    CLAUDE_GPT_PROXY_BIN="$tmp/bin/claude-code-proxy" \
+    CLAUDE_GPT_CURL_BIN="$tmp/bin/curl" \
+    CLAUDE_GPT_CLAUDE_BIN="$tmp/bin/claude" \
+    "$REPO_ROOT/bin/claude-gpt" --profile work -- -p dynamic-port
+
+  assert_contains 'proxy-arg=<0>' "$log"
+  assert_contains 'claude-base=<http://127.0.0.1:18892>' "$log"
+}
+
+test_claude_gpt_launcher_renews_while_harness_runs() {
+  local tmp home log proxy_pid_file refresh_count
+  tmp="$(mktemp -d)"
+  home="$tmp/home"
+  log="$tmp/calls.log"
+  proxy_pid_file="$tmp/proxy.pid"
+  mkdir -p "$home"
+  write_fake_claude_gpt_auth "$tmp/bin/codex-auth"
+  write_fake_claude_gpt_proxy "$tmp/bin/claude-code-proxy"
+  write_fake_claude_gpt_curl "$tmp/bin/curl"
+  write_fake_claude_harness "$tmp/bin/claude"
+
+  CODEX_TEST_LOG="$log" \
+    CODEX_TEST_PROXY_PID="$proxy_pid_file" \
+    CODEX_TEST_CLAUDE_SLEEP=2 \
+    CODEX_HOME="$home" \
+    CODEX_AUTH_BIN="$tmp/bin/codex-auth" \
+    CLAUDE_GPT_PROXY_BIN="$tmp/bin/claude-code-proxy" \
+    CLAUDE_GPT_CURL_BIN="$tmp/bin/curl" \
+    CLAUDE_GPT_CLAUDE_BIN="$tmp/bin/claude" \
+    CLAUDE_GPT_PORT=18889 \
+    CLAUDE_GPT_RENEW_MARGIN_SECS=3599 \
+    "$REPO_ROOT/bin/claude-gpt" --profile work -- -p renew
+
+  refresh_count="$(grep -Fc 'auth-arg=<refresh>' "$log")"
+  (( refresh_count >= 2 )) || fail "Claude GPT lease did not renew while the harness was running"
+  assert_contains 'auth-arg=<identity-pinned>' "$log"
+}
+
+test_claude_gpt_launcher_fails_closed_when_proxy_exits() {
+  local tmp home log proxy_pid_file claude_pid_file status
+  tmp="$(mktemp -d)"
+  home="$tmp/home"
+  log="$tmp/calls.log"
+  proxy_pid_file="$tmp/proxy.pid"
+  claude_pid_file="$tmp/claude.pid"
+  mkdir -p "$home"
+  write_fake_claude_gpt_auth "$tmp/bin/codex-auth"
+  write_fake_claude_gpt_proxy "$tmp/bin/claude-code-proxy"
+  write_fake_claude_gpt_curl "$tmp/bin/curl"
+  write_fake_claude_harness "$tmp/bin/claude"
+
+  set +e
+  CODEX_TEST_LOG="$log" \
+    CODEX_TEST_PROXY_PID="$proxy_pid_file" \
+    CODEX_TEST_PROXY_EXIT_EARLY=1 \
+    CODEX_TEST_CLAUDE_PID="$claude_pid_file" \
+    CODEX_TEST_CLAUDE_SLEEP=20 \
+    CODEX_HOME="$home" \
+    CODEX_AUTH_BIN="$tmp/bin/codex-auth" \
+    CLAUDE_GPT_PROXY_BIN="$tmp/bin/claude-code-proxy" \
+    CLAUDE_GPT_CURL_BIN="$tmp/bin/curl" \
+    CLAUDE_GPT_CLAUDE_BIN="$tmp/bin/claude" \
+    CLAUDE_GPT_PORT=18890 \
+    "$REPO_ROOT/bin/claude-gpt" --profile work -- -p proxy-failure \
+      >"$tmp/out" 2>"$tmp/err"
+  status=$?
+  set -e
+
+  [[ "$status" != "0" ]] || fail "Claude GPT launcher ignored a dead proxy"
+  assert_contains 'local proxy stopped before Claude Code exited' "$tmp/err"
+  if [[ -s "$claude_pid_file" ]] && kill -0 "$(cat "$claude_pid_file")" 2>/dev/null; then
+    fail "Claude GPT launcher left Claude running after proxy failure"
+  fi
+}
+
+test_claude_gpt_children_die_with_killed_wrapper() {
+  local tmp home log proxy_pid_file claude_pid_file wrapper_pid attempt proxy_pid claude_pid
+  tmp="$(mktemp -d)"
+  home="$tmp/home"
+  log="$tmp/calls.log"
+  proxy_pid_file="$tmp/proxy.pid"
+  claude_pid_file="$tmp/claude.pid"
+  mkdir -p "$home"
+  write_fake_claude_gpt_auth "$tmp/bin/codex-auth"
+  write_fake_claude_gpt_proxy "$tmp/bin/claude-code-proxy"
+  write_fake_claude_gpt_curl "$tmp/bin/curl"
+  write_fake_claude_harness "$tmp/bin/claude"
+
+  CODEX_TEST_LOG="$log" \
+    CODEX_TEST_PROXY_PID="$proxy_pid_file" \
+    CODEX_TEST_CLAUDE_PID="$claude_pid_file" \
+    CODEX_TEST_CLAUDE_SLEEP=30 \
+    CODEX_HOME="$home" \
+    CODEX_AUTH_BIN="$tmp/bin/codex-auth" \
+    CLAUDE_GPT_PROXY_BIN="$tmp/bin/claude-code-proxy" \
+    CLAUDE_GPT_CURL_BIN="$tmp/bin/curl" \
+    CLAUDE_GPT_CLAUDE_BIN="$tmp/bin/claude" \
+    CLAUDE_GPT_PORT=18891 \
+    "$REPO_ROOT/bin/claude-gpt" --profile work -- -p parent-death \
+      >"$tmp/out" 2>"$tmp/err" &
+  wrapper_pid=$!
+
+  for (( attempt=0; attempt<100; attempt++ )); do
+    [[ -s "$proxy_pid_file" && -s "$claude_pid_file" ]] && break
+    kill -0 "$wrapper_pid" 2>/dev/null || break
+    sleep 0.05
+  done
+  [[ -s "$proxy_pid_file" && -s "$claude_pid_file" ]] || fail "Claude GPT parent-death test did not start children"
+  proxy_pid="$(cat "$proxy_pid_file")"
+  claude_pid="$(cat "$claude_pid_file")"
+  kill -KILL "$wrapper_pid"
+  wait "$wrapper_pid" 2>/dev/null || true
+
+  for (( attempt=0; attempt<60; attempt++ )); do
+    if ! kill -0 "$proxy_pid" 2>/dev/null && ! kill -0 "$claude_pid" 2>/dev/null; then
+      break
+    fi
+    sleep 0.05
+  done
+  if kill -0 "$proxy_pid" 2>/dev/null; then
+    fail "proxy survived a killed Claude GPT wrapper"
+  fi
+  if kill -0 "$claude_pid" 2>/dev/null; then
+    fail "Claude survived a killed Claude GPT wrapper"
+  fi
+}
+
 main() {
   local test_name
   for test_name in \
@@ -2226,6 +2762,7 @@ main() {
     test_install_recovers_real_from_path \
     test_install_recovers_real_from_home_bun \
     test_install_installs_codex_auth_libs \
+    test_install_fetches_verified_claude_gpt_proxy \
     test_install_bootstraps_tui_with_private_uv_project \
     test_failed_tui_bootstrap_keeps_previous_install \
     test_watch_and_tui_forward_exact_args \
@@ -2271,7 +2808,16 @@ main() {
     test_parallel_refresh_preserves_one_complete_generation \
     test_rolling_hook_keeps_inline_auto_cached_by_default \
     test_doctor_reports_legacy_sidecars \
-    test_doctor_refuses_kill_without_yes
+    test_doctor_refuses_kill_without_yes \
+    test_claude_gpt_export_is_access_only_and_identity_pinned \
+    test_claude_gpt_launcher_is_ephemeral_and_preserves_harness_args \
+    test_claude_gpt_maps_model_lanes_and_advertises_effort \
+    test_claude_gpt_lane_flags_and_env_override_models \
+    test_claude_gpt_custom_option_can_be_dropped \
+    test_claude_gpt_launcher_reads_kernel_selected_port \
+    test_claude_gpt_launcher_renews_while_harness_runs \
+    test_claude_gpt_launcher_fails_closed_when_proxy_exits \
+    test_claude_gpt_children_die_with_killed_wrapper
   do
     "$test_name"
     printf 'ok - %s\n' "$test_name"

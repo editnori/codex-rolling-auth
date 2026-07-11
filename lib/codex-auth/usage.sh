@@ -478,7 +478,7 @@ usage_json_from_home() {
   rate_pid="$CODEX_RATE_PID"
   start="$(now_epoch)"
 
-  if ! printf '%s\n' '{"id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-auth","title":"Codex Auth","version":"0.1.1"},"capabilities":{"experimentalApi":true,"requestAttestation":false}}}' 2>/dev/null >&"$rate_in"; then
+  if ! printf '%s\n' '{"id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-auth","title":"Codex Auth","version":"0.2.0"},"capabilities":{"experimentalApi":true,"requestAttestation":false}}}' 2>/dev/null >&"$rate_in"; then
     usage_json_cleanup_coproc "$rate_in" "$rate_out" "$rate_pid"
     printf '%s\n' '{"error":{"message":"refresh unavailable"}}'
     return 0
@@ -557,7 +557,7 @@ reset_credit_json_from_home() {
   rate_pid="$CODEX_RESET_PID"
   start="$(now_epoch)"
 
-  if ! printf '%s\n' '{"id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-auth","title":"Codex Auth","version":"0.1.1"},"capabilities":{"experimentalApi":true,"requestAttestation":false}}}' 2>/dev/null >&"$rate_in"; then
+  if ! printf '%s\n' '{"id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-auth","title":"Codex Auth","version":"0.2.0"},"capabilities":{"experimentalApi":true,"requestAttestation":false}}}' 2>/dev/null >&"$rate_in"; then
     usage_json_cleanup_coproc "$rate_in" "$rate_out" "$rate_pid"
     printf '%s\n' '{"error":{"message":"reset unavailable"}}'
     return 0

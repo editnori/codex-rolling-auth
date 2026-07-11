@@ -33,6 +33,7 @@ All captures use the real Textual app with an in-memory synthetic backend.
 - [`uv`](https://docs.astral.sh/uv/) for the isolated Textual environment.
 - `crontab` is optional; without it, run `codex-auth maintain` after a direct curl update.
 - Building the patched Codex generation also needs a Rust/Cargo toolchain and normal native build dependencies.
+- Running GPT inside Claude Code also needs Claude Code and [`claude-code-proxy` 0.1.10](https://github.com/raine/claude-code-proxy/releases/tag/v0.1.10).
 
 ## Install
 
@@ -54,6 +55,7 @@ That installs:
 
 - `codex-auth`, the profile manager and rolling runner
 - `codex-auth-tui`, the full-screen watcher in a private project `.venv`
+- `claude-gpt`, an opt-in Claude Code launcher backed by a saved ChatGPT/Codex subscription profile
 - `codex`, an optional shim that runs `codex-auth auto --quiet --no-background` and then starts the real Codex binary
 - patched-Codex selection: when a matching generation exists, the shim uses it with in-process rolling auth enabled; when Codex updates, the shim immediately runs stock Codex and starts one detached patch build
 - a marked, idempotent cron entry that runs `codex-auth maintain --quiet` once per minute without replacing existing cron jobs
@@ -66,7 +68,104 @@ If you only want the manager and not the `codex` shim:
 ./install.sh
 ```
 
+`claude-code-proxy` is a separate third-party dependency. `install.sh` downloads
+the pinned 0.1.10 release artifact, verifies its published SHA-256 checksum, and
+installs it beside `claude-gpt`. The launcher prefers that sibling binary and
+refuses a different version by default. Set
+`CODEX_AUTH_INSTALL_CLAUDE_GPT_PROXY=0` only if you do not want GPT-in-Claude
+support or will install the exact proxy version yourself.
+
 ## Usage
+
+### Run GPT in the Claude Code harness
+
+Start normal Claude Code with the currently active saved Codex profile:
+
+```bash
+claude-gpt
+```
+
+Pin a different saved profile without switching the active Codex profile:
+
+```bash
+claude-gpt --profile work
+```
+
+Claude Code arguments are forwarded unchanged. `--bare` is opt-in; without it,
+your normal Claude Code hooks, plugins, skills, and project instructions still
+load:
+
+```bash
+claude-gpt --profile work --model gpt-5.6-sol -- -p "summarize this repository"
+claude-gpt --bare
+```
+
+### Model lanes and effort
+
+[`/model` in Claude Code](https://code.claude.com/docs/en/model-config) switches
+lanes without restarting the launcher. Each Claude tier maps to one GPT model:
+
+- Opus / deep → `gpt-5.6-sol` (also the starting model)
+- Sonnet / balanced → `gpt-5.6-terra`
+- Haiku / light / background → `gpt-5.6-luna`
+
+The picker labels those lanes `GPT-5.6 Sol Deep`, `GPT-5.6 Terra Balanced`,
+and `GPT-5.6 Luna Light`. It also carries one custom option,
+`GPT-5.6 Sol Ultra Fast`
+(`gpt-5.6-sol-fast`), which routes Sol through the proxy's priority service
+tier. Every lane advertises `effort,xhigh_effort,max_effort`, so `/effort`
+offers low through max and the proxy translates the chosen level per turn. The
+launcher never sets `CCP_CODEX_EFFORT`, so `/effort` stays live. Start at a
+specific level with `claude-gpt --effort high`; `/effort` can still change it
+inside the session.
+
+Sol Ultra Fast uses the selected subscription profile's separate Codex
+fast-mode quota. If that quota is unavailable, the backend can return `usage
+limit reached`; switch `/model` back to `GPT-5.6 Sol Deep`. The launcher does
+not retry a partially started tool turn on another lane because that could
+duplicate tool calls.
+
+Override a lane by flag or environment variable:
+
+```bash
+claude-gpt --sonnet-model gpt-5.6-terra --haiku-model gpt-5.6-luna
+CLAUDE_GPT_OPUS_MODEL=gpt-5.6-sol CLAUDE_GPT_FAST_MODEL= claude-gpt
+```
+
+Flags: `--model`, `--opus-model`, `--sonnet-model`, `--haiku-model`
+(`--small-model` is its alias), and `--fast-model`. Environment overrides:
+`CLAUDE_GPT_MODEL`, `CLAUDE_GPT_OPUS_MODEL`, `CLAUDE_GPT_SONNET_MODEL`,
+`CLAUDE_GPT_SMALL_MODEL`, and `CLAUDE_GPT_FAST_MODEL` with its
+`CLAUDE_GPT_FAST_MODEL_NAME`, `CLAUDE_GPT_FAST_MODEL_DESCRIPTION`, and
+`CLAUDE_GPT_FAST_MODEL_CAPABILITIES` companions. Set `CLAUDE_GPT_FAST_MODEL=`
+(empty) to drop the custom option.
+
+`CLAUDE_GPT_MODEL_CAPABILITIES` controls the capability declaration shared by
+the Opus, Sonnet, and Haiku lanes. Their picker labels can be overridden with
+`CLAUDE_GPT_OPUS_MODEL_NAME`, `CLAUDE_GPT_SONNET_MODEL_NAME`, and
+`CLAUDE_GPT_HAIKU_MODEL_NAME` (plus matching `_DESCRIPTION` variables).
+
+This path uses the selected profile's ChatGPT/Codex subscription, not
+`OPENAI_API_KEY`. `codex-auth` remains the only refresh owner. The proxy receives
+an access-only lease in a private temporary directory, never the refresh token;
+renewals must retain the same hashed account identity, and the proxy, lease, and
+temporary files are removed when Claude Code exits. Ordinary `claude`, `codex`,
+and `cswap` configuration is not rewritten by the launcher. Claude Code still
+runs its normal harness and may update its own history or credential metadata as
+it would on an ordinary launch. The launcher never switches the active Codex
+profile; if the selected profile is already active, official Codex may rotate
+that profile's credential in place during renewal so the live login does not go
+stale.
+
+The proxy binds a kernel-selected loopback port for one Claude Code process. Its
+HTTP routes do not have their own local authorization layer, so this assumes
+other processes running as your local user are trusted while the session is
+open.
+
+This is an experimental compatibility route implemented by a third-party
+Anthropic-to-Codex protocol translator. Anthropic does not support using
+non-Claude models in Claude Code, so keep normal `claude` available as the
+[supported path](https://code.claude.com/docs/en/llm-gateway).
 
 Open the persistent account monitor without changing auth:
 
@@ -240,7 +339,8 @@ crontab -l 2>/dev/null \
   | awk '$0 == "# BEGIN codex-auth maintain" {skip=1; next} $0 == "# END codex-auth maintain" {skip=0; next} !skip' \
   | crontab -
 curl -fsSL https://chatgpt.com/codex/install.sh | sh
-rm -f ~/.local/bin/codex-auth ~/.local/bin/codex-auth-tui ~/.local/bin/codex-real
+rm -f ~/.local/bin/codex-auth ~/.local/bin/codex-auth-tui ~/.local/bin/codex-real \
+  ~/.local/bin/claude-gpt ~/.local/bin/claude-code-proxy
 rm -rf ~/.local/lib/codex-auth
 ```
 
