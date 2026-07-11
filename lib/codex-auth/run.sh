@@ -113,6 +113,7 @@ cmd_run() {
   local args=()
   local auto_args=()
   local codex_cli attempt status log_file run_file watch_pid monitor_pid target_pid launcher_arg
+  local stdout_fd stderr_fd stdout_tee_pid stderr_tee_pid
 
   [[ "$max_attempts" =~ ^[1-9][0-9]*$ ]] || max_attempts=5
   [[ -z "$auto_ttl" || "$auto_ttl" =~ ^[0-9]+$ ]] || auto_ttl=""
@@ -210,7 +211,15 @@ cmd_run() {
       status=$?
     elif [[ "$log_enabled" != "0" && -n "$log_file" && ! -t 1 ]]; then
       set +e
-      CODEX_AUTH_RUNNER=1 "$codex_cli" "${run_args[@]}" > >(tee "$log_file") 2> >(tee -a "$log_file" >&2) &
+      # Truncate exactly once, then append from two owned tee processes.  Bash
+      # process substitutions are asynchronous; keep their PIDs and wait for
+      # both writers before scanning the log for a usage-limit retry.
+      : > "$log_file"
+      exec {stdout_fd}> >(tee -a "$log_file")
+      stdout_tee_pid=$!
+      exec {stderr_fd}> >(tee -a "$log_file" >&2)
+      stderr_tee_pid=$!
+      CODEX_AUTH_RUNNER=1 "$codex_cli" "${run_args[@]}" 1>&"$stdout_fd" 2>&"$stderr_fd" &
       target_pid=$!
       if [[ "${CODEX_AUTH_ROLL_LIVE_MONITOR:-1}" != "0" && -n "$log_file" ]]; then
         codex_run_limit_monitor_loop "$log_file" "$target_pid" &
@@ -218,6 +227,22 @@ cmd_run() {
       fi
       wait "$target_pid"
       status=$?
+      # The monitor was forked after these writer FDs opened, so stop it before
+      # waiting for tee EOF; otherwise its inherited descriptors keep both
+      # pipes alive forever.
+      if [[ "$monitor_pid" =~ ^[0-9]+$ ]]; then
+        kill "$monitor_pid" 2>/dev/null || true
+        wait "$monitor_pid" 2>/dev/null || true
+        monitor_pid=""
+      fi
+      exec {stdout_fd}>&-
+      exec {stderr_fd}>&-
+      wait "$stderr_tee_pid" 2>/dev/null || true
+      wait "$stdout_tee_pid" 2>/dev/null || true
+      stdout_fd=""
+      stderr_fd=""
+      stdout_tee_pid=""
+      stderr_tee_pid=""
     else
       set +e
       CODEX_AUTH_RUNNER=1 "$codex_cli" "${run_args[@]}"
@@ -302,5 +327,3 @@ cmd_recover() {
   print_status_note recover "session $*"
   exec "$codex_cli" resume "$@"
 }
-
-

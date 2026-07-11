@@ -51,6 +51,12 @@ require_arg_count_between() {
 codex_bin() {
   if [[ -n "$CODEX_BIN" && -x "$CODEX_BIN" ]]; then
     printf '%s\n' "$CODEX_BIN"
+  elif [[ -x "$CODEX_HOME/packages/standalone/current/bin/codex" ]]; then
+    printf '%s\n' "$CODEX_HOME/packages/standalone/current/bin/codex"
+  elif [[ -x "$CODEX_HOME/packages/standalone/current/codex" ]]; then
+    printf '%s\n' "$CODEX_HOME/packages/standalone/current/codex"
+  elif [[ -n "${CODEX_AUTH_SCRIPT_DIR:-}" && -x "$CODEX_AUTH_SCRIPT_DIR/codex-real" ]]; then
+    printf '%s\n' "$CODEX_AUTH_SCRIPT_DIR/codex-real"
   elif [[ -x "$HOME/.bun/bin/codex-real" ]]; then
     printf '%s\n' "$HOME/.bun/bin/codex-real"
   elif [[ -x "$HOME/.bun/bin/codex" ]]; then
@@ -60,11 +66,23 @@ codex_bin() {
   fi
 }
 
+codex_launcher_is_script() {
+  local codex_cli="$1"
+
+  [[ -r "$codex_cli" ]] || return 1
+  [[ "$(LC_ALL=C head -c 2 "$codex_cli" 2>/dev/null || true)" == '#!' ]]
+}
+
 canonical_codex_bin() {
   local codex_cli="$1"
   local target
 
-  target="$(sed -nE 's/^[[:space:]]*exec[[:space:]]+"?([^" ]+)"?[[:space:]]+"\$@".*$/\1/p' "$codex_cli" 2>/dev/null | head -n 1 || true)"
+  if ! codex_launcher_is_script "$codex_cli"; then
+    printf '%s\n' "$codex_cli"
+    return 0
+  fi
+
+  target="$(sed -nE '1,32s/^[[:space:]]*exec[[:space:]]+"?([^" ]+)"?[[:space:]]+"\$@".*$/\1/p' "$codex_cli" 2>/dev/null | head -n 1 || true)"
   if [[ -n "$target" ]]; then
     if [[ "$target" != /* ]]; then
       target="$(cd "$(dirname "$codex_cli")" && realpath "$target" 2>/dev/null || printf '%s/%s\n' "$(pwd -P)" "$target")"
@@ -82,7 +100,7 @@ codex_launcher_needs_node() {
   local codex_cli="$1"
   local first_line=""
 
-  [[ -r "$codex_cli" ]] || return 1
+  codex_launcher_is_script "$codex_cli" || return 1
   IFS= read -r first_line < "$codex_cli" || return 1
   [[ "$first_line" == "#!"*"env node"* ]]
 }
@@ -93,6 +111,20 @@ require_codex_launcher() {
   if codex_launcher_needs_node "$codex_cli" && ! command -v node >/dev/null 2>&1; then
     die "node needed for codex"
   fi
+}
+
+normalize_codex_status_text() {
+  local text="$1" line normalized=""
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" == "WARNING: proceeding, even though we could not update PATH:"* ]] && continue
+    line="${line//$'\t'/ }"
+    normalized+=" $line"
+  done <<<"$text"
+  while [[ "$normalized" == *"  "* ]]; do normalized="${normalized//  / }"; done
+  while [[ "$normalized" == " "* ]]; do normalized="${normalized# }"; done
+  while [[ "$normalized" == *" " ]]; do normalized="${normalized% }"; done
+  printf '%s\n' "$normalized"
 }
 
 ensure_dirs() {
@@ -129,6 +161,65 @@ require_name() {
 profile_path() {
   local name="$1"
   printf '%s/%s.json\n' "$PROFILE_DIR" "$name"
+}
+
+active_profile_marker_read() {
+  [[ -f "$ACTIVE_PROFILE_FILE" ]] || return 1
+  command -v jq >/dev/null 2>&1 || return 1
+  jq -er '
+    select(.version == 2)
+    | .profile
+    | select(type == "string" and test("^[A-Za-z0-9._-]+$"))
+  ' "$ACTIVE_PROFILE_FILE" 2>/dev/null
+}
+
+active_profile_marker_write() {
+  local name="$1" source="${2:-}" tmp kind identity fingerprint revision
+
+  require_name "$name"
+  ensure_dirs
+  [[ -n "$source" ]] || source="$(profile_path "$name")"
+  require_auth_file "$source"
+  command -v jq >/dev/null 2>&1 || return 1
+  kind="$(auth_file_kind "$source" || true)"
+  identity="$(auth_file_account_identity "$source" || true)"
+  fingerprint="$(credential_fingerprint "$source" || true)"
+  revision="$(auth_file_revision "$source" || true)"
+  [[ -n "$fingerprint" && -n "$revision" ]] || return 1
+  tmp="$(mktemp "$CODEX_HOME/.tmp/auth-active-profile.XXXXXX")"
+  if ! jq -n \
+    --arg profile "$name" \
+    --arg kind "$kind" \
+    --arg account_identity "$identity" \
+    --arg profile_fingerprint "$fingerprint" \
+    --arg profile_revision "$revision" \
+    '{version: 2, profile: $profile, kind: $kind, account_identity: $account_identity, profile_fingerprint: $profile_fingerprint, profile_revision: $profile_revision}' \
+    > "$tmp" \
+    || ! chmod 600 "$tmp" \
+    || ! mv -f "$tmp" "$ACTIVE_PROFILE_FILE"
+  then
+    rm -f "$tmp"
+    return 1
+  fi
+}
+
+active_profile_marker_field() {
+  local field="$1"
+
+  [[ "$field" =~ ^(profile|kind|account_identity|profile_fingerprint|profile_revision)$ ]] || return 1
+  [[ -f "$ACTIVE_PROFILE_FILE" ]] || return 1
+  command -v jq >/dev/null 2>&1 || return 1
+  jq -er --arg field "$field" 'select(.version == 2) | .[$field] | select(type == "string")' "$ACTIVE_PROFILE_FILE" 2>/dev/null
+}
+
+active_profile_marker_clear() {
+  local expected="${1:-}" current=""
+
+  if [[ -n "$expected" ]]; then
+    current="$(active_profile_marker_read || true)"
+    [[ "$current" == "$expected" ]] || return 0
+  fi
+  rm -f "$ACTIVE_PROFILE_FILE"
 }
 
 require_auth_file() {
@@ -184,6 +275,57 @@ credential_fingerprint() {
   else
     hash="$(sha256sum "$path")"
   fi
+  printf '%s\n' "${hash%% *}"
+}
+
+auth_file_revision() {
+  local path="$1" hash
+
+  [[ -f "$path" ]] || return 1
+  command -v jq >/dev/null 2>&1 || return 1
+  jq -e . "$path" >/dev/null 2>&1 || return 1
+  hash="$(jq -cS . "$path" 2>/dev/null | sha256sum)" || return 1
+  printf '%s\n' "${hash%% *}"
+}
+
+auth_file_kind() {
+  local path="$1"
+
+  [[ -f "$path" ]] || return 1
+  command -v jq >/dev/null 2>&1 || return 1
+  jq -r '
+    if (((.OPENAI_API_KEY? // null) | type) == "string" and ((.OPENAI_API_KEY | length) > 0)) then "api_key"
+    elif (.tokens | type == "object") then "chatgpt"
+    else "unknown"
+    end
+  ' "$path" 2>/dev/null
+}
+
+auth_file_account_identity() {
+  local path="$1" identity hash
+
+  [[ -f "$path" ]] || return 1
+  command -v jq >/dev/null 2>&1 || return 1
+  identity="$(jq -r '
+    def jwt_payload:
+      split(".") as $parts
+      | if ($parts | length) < 2 then null
+        else ($parts[1] | gsub("-"; "+") | gsub("_"; "/") | @base64d | fromjson?)
+        end;
+    . as $root
+    | ($root.tokens.id_token // $root.tokens.access_token // "") as $jwt
+    | ($jwt | jwt_payload) as $claims
+    | ($claims["https://api.openai.com/auth"] // {}) as $auth
+    | [
+        ($auth.chatgpt_account_id // $root.tokens.account_id // ""),
+        ($auth.chatgpt_user_id // $auth.user_id // $claims.sub // "")
+      ]
+    | map(if type == "string" then gsub("[[:space:]]"; "") else "" end)
+    | select(length == 2 and all(.[]; length > 0))
+    | join("\u001f")
+  ' "$path" 2>/dev/null || true)"
+  [[ -n "$identity" ]] || return 1
+  hash="$(printf '%s\n' "$identity" | sha256sum)"
   printf '%s\n' "${hash%% *}"
 }
 
@@ -301,4 +443,3 @@ auth_mode_display_label() {
       ;;
   esac
 }
-

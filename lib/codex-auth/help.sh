@@ -1,7 +1,18 @@
 # shellcheck shell=bash
 
 usage() {
-  local width path path_w
+  local width path path_w show_all=0 arg
+  for arg in "$@"; do
+    case "$arg" in
+      --all|-a|all)
+        show_all=1
+        ;;
+      *)
+        die "usage: codex-auth help [--all]"
+        ;;
+    esac
+  done
+
   width="$(terminal_width)"
   USAGE_COLOR_ENABLED=0
   color_enabled && USAGE_COLOR_ENABLED=1
@@ -14,8 +25,42 @@ usage() {
   elif (( width >= 22 )); then
     print_flat_context_line "profiles auth-profiles" "$width"
   fi
+
+  if (( show_all )); then
+    usage_all "$width"
+    return 0
+  fi
+
+  print_help_section "main" "$width"
+  print_help_item "watch" "Passive monitor" "$width"
+  print_help_item "watch --auto" "Dry-run autoswitch" "$width"
+  print_help_item "watch --auto --live" "Live autoswitch" "$width"
+  print_help_item "usage --sync" "Fresh TUI" "$width"
+  print_help_item "usage --refresh --select" "Fast TUI" "$width"
+  print_help_item "usage --cached --select" "Cached TUI" "$width"
+  print_help_item "current" "Active auth" "$width"
+  print_help_item "list" "Saved profiles" "$width"
+  print_help_section "profiles" "$width"
+  print_help_item "add <name>" "Browser login" "$width"
+  print_help_item "use <name>" "Select profile" "$width"
+  print_help_item "add <name> --current" "Save current auth" "$width"
+  print_help_item "reset <name> --yes" "Use earned reset" "$width"
+  print_help_item "remove <name> --yes" "Delete profile" "$width"
+  print_help_section "more" "$width"
+  print_help_item "help --all" "Full command list" "$width"
+  printf '\n'
+}
+
+usage_all() {
+  local width="$1"
+
   print_help_section "daily" "$width"
-  print_help_item "usage --refresh --select" "Refresh and select" "$width"
+  print_help_item "watch" "Passive monitor" "$width"
+  print_help_item "watch --auto" "Dry-run autoswitch" "$width"
+  print_help_item "watch --auto --live" "Live autoswitch" "$width"
+  print_help_item "usage --sync" "Fresh TUI" "$width"
+  print_help_item "usage --refresh --select" "Fast TUI" "$width"
+  print_help_item "usage --cached --select" "Cached TUI" "$width"
   print_help_item "usage --cached" "Cached usage" "$width"
   print_help_item "usage --refresh -v" "Wide usage" "$width"
   print_help_item "add <name>" "Browser login" "$width"
@@ -30,8 +75,10 @@ usage() {
   print_help_item "login <name>" "Login profile" "$width"
   print_help_section "maintenance" "$width"
   print_help_item "refresh" "Refresh usage" "$width"
+  print_help_item "reset <name> --yes" "Use earned reset" "$width"
   print_help_item "auto" "Select best profile" "$width"
   print_help_item "patch-codex" "Build patched Codex" "$width"
+  print_help_item "maintain" "Repair shim + queue patch" "$width"
   print_help_item "recover [session]" "Resume with best" "$width"
   print_help_item "run -- <args>" "Rolling session" "$width"
   print_help_item "remove <name> --yes" "Delete profile" "$width"
@@ -58,7 +105,13 @@ print_help_item() {
   local action action_tone action_w command_w desc_w line gap row pattern token first
   local tokens=()
   local action_rows=(
+    "watch"$'\t'"watch"
+    "watch --auto"$'\t'"dry"
+    "watch --auto --live"$'\t'"live"
+    "usage --sync"$'\t'"sync"
     "usage --refresh --select"$'\t'"select"
+    "usage --refresh --sync --select"$'\t'"sync"
+    "usage --cached --select"$'\t'"cache"
     "usage --cached"$'\t'"cache"
     "usage --refresh -v"$'\t'"wide"
     "add <name>"$'\t'"new"
@@ -72,6 +125,7 @@ print_help_item() {
     "import*"$'\t'"load"
     "login <name>"$'\t'"auth"
     "refresh"$'\t'"sync"
+    "reset <name> --yes"$'\t'"reset"
     "auto"$'\t'"best"
     "patch-codex"$'\t'"patch"
     "recover*"$'\t'"resume"
@@ -79,6 +133,7 @@ print_help_item() {
     "remove*"$'\t'"delete"
     "doctor"$'\t'"audit"
     "export*"$'\t'"write"
+    "help --all"$'\t'"more"
   )
 
   action="${desc%% *}"
@@ -90,17 +145,20 @@ print_help_item() {
     action="${desc%% *}"
   done
   case "$action" in
-    select|best)
+    select|best|live)
       action_tone="accent"
       ;;
-    use|save|view|cache|export|new|copy|load|write)
+    use|save|view|cache|export|new|copy|load|write|watch)
       action_tone="good"
       ;;
-    auth|login|import|wide|refresh|resume|roll|audit)
+    auth|login|import|wide|refresh|resume|roll|audit|dry|reset)
       action_tone="warn"
       ;;
     delete|remove)
       action_tone="bad"
+      ;;
+    more)
+      action_tone="muted"
       ;;
     *)
       action_tone="muted"
@@ -163,5 +221,3 @@ print_help_item() {
   print_toned_fit_rtrim "$desc" "$desc_w" muted
   printf '\n'
 }
-
-

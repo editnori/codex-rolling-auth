@@ -3,37 +3,74 @@ set -euo pipefail
 
 CODEX_AUTH_SHIM=1
 SHIM_PATH="$(realpath "$0" 2>/dev/null || printf '%s\n' "$0")"
+CODEX_HOME_DIR="${CODEX_HOME:-$HOME/.codex}"
+
+is_codex_auth_shim() {
+  local path="$1"
+
+  [[ -r "$path" ]] || return 1
+  [[ "$(LC_ALL=C head -c 2 "$path" 2>/dev/null || true)" == '#!' ]] || return 1
+  LC_ALL=C head -c 8192 "$path" 2>/dev/null | grep -aEq 'CODEX_AUTH_SHIM|codex-auth (run|auto)'
+}
+
+print_real_codex_candidate() {
+  local candidate="$1"
+  local candidate_path
+
+  [[ -x "$candidate" ]] || return 1
+  candidate_path="$(realpath "$candidate" 2>/dev/null || printf '%s' "$candidate")"
+  [[ "$candidate_path" != "$SHIM_PATH" ]] || return 1
+  is_codex_auth_shim "$candidate" && return 1
+  printf '%s\n' "$candidate"
+}
 
 find_real_codex() {
-  local wrapper_dir path_dir candidate candidate_path
-  local candidates=()
+  local wrapper_dir path_dir candidate index
+  local path_candidates=()
+  local fallback_candidates=()
+  local backups=()
   local path_dirs=()
 
-  [[ -n "${CODEX_AUTH_CODEX_BIN:-}" ]] && candidates+=("$CODEX_AUTH_CODEX_BIN")
   wrapper_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-  candidates+=( \
-    "$wrapper_dir/codex-real" \
-    "$HOME/.bun/bin/codex-real" \
-    "$HOME/.bun/bin/codex" \
-    "$HOME/.npm-global/bin/codex" \
-    /usr/local/bin/codex \
-    /usr/bin/codex \
-    /bin/codex \
-    "$wrapper_dir"/codex.backup.*
-  )
+
+  if [[ -n "${CODEX_AUTH_CODEX_BIN:-}" ]]; then
+    print_real_codex_candidate "$CODEX_AUTH_CODEX_BIN" && return 0
+  fi
+
+  for candidate in \
+    "$CODEX_HOME_DIR/packages/standalone/current/bin/codex" \
+    "$CODEX_HOME_DIR/packages/standalone/current/codex" \
+    "$wrapper_dir/codex-real"
+  do
+    print_real_codex_candidate "$candidate" && return 0
+  done
 
   IFS=':' read -r -a path_dirs <<<"${PATH:-}"
   for path_dir in "${path_dirs[@]}"; do
     [[ -n "$path_dir" ]] || path_dir='.'
-    candidates+=("$path_dir/codex")
+    path_candidates+=("$path_dir/codex")
+  done
+  for candidate in "${path_candidates[@]}"; do
+    print_real_codex_candidate "$candidate" && return 0
   done
 
-  for candidate in "${candidates[@]}"; do
-    [[ -x "$candidate" ]] || continue
-    candidate_path="$(realpath "$candidate" 2>/dev/null || printf '%s' "$candidate")"
-    [[ "$candidate_path" == "$SHIM_PATH" ]] && continue
-    printf '%s\n' "$candidate"
-    return 0
+  fallback_candidates=(
+    "$HOME/.bun/bin/codex-real"
+    "$HOME/.bun/bin/codex"
+    "$HOME/.npm-global/bin/codex"
+    /usr/local/bin/codex
+    /usr/bin/codex
+    /bin/codex
+  )
+  for candidate in "${fallback_candidates[@]}"; do
+    print_real_codex_candidate "$candidate" && return 0
+  done
+
+  shopt -s nullglob
+  backups=("$wrapper_dir"/codex.backup.*)
+  shopt -u nullglob
+  for (( index=${#backups[@]} - 1; index >= 0; index-- )); do
+    print_real_codex_candidate "${backups[index]}" && return 0
   done
 
   return 1
@@ -55,23 +92,82 @@ case "${1:-}" in
     ;;
 esac
 
+# The standalone updater owns the visible `codex` entrypoint and can replace
+# this shim while it runs. Keep an inode-local copy, run the real updater, and
+# put the shim back only if the updater actually replaced it. The next launch
+# will therefore see the new stock binary and either select its matching patch
+# or start a non-blocking rebuild.
+if [[ "${1:-}" == "update" ]]; then
+  shim_dir="$(cd "$(dirname "$SHIM_PATH")" && pwd -P)"
+  shim_copy="$(mktemp "$shim_dir/.codex-auth-shim.XXXXXX")"
+  cp "$SHIM_PATH" "$shim_copy"
+  chmod 0755 "$shim_copy"
+  restore_update_shim() {
+    [[ -n "${shim_copy:-}" && -e "$shim_copy" ]] || return 0
+    if ! is_codex_auth_shim "$SHIM_PATH"; then
+      if ! mv -Tf "$shim_copy" "$SHIM_PATH" 2>/dev/null; then
+        rm -f "$SHIM_PATH"
+        mv -f "$shim_copy" "$SHIM_PATH"
+      fi
+    else
+      rm -f "$shim_copy"
+    fi
+    shim_copy=""
+  }
+  trap restore_update_shim EXIT
+  set +e
+  env CODEX_AUTH_RUNNER=1 CODEX_AUTH_CODEX_BIN="$real_codex" "$real_codex" "$@"
+  update_status=$?
+  set -e
+  restore_update_shim
+  trap - EXIT
+  if (( update_status == 0 )) \
+    && [[ "${CODEX_AUTH_PATCH_AUTO:-1}" != "0" ]] \
+    && [[ "${CODEX_AUTH_PATCH_BUILD_AUTO:-1}" != "0" ]] \
+    && command -v codex-auth >/dev/null 2>&1; then
+    post_update_stock=""
+    for candidate in \
+      "$CODEX_HOME_DIR/packages/standalone/current/bin/codex" \
+      "$CODEX_HOME_DIR/packages/standalone/current/codex"
+    do
+      if [[ -x "$candidate" ]]; then
+        post_update_stock="$candidate"
+        break
+      fi
+    done
+    [[ -n "$post_update_stock" ]] || post_update_stock="$real_codex"
+    CODEX_AUTH_STOCK_CODEX_BIN="$post_update_stock" codex-auth patch-codex --print-bin --background --quiet >/dev/null 2>&1 || true
+  fi
+  exit "$update_status"
+fi
+
 if (( wrap_session )) && [[ "${CODEX_AUTH_AUTO:-1}" != "0" && "${CODEX_AUTH_RUNNER:-0}" != "1" ]] && command -v codex-auth >/dev/null 2>&1; then
   CODEX_AUTH_CODEX_BIN="$real_codex" CODEX_AUTH_NO_BACKGROUND=1 codex-auth auto --quiet --no-background || true
 fi
 
 if (( wrap_session )) && [[ "${CODEX_AUTH_YOLO:-1}" != "0" ]]; then
-  case "${1:-}" in
-    --yolo|--dangerously-bypass-approvals-and-sandbox|--dangerously-auto-approve-everything) ;;
-    *) codex_args=(--yolo "$@") ;;
-  esac
+  has_yolo=0
+  for arg in "$@"; do
+    case "$arg" in
+      --yolo|--dangerously-bypass-approvals-and-sandbox|--dangerously-auto-approve-everything)
+        has_yolo=1
+        break
+        ;;
+    esac
+  done
+  (( has_yolo )) || codex_args=(--yolo "$@")
 fi
 
 if (( wrap_session )) && [[ "${CODEX_AUTH_PATCH_AUTO:-1}" != "0" ]] && command -v codex-auth >/dev/null 2>&1; then
-  if patched_codex="$(CODEX_AUTH_STOCK_CODEX_BIN="$real_codex" codex-auth patch-codex --print-bin --quiet 2>/dev/null)" && [[ -n "$patched_codex" ]]; then
+  # This single command either returns the exact matching patched binary or
+  # starts one detached build and returns immediately with no path. Startup
+  # never waits for Cargo, and a stale patched binary is never selected.
+  patch_background_args=()
+  [[ "${CODEX_AUTH_PATCH_BUILD_AUTO:-1}" == "0" ]] || patch_background_args=(--background)
+  patched_codex="$(CODEX_AUTH_STOCK_CODEX_BIN="$real_codex" codex-auth patch-codex --print-bin "${patch_background_args[@]}" --quiet 2>/dev/null || true)"
+  if [[ -n "$patched_codex" ]]; then
     exec_codex="$patched_codex"
     export CODEX_AUTH_ROLLING="${CODEX_AUTH_ROLLING:-1}"
-  elif [[ "${CODEX_AUTH_PATCH_BUILD_AUTO:-0}" != "0" ]]; then
-    CODEX_AUTH_STOCK_CODEX_BIN="$real_codex" codex-auth patch-codex --background --quiet >/dev/null 2>&1 || true
   fi
 fi
 

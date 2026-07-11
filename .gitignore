@@ -1,4 +1,16 @@
 .DS_Store
 *.log
 *.tmp
+*.pyc
+.pytest_cache/
+.venv/
+__pycache__/
 tmp/
+/reports/
+/assets/.frames/
+/node_modules/
+/auth.json
+/auth-profiles/
+/auth-backups/
+/auth-state.json
+/active-profile.json

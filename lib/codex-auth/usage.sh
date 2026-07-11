@@ -65,7 +65,7 @@ state_update_profile() {
   local profile_name="$1"
   local fingerprint="$2"
   local payload="$3"
-  local updated tmp source
+  local updated tmp refresh_generation="${CODEX_AUTH_REFRESH_GENERATION:-}"
 
   updated="$(now_epoch)"
   if ! jq -e . >/dev/null 2>&1 <<<"$payload"; then
@@ -73,21 +73,19 @@ state_update_profile() {
   fi
 
   tmp="$(mktemp "$CODEX_HOME/.tmp/auth-state.XXXXXX")"
-  if [[ -f "$STATE_FILE" ]] && jq -e . "$STATE_FILE" >/dev/null 2>&1; then
-    source="$STATE_FILE"
-  else
-    source="/dev/null"
-  fi
-
   {
     flock -x 9
-    if [[ "$source" == "/dev/null" ]]; then
-      printf '{}\n'
+    # Decide which source to merge only after taking the lock.  Parallel
+    # writers on a brand-new cache must see the profile written just before
+    # them instead of each starting from an empty object and overwriting it.
+    if [[ -f "$STATE_FILE" ]] && jq -e . "$STATE_FILE" >/dev/null 2>&1; then
+      cat "$STATE_FILE"
     else
-      cat "$source"
+      printf '{}\n'
     fi | jq -c \
       --arg name "$profile_name" \
       --arg fp "$fingerprint" \
+      --arg generation "$refresh_generation" \
       --argjson updated "$updated" \
       --argjson payload "$payload" '
         .version = 1
@@ -98,6 +96,9 @@ state_update_profile() {
             fingerprint: $fp,
             payload: $payload
           }
+        | if $generation == "" then . else
+            .profiles[$name].refresh_generation = $generation
+          end
       ' > "$tmp"
     chmod 600 "$tmp"
     mv "$tmp" "$STATE_FILE"
@@ -175,7 +176,7 @@ usage_payload_still_blocked() {
     if .error? != null then
       ((.error.message // .error.data.message // .error.data.error.message // .error // "")
         | tostring
-        | test("token has been invalidated|token_invalidated|invalidated oauth token|token_revoked"; "i"))
+        | test("token has been invalidated|token_invalidated|invalidated oauth token|token_revoked|access token could not be refreshed because you have since logged out or signed in to another account|please sign in again"; "i"))
     else
       (.rateLimitsByLimitId.codex // .rateLimits // null) as $r
       | if $r == null then
@@ -198,10 +199,117 @@ usage_payload_transient_error() {
   ' <<<"$payload" >/dev/null 2>&1
 }
 
+usage_error_requires_login() {
+  local error_text="${1,,}"
+
+  [[ "$error_text" == *"token has been invalidated"* \
+    || "$error_text" == *"token_invalidated"* \
+    || "$error_text" == *"invalidated oauth token"* \
+    || "$error_text" == *"token_revoked"* \
+    || "$error_text" == *"access token could not be refreshed because you have since logged out or signed in to another account"* \
+    || "$error_text" == *"please sign in again"* ]]
+}
+
+usage_auth_file_has_credential() {
+  local path="$1"
+
+  auth_file_is_valid "$path" || return 1
+  jq -e '
+    (((.OPENAI_API_KEY? | type) == "string") and ((.OPENAI_API_KEY | length) > 0))
+    or (((.tokens.refresh_token? | type) == "string") and ((.tokens.refresh_token | length) > 0))
+    or (((.tokens.access_token? | type) == "string") and ((.tokens.access_token | length) > 0))
+  ' "$path" >/dev/null 2>&1
+}
+
+usage_sync_probed_auth() {
+  local profile_file="$1"
+  local temp_auth="$2"
+  local expected_fingerprint="$3"
+  local expected_identity="${4:-}"
+  local expected_revision="${5:-}"
+  local current_fingerprint refreshed_fingerprint live_fingerprint=""
+  local current_revision refreshed_revision live_revision=""
+  local refreshed_identity="" profile_name marker_name marker_fp marker_identity marker_revision
+  local update_live=0
+
+  [[ -n "$expected_fingerprint" && -n "$expected_revision" ]] || return 0
+  usage_auth_file_has_credential "$temp_auth" || return 0
+  refreshed_fingerprint="$(credential_fingerprint "$temp_auth" || true)"
+  refreshed_revision="$(auth_file_revision "$temp_auth" || true)"
+  [[ -n "$refreshed_fingerprint" && -n "$refreshed_revision" ]] || return 0
+  refreshed_identity="$(auth_file_account_identity "$temp_auth" || true)"
+  if [[ -n "$expected_identity" ]]; then
+    [[ "$refreshed_identity" == "$expected_identity" ]] || return 0
+  else
+    [[ "$refreshed_fingerprint" == "$expected_fingerprint" ]] || return 0
+  fi
+
+  # Most usage probes do not rotate auth. Nothing can be copied in that case,
+  # so avoid serializing every parallel refresh on the global mutation lock.
+  # Usage state remains bound to the credential fingerprint below; the full
+  # revision CAS is only needed when the probe actually changed auth content.
+  if [[ "$refreshed_revision" == "$expected_revision" ]]; then
+    printf '%s\n' "$refreshed_fingerprint"
+    return 0
+  fi
+
+  acquire_mutation_lock
+
+  # The app-server probe started from expected_fingerprint. Only copy its
+  # refreshed auth back while the saved profile still points at that exact
+  # credential. A profile switch or a separate token rotation wins the race.
+  usage_auth_file_has_credential "$profile_file" || return 0
+  current_fingerprint="$(credential_fingerprint "$profile_file" || true)"
+  current_revision="$(auth_file_revision "$profile_file" || true)"
+  [[ "$current_fingerprint" == "$expected_fingerprint" \
+    && "$current_revision" == "$expected_revision" ]] || return 0
+
+  # Live auth follows the refresh only when it still points at the same
+  # pre-probe credential. Never pull a concurrently switched session back.
+  if usage_auth_file_has_credential "$AUTH_FILE"; then
+    live_fingerprint="$(credential_fingerprint "$AUTH_FILE" || true)"
+    live_revision="$(auth_file_revision "$AUTH_FILE" || true)"
+    [[ "$live_fingerprint" == "$expected_fingerprint" \
+      && "$live_revision" == "$expected_revision" ]] && update_live=1
+  fi
+
+  [[ "$(credential_fingerprint "$profile_file" || true)" == "$expected_fingerprint" \
+    && "$(auth_file_revision "$profile_file" || true)" == "$expected_revision" ]] || return 0
+  if ! cmp -s "$profile_file" "$temp_auth"; then
+    copy_auth_file_atomic "$temp_auth" "$profile_file" || return 1
+  fi
+  if (( update_live )); then
+    if [[ "$(credential_fingerprint "$AUTH_FILE" || true)" == "$expected_fingerprint" \
+      && "$(auth_file_revision "$AUTH_FILE" || true)" == "$expected_revision" ]] \
+      && ! cmp -s "$AUTH_FILE" "$temp_auth"
+    then
+      copy_auth_file_atomic "$temp_auth" "$AUTH_FILE" || return 1
+    fi
+  fi
+
+  profile_name="$(basename "$profile_file" .json)"
+  marker_name="$(active_profile_marker_read || true)"
+  if [[ "$marker_name" == "$profile_name" ]]; then
+    marker_fp="$(active_profile_marker_field profile_fingerprint || true)"
+    marker_identity="$(active_profile_marker_field account_identity || true)"
+    marker_revision="$(active_profile_marker_field profile_revision || true)"
+    if [[ "$marker_fp" == "$expected_fingerprint" \
+      && "$marker_revision" == "$expected_revision" \
+      && ( -z "$expected_identity" || "$marker_identity" == "$expected_identity" ) ]]; then
+      active_profile_marker_write "$profile_name" "$profile_file" || true
+    fi
+  fi
+
+  # The caller uses this receipt when updating usage state. No receipt means
+  # the profile changed during the probe and the payload must not be attached
+  # to the concurrently selected credential.
+  printf '%s\n' "$refreshed_fingerprint"
+}
+
 usage_payload_for_profile() {
   local profile_file="$1"
   local fingerprint="$2"
-  local profile_name payload cached_payload age
+  local profile_name payload cached_payload age probe_fingerprint_file probe_fingerprint=""
 
   profile_name="$(basename "$profile_file" .json)"
   cached_payload=""
@@ -232,7 +340,12 @@ usage_payload_for_profile() {
     return 0
   fi
 
-  payload="$(usage_json_for_profile "$profile_file")"
+  probe_fingerprint_file="$(mktemp "$CODEX_HOME/.tmp/auth-probe-fingerprint.XXXXXX")"
+  payload="$(usage_json_for_profile "$profile_file" "$probe_fingerprint_file")"
+  if [[ -s "$probe_fingerprint_file" ]]; then
+    IFS= read -r probe_fingerprint < "$probe_fingerprint_file" || true
+  fi
+  rm -f "$probe_fingerprint_file"
 
   if [[ -n "$payload" && "$payload" != "null" ]] && usage_payload_transient_error "$payload"; then
     if [[ -n "$cached_payload" ]]; then
@@ -264,21 +377,33 @@ usage_payload_for_profile() {
     return 0
   fi
 
-  if [[ -n "$fingerprint" ]] && ! jq -e '.error? != null' >/dev/null 2>&1 <<<"$payload"; then
-    state_update_profile "$profile_name" "$fingerprint" "$payload"
+  if [[ -n "$probe_fingerprint" ]] && ! jq -e '.error? != null' >/dev/null 2>&1 <<<"$payload"; then
+    state_update_profile "$profile_name" "$probe_fingerprint" "$payload"
   fi
   printf '%s\n' "$payload"
 }
 
 usage_json_for_profile() (
   local profile_file="$1"
-  local temp_home payload
+  local probe_fingerprint_file="${2:-}"
+  local temp_home payload expected_fingerprint expected_identity="" expected_revision="" synced_fingerprint=""
 
   temp_home="$(mktemp -d "$CODEX_HOME/.tmp/auth-usage.XXXXXX")"
   trap '[[ -z "${temp_home:-}" ]] || rm -rf "$temp_home" 2>/dev/null || true' EXIT HUP INT TERM
   copy_auth_file_atomic "$profile_file" "$temp_home/auth.json"
+  if usage_auth_file_has_credential "$temp_home/auth.json"; then
+    expected_fingerprint="$(credential_fingerprint "$temp_home/auth.json" || true)"
+    expected_identity="$(auth_file_account_identity "$temp_home/auth.json" || true)"
+    expected_revision="$(auth_file_revision "$temp_home/auth.json" || true)"
+  else
+    expected_fingerprint=""
+  fi
 
   payload="$(usage_json_from_home "$temp_home")"
+  synced_fingerprint="$(usage_sync_probed_auth "$profile_file" "$temp_home/auth.json" "$expected_fingerprint" "$expected_identity" "$expected_revision" || true)"
+  if [[ -n "$probe_fingerprint_file" && -n "$synced_fingerprint" ]]; then
+    printf '%s\n' "$synced_fingerprint" > "$probe_fingerprint_file"
+  fi
   rm -rf "$temp_home" 2>/dev/null || true
   temp_home=""
   printf '%s\n' "$payload"
@@ -373,6 +498,226 @@ usage_json_from_home() {
   printf '%s\n' "$payload"
 }
 
+reset_idempotency_key() {
+  if command -v uuidgen >/dev/null 2>&1; then
+    uuidgen | tr '[:upper:]' '[:lower:]'
+  elif [[ -r /proc/sys/kernel/random/uuid ]]; then
+    IFS= read -r REPLY < /proc/sys/kernel/random/uuid
+    printf '%s\n' "$REPLY"
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import uuid; print(uuid.uuid4())'
+  else
+    printf 'codex-auth-%s-%s-%s-%s\n' "$(now_epoch)" "$$" "$RANDOM" "$RANDOM"
+  fi
+}
+
+reset_credit_json_from_home() {
+  local home_dir="$1"
+  local idempotency_key="$2"
+  local codex_cli line line_id now payload rate_payload rate_in rate_out rate_pid
+  local outcome="" requested=0 consume_received=0 done=0
+  local start timeout_sec
+
+  codex_cli="$(codex_bin)" || {
+    printf '%s\n' '{"error":{"message":"reset unavailable"}}'
+    return 0
+  }
+  if codex_launcher_needs_node "$codex_cli" && ! command -v node >/dev/null 2>&1; then
+    printf '%s\n' '{"error":{"message":"reset unavailable"}}'
+    return 0
+  fi
+  timeout_sec="${CODEX_AUTH_RESET_TIMEOUT:-10}"
+  [[ "$timeout_sec" =~ ^[0-9]+$ && "$timeout_sec" -gt 0 ]] || timeout_sec=10
+
+  if ! coproc CODEX_RESET { CODEX_AUTH_RUNNER=1 CODEX_HOME="$home_dir" "$codex_cli" app-server --listen stdio:// 2>/dev/null; }; then
+    printf '%s\n' '{"error":{"message":"reset unavailable"}}'
+    return 0
+  fi
+
+  rate_out="${CODEX_RESET[0]}"
+  rate_in="${CODEX_RESET[1]}"
+  rate_pid="$CODEX_RESET_PID"
+  start="$(now_epoch)"
+
+  if ! printf '%s\n' '{"id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-auth","title":"Codex Auth","version":"0.1.0"},"capabilities":{"experimentalApi":true,"requestAttestation":false}}}' 2>/dev/null >&"$rate_in"; then
+    usage_json_cleanup_coproc "$rate_in" "$rate_out" "$rate_pid"
+    printf '%s\n' '{"error":{"message":"reset unavailable"}}'
+    return 0
+  fi
+
+  while true; do
+    if [[ ! "$rate_out" =~ ^[0-9]+$ || ! -e "/proc/self/fd/$rate_out" ]]; then
+      if (( consume_received )); then
+        payload="$(jq -cn --arg outcome "$outcome" '{outcome:$outcome,refreshError:{message:"usage refresh unavailable"}}')"
+      else
+        payload='{"error":{"message":"reset unavailable"}}'
+      fi
+      break
+    fi
+    if IFS= read -r -t 0.25 line 2>/dev/null <&"$rate_out"; then
+      line_id="$(jq -r '.id // empty' <<<"$line" 2>/dev/null || true)"
+      if [[ "$line_id" == "1" && "$requested" == "0" ]]; then
+        printf '%s\n' '{"method":"initialized"}' 2>/dev/null >&"$rate_in" || true
+        jq -cn --arg key "$idempotency_key" \
+          '{id:2,method:"account/rateLimitResetCredit/consume",params:{idempotencyKey:$key}}' \
+          2>/dev/null >&"$rate_in" || true
+        requested=1
+      elif [[ "$line_id" == "2" ]]; then
+        outcome="$(jq -r '.result.outcome // empty' <<<"$line" 2>/dev/null || true)"
+        if [[ -n "$outcome" ]]; then
+          consume_received=1
+          printf '%s\n' '{"id":3,"method":"account/rateLimits/read"}' 2>/dev/null >&"$rate_in" || true
+        else
+          payload="$(jq -c 'if has("error") then {error:.error} else {error:{message:"invalid reset response"}} end' <<<"$line" 2>/dev/null || true)"
+          [[ -n "$payload" ]] || payload='{"error":{"message":"invalid reset response"}}'
+          done=1
+        fi
+      elif [[ "$line_id" == "3" && "$consume_received" == "1" ]]; then
+        if jq -e 'has("result")' <<<"$line" >/dev/null 2>&1; then
+          rate_payload="$(jq -c '.result' <<<"$line" 2>/dev/null || printf '{}')"
+          payload="$(jq -cn --arg outcome "$outcome" --argjson rateLimits "$rate_payload" \
+            '{outcome:$outcome,rateLimits:$rateLimits}')"
+        else
+          payload="$(jq -cn --arg outcome "$outcome" --argjson error "$(jq -c '.error // {message:"usage refresh failed"}' <<<"$line")" \
+            '{outcome:$outcome,refreshError:$error}')"
+        fi
+        done=1
+      fi
+    else
+      now="$(now_epoch)"
+      if (( now - start >= timeout_sec )); then
+        if (( consume_received )); then
+          payload="$(jq -cn --arg outcome "$outcome" '{outcome:$outcome,refreshError:{message:"usage refresh timeout"}}')"
+        else
+          payload='{"error":{"message":"reset timeout"}}'
+        fi
+        done=1
+      elif ! kill -0 "$rate_pid" 2>/dev/null; then
+        if (( consume_received )); then
+          payload="$(jq -cn --arg outcome "$outcome" '{outcome:$outcome,refreshError:{message:"usage refresh unavailable"}}')"
+        else
+          payload='{"error":{"message":"reset unavailable"}}'
+        fi
+        done=1
+      fi
+    fi
+    (( done )) && break
+  done
+
+  usage_json_cleanup_coproc "$rate_in" "$rate_out" "$rate_pid"
+  printf '%s\n' "${payload:-{\"error\":{\"message\":\"reset unavailable\"}}}"
+}
+
+reset_credit_for_profile() (
+  local profile_file="$1"
+  local idempotency_key="$2"
+  local profile_name temp_home result rate_payload
+  local expected_fingerprint="" expected_identity="" expected_revision=""
+  local synced_fingerprint=""
+
+  profile_name="$(basename "$profile_file" .json)"
+  temp_home="$(mktemp -d "$CODEX_HOME/.tmp/auth-reset.XXXXXX")"
+  trap '[[ -z "${temp_home:-}" ]] || rm -rf "$temp_home" 2>/dev/null || true' EXIT HUP INT TERM
+  copy_auth_file_atomic "$profile_file" "$temp_home/auth.json"
+  expected_fingerprint="$(credential_fingerprint "$temp_home/auth.json" || true)"
+  expected_identity="$(auth_file_account_identity "$temp_home/auth.json" || true)"
+  expected_revision="$(auth_file_revision "$temp_home/auth.json" || true)"
+
+  result="$(reset_credit_json_from_home "$temp_home" "$idempotency_key")"
+  synced_fingerprint="$(usage_sync_probed_auth \
+    "$profile_file" "$temp_home/auth.json" "$expected_fingerprint" \
+    "$expected_identity" "$expected_revision" || true)"
+
+  rate_payload="$(jq -c '.rateLimits // empty' <<<"$result" 2>/dev/null || true)"
+  if [[ -n "$synced_fingerprint" && -n "$rate_payload" ]] \
+    && ! jq -e '.error? != null' <<<"$rate_payload" >/dev/null 2>&1
+  then
+    state_update_profile "$profile_name" "$synced_fingerprint" "$rate_payload"
+  fi
+
+  rm -rf "$temp_home" 2>/dev/null || true
+  temp_home=""
+  printf '%s\n' "$result"
+)
+
+cmd_reset() {
+  local name="$1" yes="${2:-}" source kind pending pending_tmp idempotency_key
+  local result outcome remaining error profile_fingerprint state_fingerprint count
+
+  require_name "$name"
+  [[ "$yes" == "--yes" ]] || die "usage: codex-auth reset <profile> --yes"
+  ensure_dirs
+  source="$(profile_path "$name")"
+  [[ -f "$source" ]] || die "profile not found: $name"
+  require_auth_file "$source"
+  kind="$(auth_file_kind "$source" || true)"
+  [[ "$kind" == "chatgpt" ]] || die "earned resets require a ChatGPT profile: $name"
+  acquire_mutation_lock
+
+  profile_fingerprint="$(credential_fingerprint "$source" || true)"
+  state_fingerprint="$(jq -r --arg name "$name" '.profiles[$name].fingerprint // empty' "$STATE_FILE" 2>/dev/null || true)"
+  [[ -n "$profile_fingerprint" && "$profile_fingerprint" == "$state_fingerprint" ]] \
+    || die "profile changed since its usage check; refresh before using a reset: $name"
+  count="$(jq -r --arg name "$name" '
+    .profiles[$name].payload.rateLimitResetCredits.availableCount
+    | numbers | select(. >= 0) | floor
+  ' "$STATE_FILE" 2>/dev/null || true)"
+  [[ "$count" =~ ^[0-9]+$ ]] \
+    || die "reset availability is unknown; refresh usage first: $name"
+  if (( count == 0 )); then
+    print_error "no earned resets available for profile: $name"
+    return 3
+  fi
+
+  pending="$CODEX_HOME/.tmp/reset-$name.pending"
+  idempotency_key=""
+  if [[ -s "$pending" ]]; then
+    IFS= read -r idempotency_key < "$pending" || true
+  fi
+  if [[ -z "$idempotency_key" ]]; then
+    idempotency_key="$(reset_idempotency_key)"
+    pending_tmp="$(mktemp "$CODEX_HOME/.tmp/reset-$name.pending.XXXXXX")"
+    printf '%s\n' "$idempotency_key" > "$pending_tmp"
+    chmod 600 "$pending_tmp"
+    mv -f "$pending_tmp" "$pending"
+  fi
+
+  result="$(reset_credit_for_profile "$source" "$idempotency_key")"
+  outcome="$(jq -r '.outcome // empty' <<<"$result" 2>/dev/null || true)"
+  case "$outcome" in
+    reset|alreadyRedeemed)
+      rm -f "$pending"
+      remaining="$(jq -r '.rateLimits.rateLimitResetCredits.availableCount // empty' <<<"$result" 2>/dev/null || true)"
+      [[ -n "$remaining" ]] || remaining="refresh pending"
+      if [[ "$outcome" == "alreadyRedeemed" ]]; then
+        print_result_block "reset already applied $name" \
+          "profile"$'\t'"$name"$'\t'"active" \
+          "remaining"$'\t'"$remaining"$'\t'"muted"
+      else
+        print_result_block "used reset $name" \
+          "profile"$'\t'"$name"$'\t'"active" \
+          "remaining"$'\t'"$remaining"$'\t'"muted"
+      fi
+      ;;
+    nothingToReset)
+      rm -f "$pending"
+      print_error "nothing eligible to reset for profile: $name"
+      return 3
+      ;;
+    noCredit)
+      rm -f "$pending"
+      print_error "no earned resets available for profile: $name"
+      return 3
+      ;;
+    *)
+      error="$(jq -r '.error.message // .error.data.message // .error // "reset failed" | if type == "string" then . else tostring end' <<<"$result" 2>/dev/null || true)"
+      [[ -n "$error" ]] || error="reset failed"
+      print_error "$error"
+      return 1
+      ;;
+  esac
+}
+
 usage_limit_remaining_fields() {
   local used="$1"
   local window="$2"
@@ -418,7 +763,7 @@ usage_record_for_profile() {
   IFS=$'\037' read -r kind err cache_age stale plan short_used short_window short_reset weekly_used weekly_window weekly_reset credits reached <<<"$extracted"
 
   if [[ "$kind" == "error" ]]; then
-    if [[ "$err" == *"token has been invalidated"* || "$err" == *"token_invalidated"* || "$err" == *"invalidated oauth token"* || "$err" == *"token_revoked"* ]]; then
+    if usage_error_requires_login "$err"; then
       err="login"
     elif [[ "$err" == "refresh timeout" || "$err" == "refresh unavailable" || "$err" == "no response" ]]; then
       err="offline"
@@ -471,10 +816,16 @@ usage_record_for_profile() {
 
 canonical_usage_active_marks() {
   local seen_active=0
+  local active_name=""
   local valid weekly_used short_used mark profile _plan weekly short status short_label weekly_reset short_reset _cache_age
+
+  active_name="$(resolve_active_profile_for_auth "$AUTH_FILE" || true)"
 
   while IFS=$'\t' read -r valid weekly_used short_used mark profile _plan weekly short status short_label weekly_reset short_reset _cache_age; do
     [[ -n "$profile" ]] || continue
+    if [[ -n "$active_name" ]]; then
+      [[ "$profile" == "$active_name" ]] && mark="*" || mark=" "
+    fi
     if [[ "$mark" == "*" ]]; then
       if (( seen_active )); then
         mark="="
@@ -618,7 +969,15 @@ def record_for(profile, payload, mark, age):
         return ["1", "-1", "-1", mark, profile, "-", "-", "-", "no usage", "5h", "-", "-", age]
     if payload.get("error") is not None:
         err = nested_error(payload)
-        if any(part in err for part in ("token has been invalidated", "token_invalidated", "invalidated oauth token", "token_revoked")):
+        login_error = err.casefold()
+        if any(part in login_error for part in (
+            "token has been invalidated",
+            "token_invalidated",
+            "invalidated oauth token",
+            "token_revoked",
+            "access token could not be refreshed because you have since logged out or signed in to another account",
+            "please sign in again",
+        )):
             err = "login"
         elif err in ("refresh timeout", "refresh unavailable", "no response"):
             err = "offline"
@@ -783,6 +1142,7 @@ collect_usage_records() {
       require_auth_file "$profile_file"
       fingerprint="$(credential_fingerprint "$profile_file" || true)"
       payload="$(usage_payload_for_profile "$profile_file" "$fingerprint")"
+      fingerprint="$(credential_fingerprint "$profile_file" || true)"
       usage_record_for_profile "$profile_name" "$profile_file" "$payload" "$active_fp" "$fingerprint" > "$records_dir/$i.record"
     ) &
     active_jobs=$((active_jobs + 1))
@@ -884,6 +1244,7 @@ collect_usage_records_synced() {
   local profile_files=("$@")
   local records=""
   local profile_file profile_name fingerprint payload fallback_payload
+  local probe_fingerprint_file probe_fingerprint
 
   for profile_file in "${profile_files[@]}"; do
     require_auth_file "$profile_file"
@@ -899,7 +1260,13 @@ collect_usage_records_synced() {
     fi
 
     if [[ -z "$payload" ]]; then
-      payload="$(usage_json_for_profile "$profile_file")"
+      probe_fingerprint=""
+      probe_fingerprint_file="$(mktemp "$CODEX_HOME/.tmp/auth-probe-fingerprint.XXXXXX")"
+      payload="$(usage_json_for_profile "$profile_file" "$probe_fingerprint_file")"
+      if [[ -s "$probe_fingerprint_file" ]]; then
+        IFS= read -r probe_fingerprint < "$probe_fingerprint_file" || true
+      fi
+      rm -f "$probe_fingerprint_file"
       if [[ -n "$payload" && "$payload" != "null" ]] && usage_payload_transient_error "$payload"; then
         payload=""
       fi
@@ -911,11 +1278,12 @@ collect_usage_records_synced() {
         else
           payload='{"error":{"message":"no response"}}'
         fi
-      elif [[ -n "$fingerprint" ]]; then
-        state_update_profile "$profile_name" "$fingerprint" "$payload"
+      elif [[ -n "$probe_fingerprint" ]]; then
+        state_update_profile "$profile_name" "$probe_fingerprint" "$payload"
       fi
     fi
 
+    fingerprint="$(credential_fingerprint "$profile_file" || true)"
     records+="$(usage_record_for_profile "$profile_name" "$profile_file" "$payload" "$active_fp" "$fingerprint")"$'\n'
   done
 
@@ -1119,20 +1487,6 @@ active_auth_fingerprint() {
   credential_fingerprint "$AUTH_FILE" || true
 }
 
-normalize_codex_status_text() {
-  local text="$1" line normalized=""
-
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    [[ "$line" == "WARNING: proceeding, even though we could not update PATH:"* ]] && continue
-    line="${line//$'\t'/ }"
-    normalized+=" $line"
-  done <<<"$text"
-  while [[ "$normalized" == *"  "* ]]; do normalized="${normalized//  / }"; done
-  while [[ "$normalized" == " "* ]]; do normalized="${normalized# }"; done
-  while [[ "$normalized" == *" " ]]; do normalized="${normalized% }"; done
-  printf '%s\n' "$normalized"
-}
-
 acquire_refresh_lock_into() {
   local -n fd_ref="$1"
   local mode="${2:-wait}" refresh_lock_wait
@@ -1205,8 +1559,10 @@ usage_best_selection_into() {
 cmd_usage() {
   ensure_dirs
   command -v jq >/dev/null 2>&1 || die "jq is required for usage output"
+  sync_active_profile_from_live
 
   local auto_switch=0
+  local usage_sync_refresh=0
   local args=()
   local refresh_lock_held=0
   local refresh_lock_fd=""
@@ -1234,8 +1590,15 @@ cmd_usage() {
         shift
         ;;
       --sync)
-        USAGE_FAST_REFRESH=0
+        usage_sync_refresh=1
+        USAGE_REFRESH=1
+        USAGE_FAST_REFRESH=1
         shift
+        ;;
+      --help|-h)
+        source_codex_auth_libs help.sh
+        usage
+        return 0
         ;;
       --quiet|-q)
         USAGE_QUIET=1
@@ -1270,14 +1633,27 @@ cmd_usage() {
   done
   set -- "${args[@]}"
 
+  if [[ "$usage_sync_refresh" == "1" && "$auto_switch" != "1" && "$USAGE_QUIET" != "1" ]]; then
+    USAGE_SELECT=1
+  fi
+
   local profile_files=()
   profile_files_for_args_into profile_files 0 "$@" || return 0
   if (( ${#profile_files[@]} == 0 )); then
     [[ "$USAGE_QUIET" == "1" ]] || print_empty_profiles
     return 0
   fi
+  if [[ "$usage_sync_refresh" == "1" && "$USAGE_REFRESH" == "1" ]]; then
+    local sync_jobs="${CODEX_AUTH_SYNC_REFRESH_JOBS:-${#profile_files[@]}}"
+    [[ "$sync_jobs" =~ ^[0-9]+$ && "$sync_jobs" -gt 0 ]] || sync_jobs="${#profile_files[@]}"
+    (( sync_jobs > 12 )) && sync_jobs=12
+    export CODEX_AUTH_REFRESH_JOBS="${CODEX_AUTH_REFRESH_JOBS:-$sync_jobs}"
+    export CODEX_AUTH_REFRESH_JOBS_MAX="${CODEX_AUTH_REFRESH_JOBS_MAX:-${CODEX_AUTH_SYNC_REFRESH_JOBS_MAX:-$sync_jobs}}"
+  fi
   if [[ "$USAGE_SELECT" == "1" && "$USAGE_REFRESH" == "1" && "$USAGE_FAST_REFRESH" == "1" ]] \
     && selector_prompt_available \
+    && [[ "${CODEX_AUTH_SELECT_BACKGROUND_REFRESH:-1}" == "1" ]] \
+    && [[ "$usage_sync_refresh" != "1" ]] \
     && [[ "${CODEX_AUTH_SELECT_SYNC_REFRESH:-0}" != "1" ]]; then
     start_usage_background_refresh "${profile_files[@]}"
     USAGE_REFRESH=0
@@ -1384,6 +1760,7 @@ cmd_usage() {
 cmd_refresh() {
   ensure_dirs
   command -v jq >/dev/null 2>&1 || die "jq is required for usage refresh"
+  sync_active_profile_from_live
 
   USAGE_QUIET=0
   USAGE_CACHED=0
@@ -1454,6 +1831,7 @@ cmd_refresh() {
 cmd_auto() {
   ensure_dirs
   command -v jq >/dev/null 2>&1 || return 0
+  sync_active_profile_from_live
 
   USAGE_QUIET=0
   USAGE_CACHED=1

@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+launcher_path="${BASH_SOURCE[0]}"
+case "$launcher_path" in
+  /*) ;;
+  */*) launcher_path="$PWD/${launcher_path#./}" ;;
+  *) launcher_path="$(command -v "$launcher_path" 2>/dev/null || printf '%s\n' "$launcher_path")" ;;
+esac
+launcher_dir="${launcher_path%/*}"
+[[ "$launcher_dir" == "$launcher_path" ]] && launcher_dir="."
+
+if [[ -n "${CODEX_AUTH_TUI_BIN:-}" ]]; then
+  exec "$CODEX_AUTH_TUI_BIN" "$@"
+fi
+
+project_dir=""
+for candidate in \
+  "$launcher_dir/../tui" \
+  "$launcher_dir/../lib/codex-auth/tui"
+do
+  if [[ -f "$candidate/pyproject.toml" && -d "$candidate/src/codex_auth_tui" ]]; then
+    project_dir="$(cd "$candidate" && pwd -P)"
+    break
+  fi
+done
+
+if [[ -z "$project_dir" ]]; then
+  printf 'codex-auth TUI project not found next to %s\n' "$launcher_path" >&2
+  printf 'Reinstall from a complete checkout with: ./install.sh\n' >&2
+  exit 1
+fi
+
+if [[ -x "$project_dir/.venv/bin/python" ]]; then
+  if PYTHONDONTWRITEBYTECODE=1 "$project_dir/.venv/bin/python" -c 'import codex_auth_tui, textual' >/dev/null 2>&1; then
+    if [[ -x "$project_dir/.venv/bin/codex-auth-tui" ]]; then
+      exec "$project_dir/.venv/bin/codex-auth-tui" "$@"
+    fi
+    exec "$project_dir/.venv/bin/python" -m codex_auth_tui.cli "$@"
+  fi
+fi
+
+if command -v uv >/dev/null 2>&1; then
+  printf 'codex-auth TUI environment is missing; preparing %s with uv\n' "$project_dir" >&2
+  exec uv --native-tls run --project "$project_dir" --no-dev --locked codex-auth-tui "$@"
+fi
+
+printf 'codex-auth TUI dependencies are not installed and uv was not found.\n' >&2
+printf 'Install uv, then rerun ./install.sh (or run uv sync --project %s --no-dev).\n' "$project_dir" >&2
+exit 1
