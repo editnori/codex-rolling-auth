@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from types import SimpleNamespace
 import time
 
 from codex_auth_tui.backend import (
@@ -93,6 +94,38 @@ def test_snapshot_rejects_state_for_a_different_credential(codex_home):
     assert account.usage.fingerprint_match is False
     assert account.usage.stale is True
     assert account.usage.decision_value() is None
+
+
+def test_reauth_does_not_reuse_old_credentials_login_error(codex_home):
+    work = write_profile(codex_home, "work", chatgpt_profile("work"))
+    old_fingerprint = credential_fingerprint(work)
+    seed_state(
+        codex_home,
+        {
+            "work": {
+                "fingerprint": old_fingerprint,
+                "payload": {
+                    "error": (
+                        "Your access token could not be refreshed because you have "
+                        "since logged out. Please sign in again."
+                    )
+                },
+                "generation": "old-login-error",
+            }
+        },
+    )
+    write_profile(
+        codex_home,
+        "work",
+        chatgpt_profile("work", refresh_token="rt-work-after-reauth"),
+    )
+
+    usage = ShellBackend(codex_home).snapshot().accounts[0].usage
+
+    assert usage.fingerprint_match is False
+    assert usage.last_error is None
+    assert usage.requires_login is False
+    assert usage.refresh_generation == "old-login-error"
 
 
 def test_reset_credit_count_distinguishes_unknown_zero_and_positive():
@@ -211,6 +244,7 @@ def test_refresh_switch_and_patch_check_use_short_lived_fake_cli(
 
     refreshed = backend.refresh()
     saved = backend.save_current("captured")
+    reauthed = backend.reauth("alt")
     reset = backend.consume_reset("alt")
     switched = backend.switch(
         "alt", expected_current="work", expected_generation="generation-1"
@@ -219,6 +253,7 @@ def test_refresh_switch_and_patch_check_use_short_lived_fake_cli(
     assert refreshed.ok is True
     assert refreshed.generation
     assert saved.ok is True
+    assert reauthed.ok is True
     assert reset.ok is True
     assert (codex_home.profiles_dir / "captured.json").read_bytes() == work.read_bytes()
     assert switched.ok is True
@@ -227,9 +262,53 @@ def test_refresh_switch_and_patch_check_use_short_lived_fake_cli(
     log = fake_codex_auth.read_text(encoding="utf-8")
     assert "refresh --quiet --fast" in log
     assert "add captured --current" in log
+    assert "reauth alt" in log
     assert "reset alt --yes" in log
     assert "use-if-current work alt generation-1" in log
     assert "patch-codex --print-bin --quiet" in log
+
+
+def test_reauth_inherits_terminal_and_holds_backend_lock(
+    codex_home, monkeypatch
+):
+    backend = ShellBackend(codex_home, cli="/fake/codex-auth")
+    seen = {}
+
+    def fake_run(args, **kwargs):
+        seen["args"] = args
+        seen["kwargs"] = kwargs
+        acquired = backend._subprocess_lock.acquire(blocking=False)
+        seen["lock_was_held"] = not acquired
+        if acquired:
+            backend._subprocess_lock.release()
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr("codex_auth_tui.backend.subprocess.run", fake_run)
+
+    result = backend.reauth("work")
+
+    assert result.ok is True
+    assert seen["args"] == ["/fake/codex-auth", "reauth", "work"]
+    assert seen["kwargs"]["stdin"] is None
+    assert seen["kwargs"]["stdout"] is None
+    assert seen["kwargs"]["stderr"] is None
+    assert seen["kwargs"]["check"] is False
+    assert seen["lock_was_held"] is True
+
+
+def test_reauth_treats_ctrl_c_as_cancel(codex_home, monkeypatch):
+    backend = ShellBackend(codex_home, cli="/fake/codex-auth")
+
+    def interrupted(*_args, **_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("codex_auth_tui.backend.subprocess.run", interrupted)
+
+    result = backend.reauth("work")
+
+    assert result.ok is False
+    assert result.returncode == 130
+    assert result.output == "sign-in canceled"
 
 
 def test_backend_preserves_explicit_path_overrides(codex_home, tmp_path):

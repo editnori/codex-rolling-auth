@@ -9,6 +9,8 @@ accounts. Account-targeted work opens its own context:
   same cards read-only: a live monitor. ``s`` arms selection (a cursor appears),
   Enter switches and *stays watching*, Esc disarms. No accidental switch cursor
   while passively watching.
+- ``i`` / "Sign in again" → :class:`ReauthScreen` — browser login updates the
+  chosen saved profile without switching the active profile.
 """
 
 from __future__ import annotations
@@ -41,6 +43,7 @@ class DashboardScreen(Screen):
     BINDINGS = [
         Binding("s", "open_switch", "Switch"),
         Binding("n", "app.save_current", "Save"),
+        Binding("i", "app.open_reauth", "Sign in"),
         Binding("u", "app.open_resets", "Use reset"),
         Binding("w", "app.open_watch", "Watch"),
         Binding("a", "app.open_auto", "Auto"),
@@ -68,6 +71,7 @@ class DashboardScreen(Screen):
                 ("Watch profiles", "watch"),
                 ("Switch profile…", "switch"),
                 ("Save current auth…", "save-current"),
+                ("Sign in again…", "reauth"),
                 ("Use earned reset…", "reset"),
                 ("Auto-switch view", "auto"),
                 ("Quit", "quit"),
@@ -87,6 +91,7 @@ class DashboardScreen(Screen):
             "watch": app.action_open_watch,
             "switch": self.action_open_switch,
             "save-current": app.action_save_current,
+            "reauth": app.action_open_reauth,
             "reset": app.action_open_resets,
             "auto": app.action_open_auto,
             "quit": app.exit,
@@ -244,6 +249,53 @@ class ResetScreen(AccountListScreen):
         self.app.pop_screen()
 
 
+class ReauthScreen(AccountListScreen):
+    """Choose one saved ChatGPT profile for an isolated browser sign-in."""
+
+    BINDINGS = [
+        Binding("enter", "select_highlighted", "Sign in", priority=True),
+        Binding("escape,q,i", "back", "Back"),
+        Binding("j", "cursor_down", show=False),
+        Binding("k", "cursor_up", show=False),
+    ]
+
+    def on_mount(self) -> None:
+        self.query_one("#list-title", Static).update(
+            "sign in again · choose a saved ChatGPT profile"
+        )
+        self.query_one("#accounts", ListView).focus()
+        super().on_mount()
+
+    def _index_after_build(self, snap, first_build, previous) -> int | None:
+        if first_build:
+            return next(
+                (
+                    index
+                    for index, account in enumerate(snap.accounts)
+                    if account.usage.requires_login
+                ),
+                self._active_index(snap),
+            )
+        return super()._index_after_build(snap, first_build, previous)
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        item = event.item
+        if isinstance(item, AccountItem):
+            if not item.switchable:
+                self.app.notify(
+                    f"{item.name_} is not a saved ChatGPT profile",
+                    severity="warning",
+                )
+                return
+            self.app.prepare_reauth(item.name_)
+
+    def action_select_highlighted(self) -> None:
+        self.query_one("#accounts", ListView).action_select_cursor()
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
+
+
 class WatchScreen(AccountListScreen):
     """Live monitor of every profile, hands-off by default.
 
@@ -258,6 +310,7 @@ class WatchScreen(AccountListScreen):
         Binding("s", "toggle_select", "Switch"),
         Binding("enter", "select_highlighted", "Confirm", priority=True),
         Binding("n", "app.save_current", "Save"),
+        Binding("i", "app.open_reauth", "Sign in"),
         Binding("u", "app.open_resets", "Use reset"),
         Binding("a", "app.open_auto", "Auto"),
         Binding("r", "app.refresh_full", "Refresh"),

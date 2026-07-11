@@ -7,7 +7,8 @@ table/fzf output. All sensitive writes stay in the shell CLI — this package on
 *reads* state and *calls* `codex-auth refresh`, the guarded shell switch
 transaction, `codex-auth add <name> --current`, or the confirmed earned-reset
 command as short-lived subprocesses, so the mutation/refresh locks stay scoped
-to each call.
+to each call. Interactive saved-profile sign-in is the deliberate exception:
+the app suspends its full-screen terminal while `codex-auth reauth` owns the TTY.
 
 Usually launched through the shell entrypoint:
 
@@ -24,5 +25,9 @@ Press `u` to select a ChatGPT profile, fresh-check its earned reset count, and
 open a Cancel-default confirmation. A confirmed redemption uses Codex app-server
 without switching the active profile, then publishes the refreshed count and
 usage bars.
+
+Invalid saved sessions expose a clickable `sign in again` action. The same flow
+is available from the keyboard with `i`; it suspends the full-screen terminal
+while Codex runs an isolated browser login, then refreshes only that saved profile.
 
 Run the tests with `uv run --project tui pytest`.
