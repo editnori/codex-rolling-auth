@@ -366,6 +366,40 @@ class ShellBackend:
             timeout_s=SAVE_TIMEOUT_S,
         )
 
+    def reauth(self, name: str) -> OperationResult:
+        """Interactively replace one saved login without capturing its terminal.
+
+        The Textual app suspends before calling this method, so the shell command
+        must inherit the real terminal. The same backend lock used by refresh and
+        switch calls keeps another shell operation from interleaving with login.
+        """
+
+        if not self.cli:
+            return OperationResult(False, 127, "codex-auth executable not found")
+        with self._subprocess_lock:
+            try:
+                completed = subprocess.run(
+                    [self.cli, "reauth", name],
+                    stdin=None,
+                    stdout=None,
+                    stderr=None,
+                    env=self.env.copy(),
+                    check=False,
+                )
+            except KeyboardInterrupt:
+                return OperationResult(False, 130, "sign-in canceled")
+            except OSError as exc:
+                return OperationResult(False, 127, f"could not run codex-auth: {exc}")
+        if completed.returncode == 0:
+            return OperationResult(True)
+        if completed.returncode in {130, -signal.SIGINT}:
+            return OperationResult(False, 130, "sign-in canceled")
+        return OperationResult(
+            False,
+            completed.returncode,
+            f"codex-auth reauth exited with status {completed.returncode}",
+        )
+
     def consume_reset(self, name: str) -> OperationResult:
         """Use one earned rate-limit reset for ``name`` through the shell CLI."""
 
@@ -536,6 +570,15 @@ def _usage_from_state(
         and stored_fp == fingerprint
     )
     payload = entry.get("payload")
+    # A definitive auth error belongs to the credential that was probed. Once
+    # reauth replaces that credential, retaining the old error would falsely
+    # offer another sign-in against a session that has never been checked.
+    if (
+        not fingerprint_match
+        and isinstance(payload, dict)
+        and payload.get("error") is not None
+    ):
+        payload = None
     generation = entry.get("refresh_generation")
     return AccountUsage.from_payload(
         payload if isinstance(payload, dict) else None,

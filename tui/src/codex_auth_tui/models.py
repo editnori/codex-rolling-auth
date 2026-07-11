@@ -157,7 +157,7 @@ class AccountUsage:
         error = payload.get("error")
         if error is not None:
             return cls(
-                last_error=_error_label(error),
+                last_error=_error_label(error) if fingerprint_match else None,
                 age_s=age_s,
                 fetched_at=fetched_at,
                 fingerprint_match=fingerprint_match,
@@ -206,7 +206,7 @@ class AccountUsage:
     def requires_login(self) -> bool:
         """Whether a completed probe says this saved session is unusable."""
 
-        if not self.last_error:
+        if not self.fingerprint_match or not self.last_error:
             return False
         error = self.last_error.lower()
         return any(

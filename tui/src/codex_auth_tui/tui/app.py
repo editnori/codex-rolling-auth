@@ -12,9 +12,9 @@ from functools import partial
 import time
 from typing import Any
 
-from textual.app import App
+from textual.app import App, SuspendNotSupported
 from textual.reactive import reactive
-from textual.worker import WorkerState
+from textual.worker import WorkerCancelled, WorkerFailed, WorkerState
 
 from codex_auth_tui.backend import OperationResult, ShellBackend
 from codex_auth_tui.engine import (
@@ -25,7 +25,12 @@ from codex_auth_tui.models import AccountsSnapshot
 from codex_auth_tui.paths import CodexPaths, resolve_paths
 from codex_auth_tui.settings import AutoSettings, load_settings
 from codex_auth_tui.tui.autoview import AutoScreen
-from codex_auth_tui.tui.dashboard import DashboardScreen, ResetScreen, WatchScreen
+from codex_auth_tui.tui.dashboard import (
+    DashboardScreen,
+    ReauthScreen,
+    ResetScreen,
+    WatchScreen,
+)
 from codex_auth_tui.tui.modals import ConfirmModal, OutputModal, ProfileNameModal
 from codex_auth_tui.tui.theme import CODEX_AUTH_DARK
 
@@ -362,6 +367,186 @@ class CodexAuthApp(App):
                 self.push_screen(OutputModal("Save profile: details", result.output))
         self._drain_pending()
 
+    # -- isolated browser sign-in -----------------------------------------
+
+    def action_reauth(self, name: str) -> None:
+        """Rich ``@click`` target for an account's "sign in again" link."""
+
+        self.prepare_reauth(name)
+
+    def prepare_reauth(self, name: str) -> None:
+        if isinstance(self.screen, AutoScreen):
+            self.notify(
+                "Leave Auto view before signing in again",
+                severity="warning",
+            )
+            return
+        if self.busy or self._refreshing:
+            self.notify("Another auth operation is still running", severity="warning")
+            return
+        snap = self.snapshot
+        if snap is None:
+            self.notify("Saved profiles are still loading", severity="warning")
+            return
+        account = next((item for item in snap.accounts if item.name == name), None)
+        if account is None:
+            self.notify(f"Saved profile {name} was not found", severity="warning")
+            return
+        if not account.switchable:
+            self.notify(
+                f"{name} is not a saved ChatGPT profile",
+                severity="warning",
+            )
+            return
+
+        active_before = snap.active_name
+        if active_before is None:
+            active_copy = (
+                "No profile will be activated, and the live Codex auth stays as it is."
+            )
+        else:
+            active_copy = (
+                f"The current active profile ({active_before}) stays active. "
+                "No profile switch is performed."
+            )
+            if name == active_before:
+                active_copy += " Its live credential is refreshed in place."
+        self.push_screen(
+            ConfirmModal(
+                f"Open browser sign-in for {name}?\n\n"
+                f"Only the selected saved profile ({name}) is reauthenticated. "
+                f"{active_copy}",
+                title="Sign in again?",
+                yes_label="Sign in",
+                default_cancel=True,
+            ),
+            partial(self._reauth_confirmed, name, active_before),
+        )
+
+    async def _reauth_confirmed(
+        self,
+        name: str,
+        active_before: str | None,
+        confirmed: bool | None,
+    ) -> None:
+        if not confirmed:
+            return
+        if self.busy or self._refreshing:
+            self.notify("Another auth operation is still running", severity="warning")
+            return
+
+        self.busy = True
+        self.notify(f"Opening browser sign-in for {name}…", timeout=3)
+        worker = None
+        try:
+            # Restore the caller's terminal while codex login owns stdin/stdout.
+            with self.suspend():
+                worker = self.run_worker(
+                    partial(self._reauth_blocking, name),
+                    thread=True,
+                    group="reauth",
+                    exit_on_error=False,
+                    name=f"reauth-{name}",
+                )
+                result, refresh_result, snap = await worker.wait()
+        except SuspendNotSupported:
+            self.busy = False
+            self.notify(
+                "Interactive sign-in needs a local terminal",
+                severity="warning",
+            )
+            self._drain_pending()
+            return
+        except (KeyboardInterrupt, WorkerCancelled):
+            if worker is not None:
+                worker.cancel()
+            self.busy = False
+            self.notify("Sign-in canceled", title="Saved profile unchanged")
+            self._drain_pending()
+            return
+        except WorkerFailed as exc:
+            self.busy = False
+            self.notify(f"Sign-in failed: {exc.error}", severity="error")
+            self._drain_pending()
+            return
+
+        self._reauth_done(
+            name,
+            active_before,
+            result,
+            refresh_result,
+            snap,
+        )
+
+    def _reauth_blocking(
+        self, name: str
+    ) -> tuple[OperationResult, OperationResult, AccountsSnapshot]:
+        result = _operation_result(self.backend.reauth(name))
+        refresh_result = OperationResult(True)
+        if result.ok:
+            refresh_result = _operation_result(self.backend.refresh([name]))
+        snap = self.backend.snapshot()
+        if result.ok and refresh_result.ok:
+            refreshed = next(
+                (account for account in snap.accounts if account.name == name),
+                None,
+            )
+            if (
+                refreshed is None
+                or refresh_result.generation is None
+                or refreshed.usage.refresh_generation != refresh_result.generation
+            ):
+                refresh_result = OperationResult(
+                    False,
+                    75,
+                    f"fresh usage was not confirmed for {name}",
+                    refresh_result.generation,
+                )
+        return result, refresh_result, snap
+
+    def _reauth_done(
+        self,
+        name: str,
+        active_before: str | None,
+        result: OperationResult,
+        refresh_result: OperationResult,
+        snap: AccountsSnapshot,
+    ) -> None:
+        self.busy = False
+        self.snapshot = snap
+        if result.ok:
+            if snap.active_name == active_before:
+                active_note = (
+                    f" · {active_before} stayed active"
+                    if active_before is not None
+                    else " · active auth unchanged"
+                )
+                severity = "information"
+            else:
+                current = snap.active_name or "unmanaged auth"
+                active_note = f" · active state is now {current}"
+                severity = "warning"
+            if refresh_result.ok:
+                refresh_note = ""
+            else:
+                refresh_note = " · fresh usage not confirmed"
+                severity = "warning"
+            self.notify(
+                f"Updated saved login for {name}{active_note}{refresh_note}",
+                title="Sign-in complete",
+                severity=severity,
+            )
+            if isinstance(self.screen, ReauthScreen):
+                self.pop_screen()
+        elif result.returncode == 130:
+            self.notify("Sign-in canceled", title="Saved profile unchanged")
+        else:
+            message = _first_line(result.output) or "saved profile was not updated"
+            self.notify(message, severity="warning")
+            if result.output.strip():
+                self.push_screen(OutputModal("Sign in again: details", result.output))
+        self._drain_pending()
+
     # -- earned rate-limit resets -----------------------------------------
 
     def prepare_reset(self, name: str) -> None:
@@ -514,6 +699,16 @@ class CodexAuthApp(App):
     def action_open_resets(self) -> None:
         if not isinstance(self.screen, ResetScreen):
             self.push_screen(ResetScreen())
+
+    def action_open_reauth(self) -> None:
+        if isinstance(self.screen, AutoScreen):
+            self.notify(
+                "Leave Auto view before signing in again",
+                severity="warning",
+            )
+            return
+        if not isinstance(self.screen, ReauthScreen):
+            self.push_screen(ReauthScreen())
 
 
 def _operation_result(value: Any) -> OperationResult:

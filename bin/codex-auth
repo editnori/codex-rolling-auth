@@ -294,6 +294,7 @@ main() {
     use|switch) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; require_arg_count_between "$#" 1 1 "usage: codex-auth use <name>"; cmd_use "$1" ;;
     use-if-current) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; require_arg_count_between "$#" 2 3 "usage: codex-auth use-if-current <expected> <target> [refresh-generation]"; cmd_use_if_current "$@" ;;
     login) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; require_arg_count_between "$#" 1 999999 "usage: codex-auth login <name> [codex login args...]"; cmd_login "$@" ;;
+    reauth) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; require_arg_count_between "$#" 1 999999 "usage: codex-auth reauth <name> [codex login args...]"; cmd_reauth "$@" ;;
     auto) source_codex_auth_libs "${CODEX_AUTH_USAGE_LIB_FILES[@]}" profiles.sh; cmd_auto "$@" ;;
     patch-codex)
       case " $* " in

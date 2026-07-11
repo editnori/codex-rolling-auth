@@ -68,6 +68,7 @@ def event_text(event: AutoEvent) -> Text:
 class AutoScreen(Screen):
     BINDINGS = [
         Binding("l", "toggle_live", "Go live / dry-run"),
+        Binding("i", "app.open_reauth", "Sign in"),
         Binding("r", "refresh_now", "Refresh"),
         Binding("escape,q", "back", "Back"),
     ]

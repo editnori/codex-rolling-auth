@@ -17,6 +17,10 @@ _Synthetic demo data. No live credentials or account identifiers._
 
 </details>
 
+### Sign in again without switching profiles
+
+![Sign-in confirmation for the selected saved profile, with the current active profile unchanged](assets/codex-auth-sign-in.png)
+
 | Dry-run autoswitch | Earned reset confirmation |
 | --- | --- |
 | ![Dry-run autoswitch screen](assets/codex-auth-auto.png) | ![Earned reset confirmation](assets/codex-auth-reset.png) |
@@ -90,6 +94,7 @@ Watcher keys:
 
 - `s` arms or disarms manual selection.
 - `n` saves the current Codex auth as a named profile.
+- `i` opens saved-profile sign-in without switching the active profile.
 - `u` checks and uses an earned rate-limit reset for a selected profile.
 - Arrow keys or `j`/`k` move between accounts.
 - `Enter` confirms an armed switch and keeps the watcher open.
@@ -116,6 +121,14 @@ codex-auth add work --current
 
 From `codex-auth tui`, press `n`, enter the profile name, and press `Enter`.
 Replacing an existing profile requires confirmation.
+
+Repair an expired or invalid saved login without selecting it as the active profile:
+
+```bash
+codex-auth reauth work
+```
+
+In the TUI, click `sign in again` on the profile or press `i` and choose it. Codex opens its browser login outside the full-screen UI, then writes the new credential only to that saved profile. If the profile is already active, its credential is refreshed in place and the active profile name stays the same.
 
 ### Earned resets
 
@@ -196,6 +209,7 @@ This project was directly inspired by [claude-swap](https://github.com/realiti4/
 - Saved profiles contain live credentials. Files are written with restrictive permissions, but they must never be committed, uploaded, pasted into issues, or included in captures.
 - `$CODEX_HOME/active-profile.json` records the selected profile using hashed account identity and a credential fingerprint. When Codex rotates that account's refresh token, the wrapper compare-and-swaps the newer auth back into the same saved profile; a real account change or concurrent edit is never overwritten.
 - Usage probes run in temporary Codex homes. If a probe rotates a refresh token, the rotated auth is persisted before the temporary home is removed and is attached to usage state only after the profile lineage check succeeds.
+- Saved-profile sign-in runs in a private temporary Codex home with [file-backed credentials](https://learn.chatgpt.com/docs/auth#credential-storage). It rejects a different known account identity and compare-and-swaps the result so a concurrent profile update wins.
 - `bin/codex-auth` is a thin entrypoint. Shell runtime code lives in `lib/codex-auth/*.sh`; the persistent watcher lives in the isolated project under `lib/codex-auth/tui` after installation.
 - Set `CODEX_AUTH_CODEX_BIN=/path/to/codex` if the wrapper cannot find your real Codex binary.
 - Set `CODEX_AUTH_AUTO=0` to bypass automatic profile selection for one command.

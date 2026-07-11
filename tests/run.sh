@@ -137,6 +137,41 @@ write_chatgpt_auth() {
   chmod 0600 "$path"
 }
 
+write_reauth_codex() {
+  local path="$1"
+  mkdir -p "$(dirname "$path")"
+  cat > "$path" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  printf 'codex-cli 9.8.7\n'
+  exit 0
+fi
+printf 'args:%s\n' "$*" >> "$CODEX_TEST_LOG"
+printf '%s\n' "$CODEX_HOME" > "$CODEX_TEST_LOGIN_HOME_FILE"
+grep -E '^[[:space:]]*cli_auth_credentials_store[[:space:]]*=' "$CODEX_HOME/config.toml" \
+  >> "$CODEX_TEST_LOG" 2>/dev/null || true
+grep -F 'model = "gpt-5"' "$CODEX_HOME/config.toml" >> "$CODEX_TEST_LOG" 2>/dev/null || true
+[[ "${1:-}" == "login" ]] || exit 0
+mkdir -p "$CODEX_HOME"
+cp "$CODEX_TEST_LOGIN_AUTH" "$CODEX_HOME/auth.json"
+chmod 0600 "$CODEX_HOME/auth.json"
+if [[ -n "${CODEX_TEST_CONCURRENT_PROFILE_SOURCE:-}" && -n "${CODEX_TEST_CONCURRENT_PROFILE_TARGET:-}" ]]; then
+  cp "$CODEX_TEST_CONCURRENT_PROFILE_SOURCE" "$CODEX_TEST_CONCURRENT_PROFILE_TARGET"
+  chmod 0600 "$CODEX_TEST_CONCURRENT_PROFILE_TARGET"
+fi
+exit "${CODEX_TEST_LOGIN_STATUS:-0}"
+EOF
+  chmod 0755 "$path"
+}
+
+run_reauth_tty() {
+  local output="$1"
+  local command=""
+  shift
+  printf -v command '%q ' "$@"
+  script -qefc "$command" /dev/null > "$output" 2>&1
+}
+
 write_rotating_rate_limit_codex() {
   local path="$1"
   mkdir -p "$(dirname "$path")"
@@ -1889,6 +1924,213 @@ test_api_key_mismatch_is_never_lineage_synced() {
   [[ "$(jq -r '.OPENAI_API_KEY' "$home/auth.json")" == "api-b" ]] || fail "API-key mismatch changed live auth"
 }
 
+test_reauth_inactive_profile_preserves_active_state() {
+  local tmp home active target login_auth log login_home_file live_before marker_before login_home
+  tmp="$(mktemp -d)"
+  home="$tmp/home"
+  active="$home/auth-profiles/work.json"
+  target="$home/auth-profiles/repair.json"
+  login_auth="$tmp/login-auth.json"
+  log="$tmp/calls.log"
+  login_home_file="$tmp/login-home"
+  mkdir -p "$home/auth-profiles"
+  write_chatgpt_auth "$active" rt-work at-work acct-work
+  write_chatgpt_auth "$target" rt-repair-old at-repair-old acct-repair
+  write_chatgpt_auth "$login_auth" rt-repair-new at-repair-new acct-repair
+  write_reauth_codex "$tmp/real-codex"
+  printf '%s\n' 'model = "gpt-5"' 'cli_auth_credentials_store = "keyring"' '[features]' 'shell_tool = true' > "$home/config.toml"
+
+  CODEX_HOME="$home" "$REPO_ROOT/bin/codex-auth" use work >/dev/null
+  live_before="$(sha256sum "$home/auth.json")"
+  marker_before="$(sha256sum "$home/active-profile.json")"
+
+  run_reauth_tty "$tmp/out.txt" env \
+    TERM=dumb \
+    CODEX_TEST_LOG="$log" \
+    CODEX_TEST_LOGIN_HOME_FILE="$login_home_file" \
+    CODEX_TEST_LOGIN_AUTH="$login_auth" \
+    CODEX_HOME="$home" \
+    CODEX_AUTH_CODEX_BIN="$tmp/real-codex" \
+    "$REPO_ROOT/bin/codex-auth" reauth repair --device-auth
+
+  [[ "$(jq -r '.tokens.refresh_token' "$target")" == "rt-repair-new" ]] || fail "reauth did not update the selected inactive profile"
+  [[ "$(sha256sum "$home/auth.json")" == "$live_before" ]] || fail "inactive reauth changed live auth"
+  [[ "$(sha256sum "$home/active-profile.json")" == "$marker_before" ]] || fail "inactive reauth changed the active marker"
+  [[ "$(jq -r '.profile' "$home/active-profile.json")" == "work" ]] || fail "inactive reauth changed the active profile name"
+  assert_contains 'args:login -c cli_auth_credentials_store="file" --device-auth' "$log"
+  assert_contains 'cli_auth_credentials_store = "keyring"' "$log"
+  assert_contains 'model = "gpt-5"' "$log"
+  assert_contains 'unchanged' "$tmp/out.txt"
+  login_home="$(cat "$login_home_file")"
+  [[ "$login_home" != "$home" ]] || fail "reauth used the live Codex home"
+  [[ ! -e "$login_home" ]] || fail "reauth left its private Codex home behind"
+}
+
+test_reauth_rejects_wrong_account_without_mutation() {
+  local tmp home target login_auth log target_before live_before marker_before
+  tmp="$(mktemp -d)"
+  home="$tmp/home"
+  target="$home/auth-profiles/repair.json"
+  login_auth="$tmp/login-auth.json"
+  log="$tmp/calls.log"
+  mkdir -p "$home/auth-profiles"
+  write_chatgpt_auth "$home/auth-profiles/work.json" rt-work at-work acct-work
+  write_chatgpt_auth "$target" rt-repair-old at-repair-old acct-repair
+  write_chatgpt_auth "$login_auth" rt-wrong at-wrong acct-wrong
+  write_reauth_codex "$tmp/real-codex"
+  CODEX_HOME="$home" "$REPO_ROOT/bin/codex-auth" use work >/dev/null
+  target_before="$(sha256sum "$target")"
+  live_before="$(sha256sum "$home/auth.json")"
+  marker_before="$(sha256sum "$home/active-profile.json")"
+
+  if run_reauth_tty "$tmp/out.txt" env \
+    TERM=dumb \
+    CODEX_TEST_LOG="$log" \
+    CODEX_TEST_LOGIN_HOME_FILE="$tmp/login-home" \
+    CODEX_TEST_LOGIN_AUTH="$login_auth" \
+    CODEX_HOME="$home" \
+    CODEX_AUTH_CODEX_BIN="$tmp/real-codex" \
+    "$REPO_ROOT/bin/codex-auth" reauth repair
+  then
+    fail "reauth accepted a different ChatGPT account"
+  fi
+
+  assert_contains 'login account did not match saved profile' "$tmp/out.txt"
+  [[ "$(sha256sum "$target")" == "$target_before" ]] || fail "wrong-account reauth changed the target profile"
+  [[ "$(sha256sum "$home/auth.json")" == "$live_before" ]] || fail "wrong-account reauth changed live auth"
+  [[ "$(sha256sum "$home/active-profile.json")" == "$marker_before" ]] || fail "wrong-account reauth changed the active marker"
+}
+
+test_reauth_rejects_concurrent_target_change() {
+  local tmp home target login_auth concurrent_auth log live_before marker_before status
+  tmp="$(mktemp -d)"
+  home="$tmp/home"
+  target="$home/auth-profiles/repair.json"
+  login_auth="$tmp/login-auth.json"
+  concurrent_auth="$tmp/concurrent-auth.json"
+  log="$tmp/calls.log"
+  mkdir -p "$home/auth-profiles"
+  write_chatgpt_auth "$home/auth-profiles/work.json" rt-work at-work acct-work
+  write_chatgpt_auth "$target" rt-repair-old at-repair-old acct-repair
+  write_chatgpt_auth "$login_auth" rt-login at-login acct-repair
+  write_chatgpt_auth "$concurrent_auth" rt-concurrent at-concurrent acct-repair
+  write_reauth_codex "$tmp/real-codex"
+  CODEX_HOME="$home" "$REPO_ROOT/bin/codex-auth" use work >/dev/null
+  live_before="$(sha256sum "$home/auth.json")"
+  marker_before="$(sha256sum "$home/active-profile.json")"
+
+  set +e
+  run_reauth_tty "$tmp/out.txt" env \
+    TERM=dumb \
+    CODEX_TEST_LOG="$log" \
+    CODEX_TEST_LOGIN_HOME_FILE="$tmp/login-home" \
+    CODEX_TEST_LOGIN_AUTH="$login_auth" \
+    CODEX_TEST_CONCURRENT_PROFILE_SOURCE="$concurrent_auth" \
+    CODEX_TEST_CONCURRENT_PROFILE_TARGET="$target" \
+    CODEX_HOME="$home" \
+    CODEX_AUTH_CODEX_BIN="$tmp/real-codex" \
+    "$REPO_ROOT/bin/codex-auth" reauth repair
+  status=$?
+  set -e
+
+  [[ "$status" == "75" ]] || fail "concurrent target change returned $status instead of 75"
+  assert_contains 'profile changed while login was open' "$tmp/out.txt"
+  [[ "$(jq -r '.tokens.refresh_token' "$target")" == "rt-concurrent" ]] || fail "reauth overwrote the concurrent target update"
+  [[ "$(sha256sum "$home/auth.json")" == "$live_before" ]] || fail "concurrent reauth changed live auth"
+  [[ "$(sha256sum "$home/active-profile.json")" == "$marker_before" ]] || fail "concurrent reauth changed the active marker"
+}
+
+test_reauth_requires_tty_and_nonempty_chatgpt_credential() {
+  local tmp home target empty_auth unknown_profile log target_before
+  tmp="$(mktemp -d)"
+  home="$tmp/home"
+  target="$home/auth-profiles/repair.json"
+  empty_auth="$tmp/empty-auth.json"
+  log="$tmp/calls.log"
+  mkdir -p "$home/auth-profiles"
+  write_chatgpt_auth "$target" rt-repair-old at-repair-old acct-repair
+  printf '%s\n' '{"auth_mode":"chatgpt","tokens":{}}' > "$empty_auth"
+  chmod 0600 "$empty_auth"
+  write_reauth_codex "$tmp/real-codex"
+  target_before="$(sha256sum "$target")"
+
+  if TERM=dumb CODEX_HOME="$home" CODEX_AUTH_CODEX_BIN="$tmp/real-codex" \
+    "$REPO_ROOT/bin/codex-auth" reauth repair > "$tmp/no-tty.txt" 2>&1
+  then
+    fail "reauth allowed a browser login without a tty"
+  fi
+  assert_contains 'reauth needs tty' "$tmp/no-tty.txt"
+
+  if run_reauth_tty "$tmp/store-override.txt" env \
+    TERM=dumb \
+    CODEX_HOME="$home" \
+    CODEX_AUTH_CODEX_BIN="$tmp/real-codex" \
+    "$REPO_ROOT/bin/codex-auth" reauth repair \
+      -c 'cli_auth_credentials_store="keyring"'
+  then
+    fail "reauth allowed its isolated credential store to be overridden"
+  fi
+  assert_contains 'reauth controls cli_auth_credentials_store' "$tmp/store-override.txt"
+
+  if run_reauth_tty "$tmp/empty.txt" env \
+    TERM=dumb \
+    CODEX_TEST_LOG="$log" \
+    CODEX_TEST_LOGIN_HOME_FILE="$tmp/login-home" \
+    CODEX_TEST_LOGIN_AUTH="$empty_auth" \
+    CODEX_HOME="$home" \
+    CODEX_AUTH_CODEX_BIN="$tmp/real-codex" \
+    "$REPO_ROOT/bin/codex-auth" reauth repair
+  then
+    fail "reauth accepted an empty ChatGPT token object"
+  fi
+  assert_contains 'login did not produce a ChatGPT credential' "$tmp/empty.txt"
+  [[ "$(sha256sum "$target")" == "$target_before" ]] || fail "invalid login credential changed the target profile"
+
+  unknown_profile="$home/auth-profiles/unknown.json"
+  printf '%s\n' '{"auth_mode":"chatgpt","tokens":{"refresh_token":"rt-unknown","access_token":"at-unknown"}}' > "$unknown_profile"
+  chmod 0600 "$unknown_profile"
+  if run_reauth_tty "$tmp/unknown.txt" env \
+    TERM=dumb \
+    CODEX_HOME="$home" \
+    CODEX_AUTH_CODEX_BIN="$tmp/real-codex" \
+    "$REPO_ROOT/bin/codex-auth" reauth unknown
+  then
+    fail "reauth allowed a saved profile without a stable account identity"
+  fi
+  assert_contains 'saved profile has no stable account identity' "$tmp/unknown.txt"
+  [[ "$(jq -r '.tokens.refresh_token' "$unknown_profile")" == "rt-unknown" ]] || fail "identity-less reauth changed the target profile"
+}
+
+test_reauth_active_profile_keeps_active_name() {
+  local tmp home target login_auth log
+  tmp="$(mktemp -d)"
+  home="$tmp/home"
+  target="$home/auth-profiles/work.json"
+  login_auth="$tmp/login-auth.json"
+  log="$tmp/calls.log"
+  mkdir -p "$home/auth-profiles"
+  write_chatgpt_auth "$target" rt-work-old at-work-old acct-work
+  write_chatgpt_auth "$login_auth" rt-work-new at-work-new acct-work
+  write_reauth_codex "$tmp/real-codex"
+  CODEX_HOME="$home" "$REPO_ROOT/bin/codex-auth" use work >/dev/null
+
+  run_reauth_tty "$tmp/out.txt" env \
+    TERM=dumb \
+    CODEX_TEST_LOG="$log" \
+    CODEX_TEST_LOGIN_HOME_FILE="$tmp/login-home" \
+    CODEX_TEST_LOGIN_AUTH="$login_auth" \
+    CODEX_HOME="$home" \
+    CODEX_AUTH_CODEX_BIN="$tmp/real-codex" \
+    "$REPO_ROOT/bin/codex-auth" reauth work
+
+  [[ "$(jq -r '.tokens.refresh_token' "$target")" == "rt-work-new" ]] || fail "active reauth did not update the saved profile"
+  [[ "$(jq -r '.tokens.refresh_token' "$home/auth.json")" == "rt-work-new" ]] || fail "active reauth did not update live auth"
+  [[ "$(jq -r '.profile' "$home/active-profile.json")" == "work" ]] || fail "active reauth changed the active profile name"
+  [[ "$(jq -r '.profile_revision' "$home/active-profile.json")" == "$(jq -cS . "$target" | sha256sum | cut -d' ' -f1)" ]] \
+    || fail "active reauth left an incoherent active marker"
+  assert_contains 'kept work' "$tmp/out.txt"
+}
+
 test_parallel_refresh_preserves_one_complete_generation() {
   local tmp home log name
   tmp="$(mktemp -d)"
@@ -2021,6 +2263,11 @@ main() {
     test_live_account_switch_never_overwrites_marked_profile \
     test_live_rotation_does_not_guess_between_account_aliases \
     test_api_key_mismatch_is_never_lineage_synced \
+    test_reauth_inactive_profile_preserves_active_state \
+    test_reauth_rejects_wrong_account_without_mutation \
+    test_reauth_rejects_concurrent_target_change \
+    test_reauth_requires_tty_and_nonempty_chatgpt_credential \
+    test_reauth_active_profile_keeps_active_name \
     test_parallel_refresh_preserves_one_complete_generation \
     test_rolling_hook_keeps_inline_auto_cached_by_default \
     test_doctor_reports_legacy_sidecars \

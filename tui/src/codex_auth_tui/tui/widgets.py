@@ -10,6 +10,7 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
+from rich.style import Style
 from rich.text import Text
 from textual.widgets import ListItem, Static
 
@@ -32,6 +33,20 @@ _BAR_FILLED = "━"
 _BAR_HALF = "╸"
 _BAR_EMPTY = "─"
 _BAR_TICK = "┃"
+
+
+def _reauth_link_style(name: str) -> Style:
+    """Return a real Textual click action without putting markup in profile data."""
+
+    return Style(
+        color=ACCENT,
+        underline=True,
+        meta={"@click": ("app.reauth", (name,))},
+    )
+
+
+def _append_reauth_link(text: Text, acc: AccountSnapshot) -> None:
+    text.append("sign in again", style=_reauth_link_style(acc.name))
 
 
 def bar_cells(
@@ -122,13 +137,12 @@ def account_card_text(
     if not acc.usage.windows:
         text.append("\n    ")
         text.append("usage unavailable", style=MUTED)
-        if acc.usage.last_error:
-            error = (
-                "sign in again"
-                if acc.usage.requires_login
-                else acc.usage.last_error
-            )
-            text.append(f" · {error}", style=MUTED)
+        if acc.usage.last_error and acc.usage.fingerprint_match:
+            text.append(" · ", style=MUTED)
+            if acc.usage.requires_login:
+                _append_reauth_link(text, acc)
+            else:
+                text.append(acc.usage.last_error, style=MUTED)
         return text
 
     stale = acc.usage.stale
@@ -165,6 +179,12 @@ def mini_account_text(acc: AccountSnapshot, now: float) -> Text:
         return text
     if not acc.usage.windows:
         text.append("usage unknown", style=MUTED)
+        if acc.usage.last_error and acc.usage.fingerprint_match:
+            text.append(" · ", style=MUTED)
+            if acc.usage.requires_login:
+                _append_reauth_link(text, acc)
+            else:
+                text.append(acc.usage.last_error, style=MUTED)
         return text
     stale = acc.usage.stale
     for i, window in enumerate(acc.usage.windows):
@@ -252,11 +272,13 @@ class AccountItem(ListItem):
         super().__init__(AccountCard(acc))
         self.name_ = acc.name
         self.switchable = acc.switchable
+        self.requires_login = acc.usage.requires_login
         self.reset_credits_available = acc.usage.reset_credits_available
 
     def set_account(self, acc: AccountSnapshot) -> None:
         self.name_ = acc.name
         self.switchable = acc.switchable
+        self.requires_login = acc.usage.requires_login
         self.reset_credits_available = acc.usage.reset_credits_available
         self.query_one(AccountCard).set_account(acc)
 

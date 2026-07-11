@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import nullcontext
 import dataclasses
 import threading
 import time
@@ -21,13 +22,15 @@ from codex_auth_tui.models import (
 from codex_auth_tui.settings import AutoSettings
 from codex_auth_tui.tui.app import CodexAuthApp
 from codex_auth_tui.tui.autoview import AutoScreen
-from codex_auth_tui.tui.dashboard import ResetScreen, WatchScreen
+from codex_auth_tui.tui.dashboard import ReauthScreen, ResetScreen, WatchScreen
 from codex_auth_tui.tui.modals import ConfirmModal, ProfileNameModal
 from codex_auth_tui.tui.widgets import (
     AccountCard,
     AccountItem,
     RuntimeStatus,
+    account_card_text,
     bar_cells,
+    mini_account_text,
 )
 
 
@@ -67,6 +70,33 @@ def _account(
     )
 
 
+def _login_required_account(name: str, *, active: bool = False) -> AccountSnapshot:
+    now = time.time()
+    return AccountSnapshot(
+        name=name,
+        is_active=active,
+        kind="chatgpt",
+        switchable=True,
+        usage=AccountUsage(
+            fetched_at=now,
+            age_s=0,
+            last_error=(
+                "Your access token could not be refreshed because you have since "
+                "logged out or signed in to another account. Please sign in again."
+            ),
+        ),
+    )
+
+
+def _reauth_click_meta(rendered) -> tuple[str, tuple[str, ...]]:
+    start = rendered.plain.index("sign in again")
+    end = start + len("sign in again")
+    for span in rendered.spans:
+        if span.start == start and span.end == end and hasattr(span.style, "meta"):
+            return span.style.meta["@click"]
+    raise AssertionError("sign-in link has no @click metadata")
+
+
 class FakeBackend:
     def __init__(self, paths) -> None:
         self.paths = paths
@@ -91,9 +121,23 @@ class FakeBackend:
 
     def refresh(self, names=None) -> OperationResult:
         self.calls.append("refresh")
+        generation = f"fake-generation-{len(self.calls)}"
         if names:
             self.calls.append(f"refresh:{','.join(names)}")
-        return OperationResult(True)
+            selected = set(names)
+            self.accounts = [
+                dataclasses.replace(
+                    account,
+                    usage=dataclasses.replace(
+                        account.usage,
+                        refresh_generation=generation,
+                    ),
+                )
+                if account.name in selected
+                else account
+                for account in self.accounts
+            ]
+        return OperationResult(True, generation=generation)
 
     def switch(
         self,
@@ -112,6 +156,16 @@ class FakeBackend:
         saved = dataclasses.replace(current, name=name, is_active=False)
         self.accounts = [account for account in self.accounts if account.name != name]
         self.accounts.append(saved)
+        return OperationResult(True)
+
+    def reauth(self, name: str) -> OperationResult:
+        self.calls.append(f"reauth:{name}")
+        self.accounts = [
+            dataclasses.replace(account, usage=_usage(12, 8))
+            if account.name == name
+            else account
+            for account in self.accounts
+        ]
         return OperationResult(True)
 
     def consume_reset(self, name: str) -> OperationResult:
@@ -367,6 +421,160 @@ async def test_save_current_validates_names_and_confirms_replacement(codex_home)
         assert "save:work" in backend.calls
 
 
+def test_full_and_mini_login_errors_expose_safe_click_actions():
+    name = "odd');app.quit()"
+    account = _login_required_account(name)
+
+    for rendered in (
+        account_card_text(account, 90),
+        mini_account_text(account, time.time()),
+    ):
+        assert "sign in again" in rendered.plain
+        assert _reauth_click_meta(rendered) == ("app.reauth", (name,))
+
+    mismatched = dataclasses.replace(
+        account,
+        usage=dataclasses.replace(account.usage, fingerprint_match=False),
+    )
+    assert mismatched.usage.requires_login is False
+    assert "sign in again" not in account_card_text(mismatched, 90).plain
+    assert "sign in again" not in mini_account_text(mismatched, time.time()).plain
+
+
+@pytest.mark.asyncio
+async def test_login_link_targets_the_selected_saved_profile(codex_home):
+    backend = FakeBackend(codex_home)
+    backend.accounts[1] = _login_required_account("personal")
+    app = make_app(backend)
+
+    async with app.run_test(size=(104, 34)) as pilot:
+        await settle(pilot)
+        account = next(item for item in app.snapshot.accounts if item.name == "personal")
+        action_name, params = _reauth_click_meta(account_card_text(account, 90))
+        namespace, action = action_name.split(".", 1)
+
+        await app.run_action((namespace, action, params))
+        await pilot.pause()
+
+        assert isinstance(app.screen, ConfirmModal)
+        body = app.screen.query_one(".modal-body", Static).render().plain
+        assert "Only the selected saved profile (personal) is reauthenticated" in body
+        assert "current active profile (work) stays active" in body
+        assert not any(call.startswith("reauth:") for call in backend.calls)
+        await pilot.press("n")
+        await pilot.pause()
+
+        app.prepare_reauth("work")
+        await pilot.pause()
+        active_body = app.screen.query_one(".modal-body", Static).render().plain
+        assert "current active profile (work) stays active" in active_body
+        assert "live credential is refreshed in place" in active_body
+        await pilot.press("n")
+
+
+@pytest.mark.asyncio
+async def test_keyboard_reauth_cancels_safely_then_refreshes_only_selected_profile(
+    codex_home, monkeypatch
+):
+    monkeypatch.setattr(CodexAuthApp, "suspend", lambda self: nullcontext())
+    backend = FakeBackend(codex_home)
+    backend.accounts[1] = _login_required_account("personal")
+    app = make_app(backend)
+
+    async with app.run_test(size=(104, 34)) as pilot:
+        await settle(pilot)
+        await pilot.press("i")
+        await pilot.pause()
+
+        assert isinstance(app.screen, ReauthScreen)
+        assert app.screen.query_one("#accounts", ListView).index == 1
+
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmModal)
+        assert app.screen.query_one("#no", Button).has_focus
+
+        await pilot.press("n")
+        await pilot.pause()
+        assert isinstance(app.screen, ReauthScreen)
+        assert "reauth:personal" not in backend.calls
+        assert backend.active == "work"
+
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("y")
+        await settle(pilot)
+
+        assert "reauth:personal" in backend.calls
+        assert "refresh:personal" in backend.calls
+        assert backend.calls.index("reauth:personal") < backend.calls.index(
+            "refresh:personal"
+        )
+        assert backend.active == "work"
+        assert app.snapshot is not None
+        assert app.snapshot.active_name == "work"
+        personal = next(
+            item for item in app.snapshot.accounts if item.name == "personal"
+        )
+        assert personal.usage.requires_login is False
+        assert personal.usage.refresh_generation is not None
+        assert isinstance(app.screen, WatchScreen)
+
+
+@pytest.mark.asyncio
+async def test_reauth_worker_error_returns_to_the_tui(
+    codex_home, monkeypatch
+):
+    monkeypatch.setattr(CodexAuthApp, "suspend", lambda self: nullcontext())
+
+    class ErrorBackend(FakeBackend):
+        def reauth(self, name: str) -> OperationResult:
+            self.calls.append(f"reauth:{name}")
+            raise RuntimeError("browser login worker failed")
+
+    backend = ErrorBackend(codex_home)
+    backend.accounts[1] = _login_required_account("personal")
+    app = make_app(backend)
+
+    async with app.run_test(size=(104, 34)) as pilot:
+        await settle(pilot)
+        await pilot.press("i", "enter")
+        await pilot.pause()
+        await pilot.press("y")
+        for _ in range(50):
+            await pilot.pause()
+            if not app.busy:
+                break
+
+        assert app.busy is False
+        assert backend.active == "work"
+        assert "reauth:personal" in backend.calls
+        assert "refresh:personal" not in backend.calls
+        assert isinstance(app.screen, ReauthScreen)
+
+
+def test_reauth_does_not_call_cached_fallback_a_fresh_usage_result(codex_home):
+    class CachedFallbackBackend(FakeBackend):
+        def refresh(self, names=None) -> OperationResult:
+            self.calls.append("refresh")
+            if names:
+                self.calls.append(f"refresh:{','.join(names)}")
+            return OperationResult(True, generation="new-login-generation")
+
+    backend = CachedFallbackBackend(codex_home)
+    backend.accounts[1] = _login_required_account("personal")
+    app = make_app(backend)
+
+    result, refresh_result, snap = app._reauth_blocking("personal")
+
+    personal = next(item for item in snap.accounts if item.name == "personal")
+    assert result.ok is True
+    assert refresh_result.ok is False
+    assert refresh_result.generation == "new-login-generation"
+    assert "fresh usage was not confirmed" in refresh_result.output
+    assert personal.usage.refresh_generation is None
+
+
 @pytest.mark.asyncio
 async def test_watch_checks_and_uses_an_earned_reset_without_switching(codex_home):
     backend = FakeBackend(codex_home)
@@ -434,7 +642,8 @@ async def test_reset_confirmation_defaults_to_cancel(codex_home):
 async def test_auto_opens_dry_then_confirms_live_and_cleans_up(
     codex_home, fake_engine
 ):
-    app = make_app(FakeBackend(codex_home))
+    backend = FakeBackend(codex_home)
+    app = make_app(backend)
 
     async with app.run_test(size=(104, 38)) as pilot:
         await settle(pilot)
@@ -447,6 +656,16 @@ async def test_auto_opens_dry_then_confirms_live_and_cleans_up(
         assert app._store_only is True
         await pilot.pause()
         assert app.screen.query_one("#event-log", RichLog).lines
+
+        dry_engine = fake_engine.instances[0]
+        await pilot.press("i")
+        await pilot.pause()
+        await app.run_action(("app", "reauth", ("personal",)))
+        await pilot.pause()
+        assert isinstance(app.screen, AutoScreen)
+        assert fake_engine.instances == [dry_engine]
+        assert dry_engine.stopped is False
+        assert not any(call.startswith("reauth:") for call in backend.calls)
 
         await pilot.press("l")
         await pilot.pause()

@@ -45,7 +45,7 @@ from codex_auth_tui.paths import CodexPaths, resolve_paths
 from codex_auth_tui.settings import AutoSettings
 from codex_auth_tui.tui.app import CodexAuthApp
 from codex_auth_tui.tui.autoview import AutoScreen
-from codex_auth_tui.tui.dashboard import ResetScreen, WatchScreen
+from codex_auth_tui.tui.dashboard import ReauthScreen, ResetScreen, WatchScreen
 from codex_auth_tui.tui.modals import ConfirmModal
 
 
@@ -59,6 +59,7 @@ BACKGROUND = "#292929"
 
 OUTPUT_NAMES = (
     "codex-auth-watch.png",
+    "codex-auth-sign-in.png",
     "codex-auth-auto.png",
     "codex-auth-reset.png",
     "codex-auth-demo.gif",
@@ -67,6 +68,8 @@ OUTPUT_NAMES = (
 
 TIMELINE = (
     ("watch", 1_000),
+    ("reauth-picker", 800),
+    ("reauth-confirm", 1_400),
     ("reset-picker", 600),
     ("reset-confirm", 1_400),
     ("watch-return", 600),
@@ -146,6 +149,23 @@ def _account(
     )
 
 
+def _login_required_account(name: str) -> AccountSnapshot:
+    return AccountSnapshot(
+        name=name,
+        is_active=False,
+        kind="chatgpt",
+        switchable=True,
+        usage=AccountUsage(
+            fetched_at=DEMO_NOW,
+            age_s=0,
+            last_error=(
+                "Your access token could not be refreshed because you have since "
+                "logged out or signed in to another account. Please sign in again."
+            ),
+        ),
+    )
+
+
 class DemoBackend:
     """Credential-free backend implementing the app's stable shell boundary."""
 
@@ -178,6 +198,7 @@ class DemoBackend:
                 short_reset=3_000,
                 weekly_reset=345_600,
             ),
+            _login_required_account("personal"),
         ]
 
     def snapshot(self, now: float | None = None) -> AccountsSnapshot:
@@ -210,6 +231,12 @@ class DemoBackend:
 
     def save_current(self, name: str) -> OperationResult:
         return OperationResult(False, 64, "saving is disabled in demo capture")
+
+    def reauth(self, name: str) -> OperationResult:
+        # The deterministic timeline always cancels before the browser-login
+        # boundary. Keep this defensive failure here so a future timeline edit
+        # cannot accidentally turn the media build into an interactive login.
+        return OperationResult(False, 64, "sign-in is disabled in demo capture")
 
     def consume_reset(self, name: str) -> OperationResult:
         # The recorded flow stops at the Cancel-default confirmation. This
@@ -330,6 +357,29 @@ async def _capture_states(paths: CodexPaths, temporary_root: Path) -> dict[str, 
                 states[name] = _clean_svg(svg, temporary_root, name)
 
             capture("watch")
+
+            await pilot.press("i")
+            await _settle(app, pilot)
+            if not isinstance(app.screen, ReauthScreen):
+                raise RuntimeError("sign-in picker did not open")
+            capture("reauth-picker")
+
+            await pilot.press("enter")
+            await _settle(app, pilot)
+            if not isinstance(app.screen, ConfirmModal):
+                raise RuntimeError("sign-in confirmation did not open")
+            if not app.screen.query_one("#no", Button).has_focus:
+                raise RuntimeError("sign-in confirmation did not default to Cancel")
+            capture("reauth-confirm")
+
+            await pilot.press("escape")
+            await pilot.pause()
+            if not isinstance(app.screen, ReauthScreen):
+                raise RuntimeError("sign-in confirmation did not cancel to picker")
+            await pilot.press("escape")
+            await _settle(app, pilot)
+            if not isinstance(app.screen, WatchScreen):
+                raise RuntimeError("capture did not return to Watch after sign-in")
 
             await pilot.press("u")
             await _settle(app, pilot)
@@ -627,7 +677,12 @@ def _ffprobe(path: Path) -> dict:
 
 def _verify_outputs(directory: Path, expected_size: tuple[int, int]) -> dict[str, str]:
     details: dict[str, str] = {}
-    for name in ("codex-auth-watch.png", "codex-auth-auto.png", "codex-auth-reset.png"):
+    for name in (
+        "codex-auth-watch.png",
+        "codex-auth-sign-in.png",
+        "codex-auth-auto.png",
+        "codex-auth-reset.png",
+    ):
         path = directory / name
         with Image.open(path) as image:
             if image.format != "PNG" or image.size != expected_size:
@@ -731,6 +786,7 @@ async def _build(directory: Path) -> dict[str, str]:
     expected_size = images["watch"].size
     directory.mkdir(parents=True, exist_ok=True)
     _save_png(images["watch"], directory / "codex-auth-watch.png")
+    _save_png(images["reauth-confirm"], directory / "codex-auth-sign-in.png")
     _save_png(images["auto"], directory / "codex-auth-auto.png")
     _save_png(images["reset-confirm"], directory / "codex-auth-reset.png")
     _save_gif(images, directory / "codex-auth-demo.gif")

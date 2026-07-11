@@ -8,4 +8,4 @@ write, and this package reads structured state and shells out for refresh,
 switching, profile capture, and confirmed earned-reset redemption.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"

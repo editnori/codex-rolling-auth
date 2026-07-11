@@ -642,6 +642,148 @@ cmd_login() {
   rm -f "$hidden_auth"
 }
 
+reauth_prepare_private_config() {
+  local source="$1"
+  local dest="$2"
+
+  if [[ -f "$source" ]]; then
+    cp -p "$source" "$dest" || return 1
+  else
+    : > "$dest" || return 1
+  fi
+  chmod 600 "$dest"
+}
+
+cmd_reauth() (
+  local name="${1:-}"
+  [[ -n "$name" ]] || die "usage: codex-auth reauth <name> [codex login args...]"
+  shift || true
+  require_name "$name"
+  [[ -t 0 && -t 1 ]] || die "reauth needs tty"
+  local login_arg
+  for login_arg in "$@"; do
+    [[ "$login_arg" != *cli_auth_credentials_store* ]] \
+      || die "reauth controls cli_auth_credentials_store for isolated login"
+  done
+
+  local codex_cli profile expected_auth expected_revision expected_kind expected_identity
+  local login_home login_auth login_kind login_identity active_name live_before marker_before marker_existed=0
+  codex_cli="$(codex_bin)" || die "codex command not found"
+  require_codex_launcher "$codex_cli"
+  ensure_dirs
+
+  profile="$(profile_path "$name")"
+  [[ -f "$profile" ]] || die "profile not found: $name"
+  require_auth_file "$profile"
+  expected_kind="$(auth_file_kind "$profile" || true)"
+  [[ "$expected_kind" == "chatgpt" ]] || die "reauth only supports ChatGPT profiles"
+
+  login_home="$(mktemp -d "$CODEX_HOME/.tmp/reauth-${name}.XXXXXX")"
+  chmod 700 "$login_home" || die "could not secure private login home"
+  trap 'rm -rf "${login_home:-}"' EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+
+  expected_auth="$login_home/expected-auth.json"
+  copy_auth_file_atomic "$profile" "$expected_auth" || die "could not snapshot profile: $name"
+  expected_revision="$(auth_file_revision "$expected_auth" || true)"
+  [[ -n "$expected_revision" ]] || die "could not snapshot profile revision: $name"
+  expected_identity="$(auth_file_account_identity "$expected_auth" || true)"
+  [[ -n "$expected_identity" ]] || die "saved profile has no stable account identity; cannot safely reauthenticate"
+
+  reauth_prepare_private_config "$CODEX_HOME/config.toml" "$login_home/config.toml" \
+    || die "could not prepare private login config"
+
+  if ! CODEX_HOME="$login_home" CODEX_AUTH_RUNNER=1 "$codex_cli" login \
+    -c "cli_auth_credentials_store=\"file\"" "$@"; then
+    print_error "login failed; saved profile was not changed"
+    return 1
+  fi
+
+  login_auth="$login_home/auth.json"
+  if ! auth_file_is_valid "$login_auth"; then
+    print_error "login did not produce valid file-based auth; saved profile was not changed"
+    return 1
+  fi
+  login_kind="$(auth_file_kind "$login_auth" || true)"
+  [[ "$login_kind" == "chatgpt" ]] || {
+    print_error "login did not produce ChatGPT auth; saved profile was not changed"
+    return 1
+  }
+  if ! jq -e '
+    (.tokens | type == "object")
+    and ([.tokens.refresh_token?, .tokens.access_token?]
+      | any(type == "string" and length > 0))
+  ' "$login_auth" >/dev/null 2>&1; then
+    print_error "login did not produce a ChatGPT credential; saved profile was not changed"
+    return 1
+  fi
+  login_identity="$(auth_file_account_identity "$login_auth" || true)"
+  if [[ "$login_identity" != "$expected_identity" ]]; then
+    print_error "login account did not match saved profile; saved profile was not changed"
+    return 1
+  fi
+
+  acquire_mutation_lock
+  if [[ "$(auth_file_revision "$profile" || true)" != "$expected_revision" ]]; then
+    print_error "profile changed while login was open; saved login was not applied"
+    return 75
+  fi
+
+  active_name=""
+  if [[ -f "$AUTH_FILE" ]] && auth_file_is_valid "$AUTH_FILE"; then
+    active_name="$(resolve_active_profile_for_auth "$AUTH_FILE" || true)"
+  fi
+
+  if [[ "$active_name" != "$name" ]]; then
+    copy_auth_file_atomic "$login_auth" "$profile" || die "could not update profile: $name"
+    print_result_block "reauthenticated $name" \
+      "profile"$'\t'"$(display_path "$profile")"$'\t'"active" \
+      "active"$'\t'"unchanged"$'\t'"muted"
+    return 0
+  fi
+
+  if [[ ! -f "$AUTH_FILE" ]] || ! auth_file_is_valid "$AUTH_FILE"; then
+    print_error "active auth changed while login was open; saved login was not applied"
+    return 75
+  fi
+  local live_identity
+  live_identity="$(auth_file_account_identity "$AUTH_FILE" || true)"
+  if [[ -n "$login_identity" && "$live_identity" != "$login_identity" ]]; then
+    print_error "active account changed while login was open; saved login was not applied"
+    return 75
+  fi
+
+  live_before="$login_home/live-before.json"
+  copy_auth_file_atomic "$AUTH_FILE" "$live_before" || die "could not snapshot active auth"
+  marker_before="$login_home/active-profile-before.json"
+  if [[ -f "$ACTIVE_PROFILE_FILE" ]]; then
+    cp -p "$ACTIVE_PROFILE_FILE" "$marker_before" || die "could not snapshot active profile marker"
+    chmod 600 "$marker_before"
+    marker_existed=1
+  fi
+
+  if ! copy_auth_file_atomic "$login_auth" "$profile" \
+    || ! copy_auth_file_atomic "$login_auth" "$AUTH_FILE" \
+    || ! active_profile_marker_write "$name" "$profile"
+  then
+    copy_auth_file_atomic "$expected_auth" "$profile" || true
+    copy_auth_file_atomic "$live_before" "$AUTH_FILE" || true
+    if (( marker_existed )); then
+      copy_auth_file_atomic "$marker_before" "$ACTIVE_PROFILE_FILE" || true
+    else
+      rm -f "$ACTIVE_PROFILE_FILE"
+    fi
+    print_error "could not update active profile; previous auth was restored"
+    return 1
+  fi
+
+  print_result_block "reauthenticated $name" \
+    "profile"$'\t'"$(display_path "$profile")"$'\t'"active" \
+    "active"$'\t'"kept $name"$'\t'"active"
+)
+
 cmd_add() {
   local name="${1:-}"
   [[ -n "$name" ]] || die "usage: codex-auth add <name> [--current | --file <file> | codex login args...]"
