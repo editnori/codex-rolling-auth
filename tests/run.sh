@@ -174,20 +174,50 @@ case "${1:-}" in
   claude-gpt-export)
     destination="$3"
     expected_identity="${4:-}"
-    [[ -z "$expected_identity" || "$expected_identity" == "identity-pinned" ]] || exit 65
+    requested_profile="$2"
+    if [[ "$requested_profile" == "--active" ]]; then
+      if [[ -n "${CODEX_TEST_ACTIVE_PROFILE_FILE:-}" ]]; then
+        selected_profile="$(jq -er '.profile | select(type == "string" and length > 0)' "$CODEX_TEST_ACTIVE_PROFILE_FILE")"
+      else
+        selected_profile=work
+      fi
+    else
+      selected_profile="$requested_profile"
+    fi
+    if [[ "$selected_profile" == "work" ]]; then
+      selected_identity=identity-pinned
+    else
+      selected_identity="identity-$selected_profile"
+    fi
+    [[ -z "$expected_identity" || "$expected_identity" == "$selected_identity" ]] || exit 65
     mkdir -p "${destination%/*}"
     chmod 700 "${destination%/*}"
+    tmp="$(mktemp "${destination%/*}/.fake-claude-gpt-auth.XXXXXX")"
     jq -cn \
-      --arg access "access-only-test-token" \
-      '{access:$access,refresh:"",expires:4102444800000,accountId:"acct-work"}' \
-      > "$destination"
-    chmod 600 "$destination"
+      --arg access "access-only-$selected_profile" \
+      --arg account "acct-$selected_profile" \
+      '{access:$access,refresh:"",expires:4102444800000,accountId:$account}' \
+      > "$tmp"
+    chmod 600 "$tmp"
+    mv -f "$tmp" "$destination"
     expires=$(( $(date +%s) * 1000 + 3600000 ))
-    jq -cn --arg profile work --arg identity identity-pinned --argjson expires "$expires" \
-      '{profile:$profile,account_identity:$identity,profile_revision:"revision",credential_fingerprint:"fingerprint",expires:$expires}'
+    jq -cn \
+      --arg profile "$selected_profile" \
+      --arg identity "$selected_identity" \
+      --arg revision "revision-$selected_profile" \
+      --arg fingerprint "fingerprint-$selected_profile" \
+      --argjson expires "$expires" \
+      '{profile:$profile,account_identity:$identity,profile_revision:$revision,credential_fingerprint:$fingerprint,expires:$expires}'
     ;;
   refresh)
-    [[ "${2:-}" == "--quiet" && "${3:-}" == "--fast" && "${4:-}" == "work" ]] || exit 66
+    [[ "${2:-}" == "--quiet" && "${3:-}" == "--fast" && -n "${4:-}" ]] || exit 66
+    if [[ "${CODEX_TEST_REFRESH_DELAY_SECS:-0}" != "0" ]]; then
+      sleep "$CODEX_TEST_REFRESH_DELAY_SECS"
+    fi
+    if [[ -n "${CODEX_TEST_REFRESH_FAIL_PROFILE:-}" \
+      && "${4:-}" == "$CODEX_TEST_REFRESH_FAIL_PROFILE" ]]; then
+      exit 67
+    fi
     ;;
   *)
     exit 64
@@ -204,7 +234,7 @@ write_fake_claude_gpt_proxy() {
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ "${1:-}" == "--version" ]]; then
-  printf 'claude-code-proxy 0.1.10-codex-auth.1\n'
+  printf 'claude-code-proxy 0.1.10-codex-auth.2\n'
   exit 0
 fi
 printf 'proxy-arg=<%s>\n' "$@" >> "$CODEX_TEST_LOG"
@@ -235,9 +265,40 @@ if [[ "${CODEX_TEST_PROXY_EXIT_EARLY:-0}" == "1" ]]; then
   exit 42
 fi
 trap 'exit 0' TERM INT HUP
-while true; do sleep 1; done
+last_lease=""
+while true; do
+  if [[ "${CODEX_TEST_PROXY_WATCH_AUTH:-0}" == "1" ]]; then
+    lease="$(jq -er '[.accountId, .access] | join(":")' "$CCP_CONFIG_DIR/codex/auth.json" 2>/dev/null || true)"
+    if [[ -n "$lease" && "$lease" != "$last_lease" ]]; then
+      printf 'proxy-lease=<%s>\n' "$lease" >> "$CODEX_TEST_LOG"
+      last_lease="$lease"
+    fi
+    sleep 0.05
+  else
+    sleep 1
+  fi
+done
 EOF
   chmod 0755 "$path"
+}
+
+write_fake_active_profile_marker() {
+  local path="$1"
+  local profile="$2"
+  local parent tmp
+  parent="${path%/*}"
+  mkdir -p "$parent"
+  tmp="$(mktemp "$parent/.active-profile.XXXXXX")"
+  local identity="identity-$profile"
+  [[ "$profile" == "work" ]] && identity=identity-pinned
+  jq -cn \
+    --arg profile "$profile" \
+    --arg identity "$identity" \
+    --arg revision "revision-$profile" \
+    --arg fingerprint "fingerprint-$profile" \
+    '{version:2,profile:$profile,kind:"chatgpt",account_identity:$identity,
+      profile_revision:$revision,profile_fingerprint:$fingerprint}' > "$tmp"
+  mv -f "$tmp" "$path"
 }
 
 write_fake_claude_gpt_curl() {
@@ -1000,7 +1061,7 @@ test_install_fetches_verified_claude_gpt_proxy() {
   mkdir -p "$payload"
   printf '%s\n' \
     '#!/usr/bin/env bash' \
-    'printf "claude-code-proxy 0.1.10-codex-auth.1\\n"' > "$payload/claude-code-proxy"
+    'printf "claude-code-proxy 0.1.10-codex-auth.2\\n"' > "$payload/claude-code-proxy"
   chmod 0755 "$payload/claude-code-proxy"
   tar -czf "$archive" -C "$payload" claude-code-proxy
   (cd "$tmp" && sha256sum "${archive##*/}" > "${checksum##*/}")
@@ -1012,7 +1073,7 @@ test_install_fetches_verified_claude_gpt_proxy() {
     "$REPO_ROOT/install.sh" >/dev/null
 
   [[ -x "$prefix/bin/claude-code-proxy" ]] || fail "verified Claude GPT proxy was not installed"
-  [[ "$("$prefix/bin/claude-code-proxy" --version)" == "claude-code-proxy 0.1.10-codex-auth.1" ]] \
+  [[ "$("$prefix/bin/claude-code-proxy" --version)" == "claude-code-proxy 0.1.10-codex-auth.2" ]] \
     || fail "installed Claude GPT proxy reported the wrong version"
 }
 
@@ -2692,6 +2753,148 @@ test_claude_gpt_launcher_renews_while_harness_runs() {
   assert_contains 'auth-arg=<identity-pinned>' "$log"
 }
 
+test_claude_gpt_default_follows_active_profile_during_session() {
+  local tmp home log marker proxy_pid_file wrapper_pid attempt
+  tmp="$(mktemp -d)"
+  home="$tmp/home"
+  log="$tmp/calls.log"
+  marker="$tmp/custom-active-profile.json"
+  proxy_pid_file="$tmp/proxy.pid"
+  mkdir -p "$home"
+  write_fake_active_profile_marker "$marker" work
+  write_fake_claude_gpt_auth "$tmp/bin/codex-auth"
+  write_fake_claude_gpt_proxy "$tmp/bin/claude-code-proxy"
+  write_fake_claude_gpt_curl "$tmp/bin/curl"
+  write_fake_claude_harness "$tmp/bin/claude"
+
+  CODEX_TEST_LOG="$log" \
+    CODEX_TEST_PROXY_PID="$proxy_pid_file" \
+    CODEX_TEST_PROXY_WATCH_AUTH=1 \
+    CODEX_TEST_ACTIVE_PROFILE_FILE="$marker" \
+    CODEX_AUTH_ACTIVE_PROFILE_FILE="$marker" \
+    CODEX_TEST_CLAUDE_SLEEP=3 \
+    CODEX_HOME="$home" \
+    CODEX_AUTH_BIN="$tmp/bin/codex-auth" \
+    CLAUDE_GPT_PROXY_BIN="$tmp/bin/claude-code-proxy" \
+    CLAUDE_GPT_CURL_BIN="$tmp/bin/curl" \
+    CLAUDE_GPT_CLAUDE_BIN="$tmp/bin/claude" \
+    CLAUDE_GPT_PORT=18895 \
+    "$REPO_ROOT/bin/claude-gpt" -- -p follow-active \
+      >"$tmp/out" 2>"$tmp/err" &
+  wrapper_pid=$!
+
+  for (( attempt=0; attempt<100; attempt++ )); do
+    grep -Fq 'proxy-lease=<acct-work:access-only-work>' "$log" 2>/dev/null && break
+    kill -0 "$wrapper_pid" 2>/dev/null || break
+    sleep 0.05
+  done
+  assert_contains 'proxy-lease=<acct-work:access-only-work>' "$log"
+
+  write_fake_active_profile_marker "$marker" personal
+  for (( attempt=0; attempt<100; attempt++ )); do
+    grep -Fq 'proxy-lease=<acct-personal:access-only-personal>' "$log" 2>/dev/null && break
+    kill -0 "$wrapper_pid" 2>/dev/null || break
+    sleep 0.05
+  done
+  wait "$wrapper_pid"
+
+  assert_contains 'proxy-lease=<acct-personal:access-only-personal>' "$log"
+  assert_contains 'active subscription profile changed: work -> personal' "$tmp/err"
+  assert_contains 'auth-arg=<--active>' "$log"
+}
+
+test_claude_gpt_default_recovers_switch_during_failed_initial_refresh() {
+  local tmp home log marker proxy_pid_file wrapper_pid attempt
+  tmp="$(mktemp -d)"
+  home="$tmp/home"
+  log="$tmp/calls.log"
+  marker="$tmp/custom-active-profile.json"
+  proxy_pid_file="$tmp/proxy.pid"
+  mkdir -p "$home"
+  write_fake_active_profile_marker "$marker" work
+  write_fake_claude_gpt_auth "$tmp/bin/codex-auth"
+  write_fake_claude_gpt_proxy "$tmp/bin/claude-code-proxy"
+  write_fake_claude_gpt_curl "$tmp/bin/curl"
+  write_fake_claude_harness "$tmp/bin/claude"
+
+  CODEX_TEST_LOG="$log" \
+    CODEX_TEST_PROXY_PID="$proxy_pid_file" \
+    CODEX_TEST_PROXY_WATCH_AUTH=1 \
+    CODEX_TEST_ACTIVE_PROFILE_FILE="$marker" \
+    CODEX_AUTH_ACTIVE_PROFILE_FILE="$marker" \
+    CODEX_TEST_REFRESH_DELAY_SECS=0.5 \
+    CODEX_TEST_REFRESH_FAIL_PROFILE=work \
+    CODEX_TEST_CLAUDE_SLEEP=1 \
+    CODEX_HOME="$home" \
+    CODEX_AUTH_BIN="$tmp/bin/codex-auth" \
+    CLAUDE_GPT_PROXY_BIN="$tmp/bin/claude-code-proxy" \
+    CLAUDE_GPT_CURL_BIN="$tmp/bin/curl" \
+    CLAUDE_GPT_CLAUDE_BIN="$tmp/bin/claude" \
+    CLAUDE_GPT_PORT=18897 \
+    "$REPO_ROOT/bin/claude-gpt" -- -p recover-initial-switch \
+      >"$tmp/out" 2>"$tmp/err" &
+  wrapper_pid=$!
+
+  for (( attempt=0; attempt<100; attempt++ )); do
+    grep -Fq 'auth-arg=<refresh>' "$log" 2>/dev/null && break
+    kill -0 "$wrapper_pid" 2>/dev/null || break
+    sleep 0.01
+  done
+  assert_contains 'auth-arg=<refresh>' "$log"
+  write_fake_active_profile_marker "$marker" personal
+  wait "$wrapper_pid"
+
+  assert_contains 'proxy-lease=<acct-personal:access-only-personal>' "$log"
+  assert_not_contains 'proxy-lease=<acct-work:access-only-work>' "$log"
+  assert_contains 'auth-arg=<--active>' "$log"
+}
+
+test_claude_gpt_explicit_profile_stays_pinned_during_active_switch() {
+  local tmp home log marker proxy_pid_file wrapper_pid attempt pinned_exports
+  tmp="$(mktemp -d)"
+  home="$tmp/home"
+  log="$tmp/calls.log"
+  marker="$home/active-profile.json"
+  proxy_pid_file="$tmp/proxy.pid"
+  mkdir -p "$home"
+  write_fake_active_profile_marker "$marker" work
+  write_fake_claude_gpt_auth "$tmp/bin/codex-auth"
+  write_fake_claude_gpt_proxy "$tmp/bin/claude-code-proxy"
+  write_fake_claude_gpt_curl "$tmp/bin/curl"
+  write_fake_claude_harness "$tmp/bin/claude"
+
+  CODEX_TEST_LOG="$log" \
+    CODEX_TEST_PROXY_PID="$proxy_pid_file" \
+    CODEX_TEST_PROXY_WATCH_AUTH=1 \
+    CODEX_TEST_ACTIVE_PROFILE_FILE="$marker" \
+    CODEX_TEST_CLAUDE_SLEEP=3 \
+    CODEX_HOME="$home" \
+    CODEX_AUTH_BIN="$tmp/bin/codex-auth" \
+    CLAUDE_GPT_PROXY_BIN="$tmp/bin/claude-code-proxy" \
+    CLAUDE_GPT_CURL_BIN="$tmp/bin/curl" \
+    CLAUDE_GPT_CLAUDE_BIN="$tmp/bin/claude" \
+    CLAUDE_GPT_PORT=18896 \
+    CLAUDE_GPT_RENEW_MARGIN_SECS=3599 \
+    "$REPO_ROOT/bin/claude-gpt" --profile work -- -p stay-pinned \
+      >"$tmp/out" 2>"$tmp/err" &
+  wrapper_pid=$!
+
+  for (( attempt=0; attempt<100; attempt++ )); do
+    grep -Fq 'proxy-lease=<acct-work:access-only-work>' "$log" 2>/dev/null && break
+    kill -0 "$wrapper_pid" 2>/dev/null || break
+    sleep 0.05
+  done
+  assert_contains 'proxy-lease=<acct-work:access-only-work>' "$log"
+
+  write_fake_active_profile_marker "$marker" personal
+  wait "$wrapper_pid"
+
+  assert_not_contains 'proxy-lease=<acct-personal:access-only-personal>' "$log"
+  assert_not_contains 'auth-arg=<--active>' "$log"
+  pinned_exports="$(grep -Fc 'auth-arg=<identity-pinned>' "$log")"
+  (( pinned_exports >= 2 )) || fail "explicit Claude GPT profile was not renewed with its pinned identity"
+}
+
 test_claude_gpt_launcher_fails_closed_when_proxy_exits() {
   local tmp home log proxy_pid_file claude_pid_file status
   tmp="$(mktemp -d)"
@@ -2864,6 +3067,9 @@ main() {
     test_claude_gpt_custom_option_can_be_dropped \
     test_claude_gpt_launcher_reads_kernel_selected_port \
     test_claude_gpt_launcher_renews_while_harness_runs \
+    test_claude_gpt_default_follows_active_profile_during_session \
+    test_claude_gpt_default_recovers_switch_during_failed_initial_refresh \
+    test_claude_gpt_explicit_profile_stays_pinned_during_active_switch \
     test_claude_gpt_launcher_fails_closed_when_proxy_exits \
     test_claude_gpt_children_die_with_killed_wrapper
   do

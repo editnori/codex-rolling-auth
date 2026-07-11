@@ -3,7 +3,7 @@ set -euo pipefail
 
 umask 077
 
-CLAUDE_GPT_PROXY_VERSION="0.1.10-codex-auth.1"
+CLAUDE_GPT_PROXY_VERSION="0.1.10-codex-auth.2"
 CLAUDE_GPT_DEFAULT_COMPACT_WINDOW="372000"
 # Dynamic model lanes. Claude Code keeps /model and /effort live; these only set
 # which GPT model each Claude tier maps to. The proxy translates every id and the
@@ -38,7 +38,7 @@ subscription profile. This does not use OPENAI_API_KEY or change the active
 codex-auth profile.
 
 Launcher options:
-  --profile NAME       use a saved profile (default: current active profile)
+  --profile NAME       use and pin a saved profile (default: follow active profile)
   --model MODEL        starting model (default: gpt-5.6-sol)
   --opus-model MODEL   Opus deep lane (default: gpt-5.6-sol)
   --sonnet-model MODEL Sonnet balanced lane (default: gpt-5.6-terra)
@@ -86,6 +86,36 @@ metadata_field() {
   local metadata="$1"
   local field="$2"
   jq -er --arg field "$field" '.[$field] | select(. != null and . != "")' <<<"$metadata"
+}
+
+active_marker_state() {
+  local marker="$1"
+  jq -c '
+    select(.version == 2)
+    | {profile, account_identity, profile_revision, profile_fingerprint}
+  ' "$marker" 2>/dev/null || printf '%s\n' unavailable
+}
+
+metadata_marker_state() {
+  local metadata="$1"
+  jq -c '
+    {
+      profile,
+      account_identity,
+      profile_revision,
+      profile_fingerprint: .credential_fingerprint
+    }
+  ' <<<"$metadata"
+}
+
+proxy_lease_file_is_safe() {
+  local lease_file="$1"
+  jq -e --argjson lease_expires "$CLAUDE_GPT_PROXY_LEASE_EXPIRES" '
+    .refresh == ""
+    and .expires == $lease_expires
+    and ((.access // "") | type == "string" and length > 0)
+    and ((.accountId // "") | type == "string" and length > 0)
+  ' "$lease_file" >/dev/null 2>&1
 }
 
 claude_context_model() {
@@ -136,6 +166,7 @@ signal_process_tree() {
 
 main() {
   local profile="--active"
+  local follow_active=1
   local model="${CLAUDE_GPT_MODEL:-$CLAUDE_GPT_DEFAULT_MODEL}"
   local opus_model="${CLAUDE_GPT_OPUS_MODEL:-$CLAUDE_GPT_DEFAULT_OPUS_MODEL}"
   local opus_model_name="${CLAUDE_GPT_OPUS_MODEL_NAME:-$CLAUDE_GPT_DEFAULT_OPUS_MODEL_NAME}"
@@ -156,8 +187,10 @@ main() {
   local compact_window="${CLAUDE_GPT_COMPACT_WINDOW:-${CLAUDE_CODE_AUTO_COMPACT_WINDOW:-$CLAUDE_GPT_DEFAULT_COMPACT_WINDOW}}"
   local effort="" bare=0
   local script_dir codex_auth proxy_bin claude_bin curl_bin
-  local codex_home session_dir config_dir auth_file state_dir proxy_log proxy_state_log stop_file
+  local codex_home session_dir config_dir auth_file active_lease_candidate active_profile_file
+  local state_dir proxy_log proxy_state_log stop_file
   local metadata initial_expires expires profile_name identity now requested_port port proxy_version
+  local initial_profile_name initial_identity active_state=""
   local renew_margin_secs parent_death_code
   local proxy_pid="" lease_pid="" claude_pid="" wrapper_pid="$BASHPID" status=0
   local -a claude_args=()
@@ -167,6 +200,7 @@ main() {
       --profile)
         [[ $# -ge 2 && -n "$2" ]] || die "--profile needs a name"
         profile="$2"
+        [[ "$profile" == "--active" ]] || follow_active=0
         shift 2
         ;;
       --model)
@@ -252,6 +286,8 @@ main() {
   session_dir="$(mktemp -d "$codex_home/.tmp/claude-gpt.XXXXXX")"
   config_dir="$session_dir/config"
   auth_file="$config_dir/codex/auth.json"
+  active_lease_candidate="$config_dir/codex/auth.active-next.json"
+  active_profile_file="${CODEX_AUTH_ACTIVE_PROFILE_FILE:-$codex_home/active-profile.json}"
   state_dir="$session_dir/state"
   proxy_log="$session_dir/proxy.log"
   proxy_state_log="$state_dir/claude-code-proxy/proxy.log"
@@ -297,20 +333,43 @@ main() {
     || die "auth export did not return a stable account identity"
   initial_expires="$(metadata_field "$metadata" expires)" \
     || die "auth export did not return the access-token expiry"
+  initial_profile_name="$profile_name"
+  initial_identity="$identity"
 
   # Opening Codex app-server against an isolated copy makes official Codex own
   # any refresh-token rotation. codex-auth safely merges the result back into
   # this one saved profile without switching the active profile name.
-  "$codex_auth" refresh --quiet --fast "$profile_name" >/dev/null
-  metadata="$("$codex_auth" claude-gpt-export "$profile_name" "$auth_file" "$identity")" \
-    || die "could not renew the selected subscription profile"
+  if (( follow_active )); then
+    # A watch/auto switch can retire the original account while this refresh is
+    # starting.  Its failure must not hide a newly valid active profile; the
+    # locked --active export below is the authoritative startup decision.
+    "$codex_auth" refresh --quiet --fast "$profile_name" >/dev/null 2>&1 || true
+    # The active profile may have changed while its predecessor refreshed.
+    # Resolve it again under codex-auth's mutation lock instead of putting the
+    # predecessor back into the session lease.
+    metadata="$("$codex_auth" claude-gpt-export --active "$auth_file")" \
+      || die "could not renew the active subscription profile"
+  else
+    "$codex_auth" refresh --quiet --fast "$profile_name" >/dev/null
+    metadata="$("$codex_auth" claude-gpt-export "$profile_name" "$auth_file" "$identity")" \
+      || die "could not renew the selected subscription profile"
+  fi
+  profile_name="$(metadata_field "$metadata" profile)" \
+    || die "renewed auth export did not return a profile"
+  identity="$(metadata_field "$metadata" account_identity)" \
+    || die "renewed auth export did not return a stable account identity"
   expires="$(metadata_field "$metadata" expires)" \
     || die "renewed auth export did not return an expiry"
+  if (( follow_active )); then
+    active_state="$(metadata_marker_state "$metadata")" \
+      || die "renewed auth export did not return active-profile metadata"
+  fi
   now="$(date +%s)"
   if (( expires / 1000 <= now + 90 )); then
     die "the selected access token is about to expire; run: codex-auth reauth $profile_name"
   fi
-  if (( initial_expires / 1000 <= now + 300 && expires <= initial_expires )); then
+  if [[ "$profile_name" == "$initial_profile_name" && "$identity" == "$initial_identity" ]] \
+    && (( initial_expires / 1000 <= now + 300 && expires <= initial_expires )); then
     die "Codex could not refresh the selected access token; run: codex-auth reauth $profile_name"
   fi
   [[ "$(jq -r '.refresh' "$auth_file")" == "" ]] \
@@ -369,7 +428,10 @@ main() {
   fi
 
   renew_lease() {
-    local current_expires="$expires" next_metadata next_expires target sleep_for lease_now
+    local current_profile="$profile_name" current_identity="$identity" current_expires="$expires"
+    local current_active_state="$active_state" marker_state previous_profile previous_identity
+    local next_metadata next_profile next_identity next_expires next_active_state
+    local target sleep_for lease_now
     renew_margin_secs="${CLAUDE_GPT_RENEW_MARGIN_SECS:-290}"
     [[ "$renew_margin_secs" =~ ^[0-9]+$ && "$renew_margin_secs" -ge 1 ]] || renew_margin_secs=290
     while [[ ! -e "$stop_file" ]] \
@@ -377,6 +439,42 @@ main() {
       && process_alive "$claude_pid" \
       && process_alive "$proxy_pid"
     do
+      if (( follow_active )); then
+        marker_state="$(active_marker_state "$active_profile_file")"
+        if [[ "$marker_state" != "$current_active_state" ]] \
+          && next_metadata="$("$codex_auth" claude-gpt-export --active "$active_lease_candidate" 2>/dev/null)" \
+          && next_profile="$(metadata_field "$next_metadata" profile 2>/dev/null)" \
+          && next_identity="$(metadata_field "$next_metadata" account_identity 2>/dev/null)" \
+          && next_expires="$(metadata_field "$next_metadata" expires 2>/dev/null)" \
+          && next_active_state="$(metadata_marker_state "$next_metadata" 2>/dev/null)" \
+          && proxy_lease_file_is_safe "$active_lease_candidate"
+        then
+          lease_now="$(date +%s)"
+          if (( next_expires / 1000 > lease_now + 90 )) \
+            && mv -f "$active_lease_candidate" "$auth_file"
+          then
+            previous_profile="$current_profile"
+            previous_identity="$current_identity"
+            current_profile="$next_profile"
+            current_identity="$next_identity"
+            current_expires="$next_expires"
+            current_active_state="$next_active_state"
+            if [[ "$current_profile" != "$previous_profile" || "$current_identity" != "$previous_identity" ]]; then
+              printf 'claude-gpt: active subscription profile changed: %s -> %s\n' \
+                "$previous_profile" "$current_profile" >&2
+            fi
+          else
+            rm -f "$active_lease_candidate"
+            # Keep the current, still-valid lease live while official Codex
+            # refreshes the newly selected profile. The next poll stages it
+            # again and only promotes a validated access-only replacement.
+            "$codex_auth" refresh --quiet --fast "$next_profile" >/dev/null 2>&1 || true
+          fi
+        else
+          rm -f "$active_lease_candidate"
+        fi
+      fi
+
       lease_now="$(date +%s)"
       # Official Codex refreshes access tokens inside its final five minutes.
       # Enter that window with ten seconds of headroom, then retry briefly if a
@@ -389,19 +487,53 @@ main() {
         continue
       fi
 
-      if "$codex_auth" refresh --quiet --fast "$profile_name" >/dev/null 2>&1 \
-        && next_metadata="$("$codex_auth" claude-gpt-export "$profile_name" "$auth_file" "$identity" 2>/dev/null)" \
+      next_metadata=""
+      if "$codex_auth" refresh --quiet --fast "$current_profile" >/dev/null 2>&1; then
+        if (( follow_active )); then
+          next_metadata="$("$codex_auth" claude-gpt-export --active "$active_lease_candidate" 2>/dev/null)" \
+            || next_metadata=""
+          lease_now="$(date +%s)"
+          if [[ -z "$next_metadata" ]] \
+            || ! next_expires="$(metadata_field "$next_metadata" expires 2>/dev/null)" \
+            || (( next_expires / 1000 <= lease_now + 90 )) \
+            || ! proxy_lease_file_is_safe "$active_lease_candidate" \
+            || ! mv -f "$active_lease_candidate" "$auth_file"
+          then
+            rm -f "$active_lease_candidate"
+            next_metadata=""
+          fi
+        else
+          next_metadata="$("$codex_auth" claude-gpt-export "$current_profile" "$auth_file" "$current_identity" 2>/dev/null)" \
+            || next_metadata=""
+        fi
+      fi
+      if [[ -n "$next_metadata" ]] \
+        && next_profile="$(metadata_field "$next_metadata" profile 2>/dev/null)" \
+        && next_identity="$(metadata_field "$next_metadata" account_identity 2>/dev/null)" \
         && next_expires="$(metadata_field "$next_metadata" expires 2>/dev/null)"
       then
-        if (( next_expires > current_expires )); then
+        previous_profile="$current_profile"
+        previous_identity="$current_identity"
+        current_profile="$next_profile"
+        current_identity="$next_identity"
+        if (( follow_active )); then
+          current_active_state="$(metadata_marker_state "$next_metadata")"
+        fi
+        if [[ "$current_profile" != "$previous_profile" || "$current_identity" != "$previous_identity" ]] \
+          || (( next_expires > current_expires )); then
+          if [[ "$current_profile" != "$previous_profile" || "$current_identity" != "$previous_identity" ]]; then
+            printf 'claude-gpt: active subscription profile changed: %s -> %s\n' \
+              "$previous_profile" "$current_profile" >&2
+          fi
           current_expires="$next_expires"
           continue
         fi
+        current_expires="$next_expires"
       fi
 
       lease_now="$(date +%s)"
       if (( lease_now >= current_expires / 1000 - 60 )); then
-        printf 'claude-gpt: subscription lease could not be renewed for profile %s\n' "$profile_name" >&2
+        printf 'claude-gpt: subscription lease could not be renewed for profile %s\n' "$current_profile" >&2
         process_alive "$claude_pid" && kill -TERM "$claude_pid" 2>/dev/null || true
         process_alive "$wrapper_pid" && kill -TERM "$wrapper_pid" 2>/dev/null || true
         return 1

@@ -9,7 +9,7 @@ codex_home="${CODEX_HOME:-$HOME/.codex}"
 standalone_root="$codex_home/packages/standalone"
 tui_source="$repo_dir/tui"
 tui_dir="$libdir/tui"
-claude_gpt_proxy_version="0.1.10-codex-auth.1"
+claude_gpt_proxy_version="0.1.10-codex-auth.2"
 
 mkdir -p "$bindir" "$libdir"
 if [[ ! -f "$tui_source/pyproject.toml" || ! -f "$tui_source/uv.lock" || ! -d "$tui_source/src/codex_auth_tui" ]]; then

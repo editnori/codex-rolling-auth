@@ -34,7 +34,7 @@ All captures use the real Textual app with an in-memory synthetic backend.
 - `crontab` is optional; without it, run `codex-auth maintain` after a direct curl update.
 - Building the patched Codex generation also needs a Rust/Cargo toolchain and normal native build dependencies.
 - Running GPT inside Claude Code also needs Claude Code. The installer supplies
-  the pinned [`claude-code-proxy` compatibility build](https://github.com/editnori/claude-code-proxy/releases/tag/v0.1.10-codex-auth.1).
+  the pinned [`claude-code-proxy` compatibility build](https://github.com/editnori/claude-code-proxy/releases/tag/v0.1.10-codex-auth.2).
 
 ## Install
 
@@ -70,14 +70,16 @@ If you only want the manager and not the `codex` shim:
 ```
 
 `claude-code-proxy` is a separate MIT-licensed third-party dependency.
-`install.sh` downloads the pinned `0.1.10-codex-auth.1` compatibility build,
+`install.sh` downloads the pinned `0.1.10-codex-auth.2` compatibility build,
 verifies its published SHA-256 checksum, and installs it beside `claude-gpt`.
 That build stays source-visible in the
 [`editnori/claude-code-proxy` fork](https://github.com/editnori/claude-code-proxy)
 and contains two focused fixes submitted upstream: true Sol `max` effort
 ([PR #28](https://github.com/raine/claude-code-proxy/pull/28)) and terminal
 context-window responses that activate Claude compaction
-([PR #29](https://github.com/raine/claude-code-proxy/pull/29)). The launcher
+([PR #29](https://github.com/raine/claude-code-proxy/pull/29)), plus immediate
+rate-limit classification and isolated-auth reloads
+([PR #30](https://github.com/raine/claude-code-proxy/pull/30)). The launcher
 prefers the sibling binary and refuses a different version by default. Set
 `CODEX_AUTH_INSTALL_CLAUDE_GPT_PROXY=0` only if you do not want GPT-in-Claude
 support or will install the exact proxy version yourself.
@@ -172,6 +174,11 @@ proxy returns the upstream context-window failure as terminal HTTP 413
 message groups, compacts the session, and retries the interrupted turn. It no
 longer retries the same oversized request as a 502 server failure.
 
+Codex rate-limit events also stop immediately. Normal quota exhaustion returns
+HTTP 429 with its retry delay instead of becoming two nested ten-attempt retry
+loops. If the same event arrives for an estimated input at or above 372K, the
+proxy returns 413 so Claude can trim the oversized compaction request first.
+
 Lower the ceiling when you want earlier compaction:
 
 ```bash
@@ -187,14 +194,17 @@ relaunched before a newly installed compatibility build takes effect.
 This path uses the selected profile's ChatGPT/Codex subscription, not
 `OPENAI_API_KEY`. `codex-auth` remains the only refresh owner. The proxy receives
 an access-only lease in a private temporary directory, never the refresh token;
-renewals must retain the same hashed account identity, and the proxy, lease, and
+each lease snapshot contains one account identity, and the proxy, lease, and
 temporary files are removed when Claude Code exits. Ordinary `claude`, `codex`,
 and `cswap` configuration is not rewritten by the launcher. Claude Code still
 runs its normal harness and may update its own history or credential metadata as
-it would on an ordinary launch. The launcher never switches the active Codex
-profile; if the selected profile is already active, official Codex may rotate
-that profile's credential in place during renewal so the live login does not go
-stale.
+it would on an ordinary launch. The launcher never changes which Codex profile
+is active. A default `claude-gpt` session follows changes made by `codex-auth`
+watch/auto mode: it stages and validates a new access-only lease, then the proxy
+reloads that lease on the next request without restarting Claude. An explicit
+`claude-gpt --profile NAME` remains pinned to that account, requires renewals to
+retain its hashed identity, and ignores active profile changes. Official Codex
+remains the only refresh-token owner in both modes.
 
 The proxy binds a kernel-selected loopback port for one Claude Code process. Its
 HTTP routes do not have their own local authorization layer, so this assumes
