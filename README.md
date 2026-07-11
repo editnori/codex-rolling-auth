@@ -30,6 +30,7 @@ All captures use the real Textual app with an in-memory synthetic backend.
 ## Requirements
 
 - Linux or WSL with Bash, `jq`, `flock`, Git, and the official Codex CLI.
+  `claude-gpt` specifically requires Bash 5.1 or newer for supervised child waiting.
 - [`uv`](https://docs.astral.sh/uv/) for the isolated Textual environment.
 - `crontab` is optional; without it, run `codex-auth maintain` after a direct curl update.
 - Building the patched Codex generation also needs a Rust/Cargo toolchain and normal native build dependencies.
@@ -388,9 +389,10 @@ crontab -l 2>/dev/null \
   | awk '$0 == "# BEGIN codex-auth maintain" {skip=1; next} $0 == "# END codex-auth maintain" {skip=0; next} !skip' \
   | crontab -
 curl -fsSL https://chatgpt.com/codex/install.sh | sh
-rm -f ~/.local/bin/codex-auth ~/.local/bin/codex-auth-tui ~/.local/bin/codex-real \
-  ~/.local/bin/claude-gpt ~/.local/bin/claude-code-proxy
-rm -rf ~/.local/lib/codex-auth
+prefix="${PREFIX:-$HOME/.local}"
+rm -f "$prefix/bin/codex-auth" "$prefix/bin/codex-auth-tui" "$prefix/bin/codex-real" \
+  "$prefix/bin/claude-gpt" "$prefix/bin/claude-code-proxy"
+rm -rf "$prefix/lib/codex-auth"
 ```
 
 This intentionally leaves `$CODEX_HOME/auth-profiles` and other account state in place.

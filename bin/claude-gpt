@@ -165,6 +165,9 @@ signal_process_tree() {
 }
 
 main() {
+  if (( BASH_VERSINFO[0] < 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] < 1) )); then
+    die "Bash 5.1 or newer is required (the launcher uses wait -n -p)"
+  fi
   local profile="--active"
   local follow_active=1
   local model="${CLAUDE_GPT_MODEL:-$CLAUDE_GPT_DEFAULT_MODEL}"

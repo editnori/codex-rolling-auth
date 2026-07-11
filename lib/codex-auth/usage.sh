@@ -478,7 +478,7 @@ usage_json_from_home() {
   rate_pid="$CODEX_RATE_PID"
   start="$(now_epoch)"
 
-  if ! printf '%s\n' '{"id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-auth","title":"Codex Auth","version":"0.2.0"},"capabilities":{"experimentalApi":true,"requestAttestation":false}}}' 2>/dev/null >&"$rate_in"; then
+  if ! printf '%s\n' '{"id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-auth","title":"Codex Auth","version":"0.2.0"},"capabilities":{"experimentalApi":true,"requestAttestation":false}}}' 1>&"$rate_in" 2>/dev/null; then
     usage_json_cleanup_coproc "$rate_in" "$rate_out" "$rate_pid"
     printf '%s\n' '{"error":{"message":"refresh unavailable"}}'
     return 0
@@ -492,8 +492,8 @@ usage_json_from_home() {
     if IFS= read -r -t 0.25 line 2>/dev/null <&"$rate_out"; then
       line_id="$(jq -r '.id // empty' <<<"$line" 2>/dev/null || true)"
       if [[ "$line_id" == "1" && "$requested" == "0" ]]; then
-        printf '%s\n' '{"method":"initialized"}' 2>/dev/null >&"$rate_in" || true
-        printf '%s\n' '{"id":2,"method":"account/rateLimits/read"}' 2>/dev/null >&"$rate_in" || true
+        printf '%s\n' '{"method":"initialized"}' 1>&"$rate_in" 2>/dev/null || true
+        printf '%s\n' '{"id":2,"method":"account/rateLimits/read"}' 1>&"$rate_in" 2>/dev/null || true
         requested=1
       elif [[ "$line_id" == "2" ]]; then
         payload="$(jq -c 'if has("result") then .result else {error:.error} end' <<<"$line" 2>/dev/null || true)"
@@ -557,7 +557,7 @@ reset_credit_json_from_home() {
   rate_pid="$CODEX_RESET_PID"
   start="$(now_epoch)"
 
-  if ! printf '%s\n' '{"id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-auth","title":"Codex Auth","version":"0.2.0"},"capabilities":{"experimentalApi":true,"requestAttestation":false}}}' 2>/dev/null >&"$rate_in"; then
+  if ! printf '%s\n' '{"id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-auth","title":"Codex Auth","version":"0.2.0"},"capabilities":{"experimentalApi":true,"requestAttestation":false}}}' 1>&"$rate_in" 2>/dev/null; then
     usage_json_cleanup_coproc "$rate_in" "$rate_out" "$rate_pid"
     printf '%s\n' '{"error":{"message":"reset unavailable"}}'
     return 0
@@ -575,16 +575,16 @@ reset_credit_json_from_home() {
     if IFS= read -r -t 0.25 line 2>/dev/null <&"$rate_out"; then
       line_id="$(jq -r '.id // empty' <<<"$line" 2>/dev/null || true)"
       if [[ "$line_id" == "1" && "$requested" == "0" ]]; then
-        printf '%s\n' '{"method":"initialized"}' 2>/dev/null >&"$rate_in" || true
+        printf '%s\n' '{"method":"initialized"}' 1>&"$rate_in" 2>/dev/null || true
         jq -cn --arg key "$idempotency_key" \
           '{id:2,method:"account/rateLimitResetCredit/consume",params:{idempotencyKey:$key}}' \
-          2>/dev/null >&"$rate_in" || true
+          1>&"$rate_in" 2>/dev/null || true
         requested=1
       elif [[ "$line_id" == "2" ]]; then
         outcome="$(jq -r '.result.outcome // empty' <<<"$line" 2>/dev/null || true)"
         if [[ -n "$outcome" ]]; then
           consume_received=1
-          printf '%s\n' '{"id":3,"method":"account/rateLimits/read"}' 2>/dev/null >&"$rate_in" || true
+          printf '%s\n' '{"id":3,"method":"account/rateLimits/read"}' 1>&"$rate_in" 2>/dev/null || true
         else
           payload="$(jq -c 'if has("error") then {error:.error} else {error:{message:"invalid reset response"}} end' <<<"$line" 2>/dev/null || true)"
           [[ -n "$payload" ]] || payload='{"error":{"message":"invalid reset response"}}'
