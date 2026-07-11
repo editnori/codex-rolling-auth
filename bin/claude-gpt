@@ -46,8 +46,10 @@ Launcher options:
   --fast-model MODEL   custom "GPT-5.6 Sol Ultra Fast" picker option
                        (default: gpt-5.6-sol-fast; set CLAUDE_GPT_FAST_MODEL=
                        to drop it)
-  --effort LEVEL       starting effort: low, medium, high, xhigh, max, or auto
-                       (still changeable with /effort)
+  --effort LEVEL       starting effort: low, medium, high, xhigh, max,
+                       ultracode (or ultra), or auto
+                       (still changeable with /effort; ultracode is xhigh plus
+                       Claude's dynamic workflow orchestration)
   --bare               pass --bare to Claude Code
   -h, --help           show this help
 
@@ -181,7 +183,8 @@ main() {
         [[ $# -ge 2 && -n "$2" ]] || die "--effort needs a level"
         case "$2" in
           low|medium|high|xhigh|max|auto) effort="$2" ;;
-          *) die "--effort must be low, medium, high, xhigh, max, or auto" ;;
+          ultra|ultracode) effort="ultracode" ;;
+          *) die "--effort must be low, medium, high, xhigh, max, ultracode (or ultra), or auto" ;;
         esac
         shift 2
         ;;

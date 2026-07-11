@@ -7,6 +7,7 @@
 - Kept proxy routing child-only, forwarded Claude Code arguments unchanged, and avoided switching the active Codex profile or rewriting cswap configuration.
 - Mapped Claude Code's Opus, Sonnet, and Haiku tiers to the `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` lanes, each overridable by a launcher flag or `CLAUDE_GPT_*` variable.
 - Added clear GPT labels and `effort,xhigh_effort,max_effort` capability declarations to every lane, including one custom `/model` option, `GPT-5.6 Sol Ultra Fast` (`gpt-5.6-sol-fast`); `claude-gpt --effort` sets only the starting level, `/effort` stays dynamic, and the launcher never pins `CCP_CODEX_EFFORT`.
+- Added `claude-gpt --effort ultracode` and its `ultra` alias for Claude Code's xhigh-plus-dynamic-workflow mode, and documented the pinned proxy's current `max`-to-`xhigh` limitation separately from Ultra Fast service tier.
 
 ## 0.1.1 - 2026-07-10
 

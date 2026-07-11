@@ -114,10 +114,18 @@ and `GPT-5.6 Luna Light`. It also carries one custom option,
 `GPT-5.6 Sol Ultra Fast`
 (`gpt-5.6-sol-fast`), which routes Sol through the proxy's priority service
 tier. Every lane advertises `effort,xhigh_effort,max_effort`, so `/effort`
-offers low through max and the proxy translates the chosen level per turn. The
-launcher never sets `CCP_CODEX_EFFORT`, so `/effort` stays live. Start at a
-specific level with `claude-gpt --effort high`; `/effort` can still change it
+offers low through max plus Claude Code's `ultracode` mode when dynamic
+workflows are available. `ultracode` means xhigh effort plus Claude's workflow
+orchestration; it is not another Sol reasoning-effort value. Start it with
+`claude-gpt --effort ultracode` (or the `ultra` alias). The launcher never sets
+`CCP_CODEX_EFFORT`, so `/effort` stays live and can still change the level
 inside the session.
+
+GPT-5.6 Sol's highest direct reasoning effort is `max`. The pinned upstream
+proxy 0.1.10 predates that Sol behavior and maps Claude's `max` to `xhigh`;
+`ultracode` still works as designed because its underlying effort is xhigh.
+Until the proxy's max-effort correction ships, do not treat its `max` picker
+entry as true Sol `reasoning.effort: "max"`.
 
 Sol Ultra Fast uses the selected subscription profile's separate Codex
 fast-mode quota. If that quota is unavailable, the backend can return `usage

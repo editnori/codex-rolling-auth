@@ -2561,6 +2561,35 @@ test_claude_gpt_lane_flags_and_env_override_models() {
   assert_contains 'claude-arg=<high>' "$log"
 }
 
+test_claude_gpt_ultra_alias_starts_ultracode_workflows() {
+  local tmp home log proxy_pid_file
+  tmp="$(mktemp -d)"
+  home="$tmp/home"
+  log="$tmp/calls.log"
+  proxy_pid_file="$tmp/proxy.pid"
+  mkdir -p "$home"
+  write_fake_claude_gpt_auth "$tmp/bin/codex-auth"
+  write_fake_claude_gpt_proxy "$tmp/bin/claude-code-proxy"
+  write_fake_claude_gpt_curl "$tmp/bin/curl"
+  write_fake_claude_harness "$tmp/bin/claude"
+
+  CODEX_TEST_LOG="$log" \
+    CODEX_TEST_PROXY_PID="$proxy_pid_file" \
+    CODEX_HOME="$home" \
+    CODEX_AUTH_BIN="$tmp/bin/codex-auth" \
+    CLAUDE_GPT_PROXY_BIN="$tmp/bin/claude-code-proxy" \
+    CLAUDE_GPT_CURL_BIN="$tmp/bin/curl" \
+    CLAUDE_GPT_CLAUDE_BIN="$tmp/bin/claude" \
+    CLAUDE_GPT_PORT=18894 \
+    "$REPO_ROOT/bin/claude-gpt" --profile work --effort ultra -- -p workflows
+
+  assert_contains 'claude-arg=<--effort>' "$log"
+  assert_contains 'claude-arg=<ultracode>' "$log"
+  # Ultracode must not freeze the proxy at one effort; Claude owns its
+  # xhigh-plus-workflow orchestration for the session.
+  assert_contains 'proxy-effort=<unset>' "$log"
+}
+
 test_claude_gpt_custom_option_can_be_dropped() {
   local tmp home log proxy_pid_file
   tmp="$(mktemp -d)"
@@ -2813,6 +2842,7 @@ main() {
     test_claude_gpt_launcher_is_ephemeral_and_preserves_harness_args \
     test_claude_gpt_maps_model_lanes_and_advertises_effort \
     test_claude_gpt_lane_flags_and_env_override_models \
+    test_claude_gpt_ultra_alias_starts_ultracode_workflows \
     test_claude_gpt_custom_option_can_be_dropped \
     test_claude_gpt_launcher_reads_kernel_selected_port \
     test_claude_gpt_launcher_renews_while_harness_runs \
