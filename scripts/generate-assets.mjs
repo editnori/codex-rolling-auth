@@ -12,13 +12,13 @@ rmSync(framesDir, { recursive: true, force: true });
 mkdirSync(framesDir, { recursive: true });
 
 const rows = [
-  { action: "stay", profile: "Layth08", wk: 43, h5: 100, status: "ready", selected: true },
-  { action: "use", profile: "Layth48", wk: 76, h5: 86, status: "ready" },
-  { action: "use", profile: "Layth18", wk: 64, h5: 31, status: "ready" },
-  { action: "cap", profile: "Layth38", wk: 0, h5: 100, status: "old cap" },
-  { action: "cap", profile: "Layth", wk: 0, h5: 100, status: "cap" },
-  { action: "cap", profile: "Layth.qassem", wk: 0, h5: 100, status: "cap" },
-  { action: "cap", profile: "Layth28", wk: 0, h5: 100, status: "cap" },
+  { action: "stay", profile: "work", wk: 43, h5: 100, status: "ready", selected: true },
+  { action: "use", profile: "backup", wk: 76, h5: 86, status: "ready" },
+  { action: "use", profile: "personal", wk: 64, h5: 31, status: "ready" },
+  { action: "cap", profile: "lab", wk: 0, h5: 100, status: "old cap" },
+  { action: "cap", profile: "spare-1", wk: 0, h5: 100, status: "cap" },
+  { action: "cap", profile: "spare-2", wk: 0, h5: 100, status: "cap" },
+  { action: "cap", profile: "spare-3", wk: 0, h5: 100, status: "cap" },
   { action: "login", profile: "current", wk: null, h5: null, status: "login needed" },
 ];
 

@@ -27,7 +27,7 @@
 <text x="0" y="102" class="warn" font-weight="700">filter</text>
 <rect x="0" y="122" width="1120" height="34" class="row-selected"/>
 <text x="30" y="140" class="active" font-weight="700">stay</text>
-<text x="140" y="140" class="fg" font-weight="700">Layth08</text>
+<text x="140" y="140" class="fg" font-weight="700">work</text>
 <text x="418" y="140" class="warn" text-anchor="middle">43</text>
 <rect x="448" y="124" width="94" height="32" class="bar-bg"/>
 <rect x="448" y="124" width="40" height="32" class="bar-warn"/>
@@ -40,7 +40,7 @@
 <rect x="694" y="154" width="94" height="2" class="bar-rule"/>
 <text x="928" y="140" class="good" font-weight="700">ready</text>
 <text x="30" y="174" class="good" >use</text>
-<text x="140" y="174" class="fg" >Layth48</text>
+<text x="140" y="174" class="fg" >backup</text>
 <text x="418" y="174" class="good" text-anchor="middle">76</text>
 <rect x="448" y="158" width="94" height="32" class="bar-bg"/>
 <rect x="448" y="158" width="71" height="32" class="bar-good"/>
@@ -53,7 +53,7 @@
 <rect x="694" y="188" width="94" height="2" class="bar-rule"/>
 <text x="928" y="174" class="good" >ready</text>
 <text x="30" y="208" class="good" >use</text>
-<text x="140" y="208" class="fg" >Layth18</text>
+<text x="140" y="208" class="fg" >personal</text>
 <text x="418" y="208" class="good" text-anchor="middle">64</text>
 <rect x="448" y="192" width="94" height="32" class="bar-bg"/>
 <rect x="448" y="192" width="60" height="32" class="bar-good"/>
@@ -66,7 +66,7 @@
 <rect x="694" y="222" width="94" height="2" class="bar-rule"/>
 <text x="928" y="208" class="good" >ready</text>
 <text x="30" y="242" class="bad" font-weight="700">cap</text>
-<text x="140" y="242" class="fg" >Layth38</text>
+<text x="140" y="242" class="fg" >lab</text>
 <text x="418" y="242" class="bad" text-anchor="middle">0</text>
 <rect x="448" y="226" width="94" height="32" class="bar-bg"/>
 <rect x="448" y="226" width="94" height="2" class="bar-rule"/>
@@ -78,7 +78,7 @@
 <rect x="694" y="256" width="94" height="2" class="bar-rule"/>
 <text x="928" y="242" class="warn" >old cap</text>
 <text x="30" y="276" class="bad" font-weight="700">cap</text>
-<text x="140" y="276" class="fg" >Layth</text>
+<text x="140" y="276" class="fg" >spare-1</text>
 <text x="418" y="276" class="bad" text-anchor="middle">0</text>
 <rect x="448" y="260" width="94" height="32" class="bar-bg"/>
 <rect x="448" y="260" width="94" height="2" class="bar-rule"/>
@@ -90,7 +90,7 @@
 <rect x="694" y="290" width="94" height="2" class="bar-rule"/>
 <text x="928" y="276" class="bad" >cap</text>
 <text x="30" y="310" class="bad" font-weight="700">cap</text>
-<text x="140" y="310" class="fg" >Layth.qassem</text>
+<text x="140" y="310" class="fg" >spare-2</text>
 <text x="418" y="310" class="bad" text-anchor="middle">0</text>
 <rect x="448" y="294" width="94" height="32" class="bar-bg"/>
 <rect x="448" y="294" width="94" height="2" class="bar-rule"/>
@@ -102,7 +102,7 @@
 <rect x="694" y="324" width="94" height="2" class="bar-rule"/>
 <text x="928" y="310" class="bad" >cap</text>
 <text x="30" y="344" class="bad" font-weight="700">cap</text>
-<text x="140" y="344" class="fg" >Layth28</text>
+<text x="140" y="344" class="fg" >spare-3</text>
 <text x="418" y="344" class="bad" text-anchor="middle">0</text>
 <rect x="448" y="328" width="94" height="32" class="bar-bg"/>
 <rect x="448" y="328" width="94" height="2" class="bar-rule"/>

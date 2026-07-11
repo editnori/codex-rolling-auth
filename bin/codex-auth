@@ -8,6 +8,7 @@ AUTH_FILE="$CODEX_HOME/auth.json"
 PROFILE_DIR="${CODEX_AUTH_PROFILES_DIR:-$CODEX_HOME/auth-profiles}"
 BACKUP_DIR="$CODEX_HOME/auth-backups"
 STATE_FILE="${CODEX_AUTH_STATE_FILE:-$CODEX_HOME/auth-state.json}"
+ACTIVE_PROFILE_FILE="${CODEX_AUTH_ACTIVE_PROFILE_FILE:-$CODEX_HOME/active-profile.json}"
 CACHE_TTL="${CODEX_AUTH_CACHE_TTL:-900}"
 CODEX_BIN="${CODEX_AUTH_CODEX_BIN:-}"
 USAGE_VERBOSE=0
@@ -133,6 +134,12 @@ fast_patch_codex_bin() {
     printf '%s\n' "$CODEX_AUTH_STOCK_CODEX_BIN"
   elif [[ -n "$CODEX_BIN" && -x "$CODEX_BIN" ]]; then
     printf '%s\n' "$CODEX_BIN"
+  elif [[ -x "$CODEX_HOME/packages/standalone/current/bin/codex" ]]; then
+    printf '%s\n' "$CODEX_HOME/packages/standalone/current/bin/codex"
+  elif [[ -x "$CODEX_HOME/packages/standalone/current/codex" ]]; then
+    printf '%s\n' "$CODEX_HOME/packages/standalone/current/codex"
+  elif [[ -x "$CODEX_AUTH_SCRIPT_DIR/codex-real" ]]; then
+    printf '%s\n' "$CODEX_AUTH_SCRIPT_DIR/codex-real"
   elif [[ -x "$HOME/.bun/bin/codex-real" ]]; then
     printf '%s\n' "$HOME/.bun/bin/codex-real"
   elif [[ -x "$HOME/.bun/bin/codex" ]]; then
@@ -144,10 +151,16 @@ fast_patch_codex_bin() {
 
 fast_patch_canonical_codex_bin() {
   local codex_cli="$1"
-  local line target
+  local line target line_count=0
 
   [[ -r "$codex_cli" ]] || { printf '%s\n' "$codex_cli"; return 0; }
+  if [[ "$(LC_ALL=C head -c 2 "$codex_cli" 2>/dev/null || true)" != '#!' ]]; then
+    printf '%s\n' "$codex_cli"
+    return 0
+  fi
   while IFS= read -r line; do
+    line_count=$((line_count + 1))
+    (( line_count <= 32 )) || break
     [[ "$line" == exec\ * ]] || [[ "$line" == "  exec "* ]] || continue
     target="${line#*exec }"
     target="${target%% \"\$@\"*}"
@@ -176,7 +189,7 @@ fast_patch_marker_value() {
 }
 
 fast_patch_codex() {
-  local print_key=0 print_bin=0 quiet=0 arg stock_bin stock_version hash_line stock_hash checksum size stock_key marker root marker_key marker_patch_version
+  local print_key=0 print_bin=0 quiet=0 arg stock_bin stock_real stock_version stock_stat hash_line checksum size stock_key marker root marker_key marker_patch_version patched_bin
 
   for arg in "$@"; do
     case "$arg" in
@@ -192,32 +205,70 @@ fast_patch_codex() {
     return 1
   }
   stock_bin="$(fast_patch_canonical_codex_bin "$stock_bin")"
+  stock_real="$(realpath "$stock_bin" 2>/dev/null || printf '%s' "$stock_bin")"
   stock_version="$("$stock_bin" --version 2>/dev/null || true)"
   stock_version="${stock_version%%$'\n'*}"
   stock_version="${stock_version%"${stock_version##*[![:space:]]}"}"
   [[ -n "$stock_version" ]] || stock_version="unknown"
-  if command -v sha256sum >/dev/null 2>&1 && [[ -f "$stock_bin" ]]; then
-    hash_line="$(sha256sum "$stock_bin")"; stock_hash="${hash_line%% *}"
-    hash_line="$(printf '%s\037%s\n' "$stock_version" "$stock_hash" | sha256sum)"; stock_key="${hash_line%% *}"
+  if command -v stat >/dev/null 2>&1; then
+    stock_stat="$(stat -Lc '%d:%i:%s:%y:%z' "$stock_bin" 2>/dev/null || true)"
+  fi
+  [[ -n "${stock_stat:-}" ]] || stock_stat="$(wc -c < "$stock_bin" 2>/dev/null || printf 'unknown')"
+  if command -v sha256sum >/dev/null 2>&1; then
+    hash_line="$(printf 'layout=1\037%s\037%s\037%s\n' "$stock_real" "$stock_version" "$stock_stat" | sha256sum)"
+    stock_key="${hash_line%% *}"
   else
-    read -r checksum size _ <<<"$(printf '%s' "$stock_bin" | cksum)"; stock_hash="$checksum-$size"
-    read -r checksum size _ <<<"$(printf '%s\037%s\n' "$stock_version" "$stock_hash" | cksum)"; stock_key="$checksum-$size"
+    read -r checksum size _ <<<"$(printf 'layout=1\037%s\037%s\037%s\n' "$stock_real" "$stock_version" "$stock_stat" | cksum)"
+    stock_key="$checksum-$size"
   fi
   if (( print_key )); then
     printf '%s\n' "$stock_key"
     return 0
   fi
   root="${CODEX_AUTH_PATCH_CODEX_DIR:-$CODEX_HOME/patched-codex}"
-  marker="$root/current.env"
+  marker="$root/generations/$stock_key/current.env"
+  patched_bin="$root/generations/$stock_key/codex"
+  if [[ ! -f "$marker" ]]; then
+    marker="$root/current.env"
+    patched_bin="$root/bin/codex"
+  fi
   marker_key="$(fast_patch_marker_value "$marker" stock_key)"
   marker_patch_version="$(fast_patch_marker_value "$marker" patch_version)"
-  [[ "$marker_key" == "$stock_key" && "$marker_patch_version" == "1" && -x "$root/bin/codex" ]] || return 1
-  printf '%s/bin/codex\n' "$root"
+  [[ "$marker_key" == "$stock_key" && "$marker_patch_version" == "2" && -x "$patched_bin" ]] || return 1
+  printf '%s\n' "$patched_bin"
+}
+
+start_tui_patch_check() {
+  local stock_bin
+
+  [[ "${CODEX_AUTH_TUI_PATCH_AUTO:-1}" != "0" ]] || return 0
+  stock_bin="$(fast_patch_codex_bin 2>/dev/null)" || return 0
+
+  # Keep version/hash discovery off the TUI startup path. patch-codex owns the
+  # detached build, its log, and its non-blocking lock; this process only
+  # dispatches that existing background mechanism.
+  nohup env \
+    CODEX_AUTH_STOCK_CODEX_BIN="$stock_bin" \
+    CODEX_AUTH_TUI_PATCH_AUTO=0 \
+    "$CODEX_AUTH_SELF" patch-codex --background --quiet \
+    </dev/null >/dev/null 2>&1 &
 }
 
 main() {
   local command="${1:-}"
   shift || true
+
+  if [[ "$command" == "watch" || "$command" == "tui" ]]; then
+    local tui_launcher="${CODEX_AUTH_TUI_BIN:-$CODEX_AUTH_SCRIPT_DIR/codex-auth-tui}"
+    if [[ "$tui_launcher" == */* && ! -x "$tui_launcher" ]]; then
+      printf 'codex-auth TUI launcher not found: %s\n' "$tui_launcher" >&2
+      printf 'Reinstall from a complete checkout with: ./install.sh\n' >&2
+      return 1
+    fi
+    start_tui_patch_check
+    export CODEX_AUTH_BIN="${CODEX_AUTH_BIN:-$CODEX_AUTH_SELF}"
+    exec "$tui_launcher" "$@"
+  fi
 
   if [[ "$command" == "paths" && "$#" == 0 && "${CODEX_AUTH_FAST_PATHS:-1}" != "0" ]]; then
     fast_paths
@@ -235,12 +286,13 @@ main() {
   source_codex_auth_libs "${CODEX_AUTH_BASE_LIB_FILES[@]}"
   case "$command" in
     add) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; cmd_add "$@" ;;
-    usage|limits) source_codex_auth_libs "${CODEX_AUTH_USAGE_LIB_FILES[@]}"; cmd_usage "$@" ;;
+    usage|limits) source_codex_auth_libs "${CODEX_AUTH_USAGE_LIB_FILES[@]}" profiles.sh; cmd_usage "$@" ;;
     list|ls) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; cmd_list "$@" ;;
     current|status) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; cmd_current "$@" ;;
     save) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; require_arg_count_between "$#" 1 2 "usage: codex-auth save <name> [file]"; cmd_save "$@" ;;
     import) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; require_arg_count_between "$#" 2 2 "usage: codex-auth import <name> <file>"; cmd_save "$1" "$2" "imported $1" ;;
     use|switch) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; require_arg_count_between "$#" 1 1 "usage: codex-auth use <name>"; cmd_use "$1" ;;
+    use-if-current) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; require_arg_count_between "$#" 2 3 "usage: codex-auth use-if-current <expected> <target> [refresh-generation]"; cmd_use_if_current "$@" ;;
     login) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; require_arg_count_between "$#" 1 999999 "usage: codex-auth login <name> [codex login args...]"; cmd_login "$@" ;;
     auto) source_codex_auth_libs "${CODEX_AUTH_USAGE_LIB_FILES[@]}" profiles.sh; cmd_auto "$@" ;;
     patch-codex)
@@ -254,14 +306,16 @@ main() {
       esac
       cmd_patch_codex "$@"
       ;;
+    maintain) source_codex_auth_libs patch.sh maintain.sh; cmd_maintain "$@" ;;
     run|wrap) source_codex_auth_libs "${CODEX_AUTH_USAGE_LIB_FILES[@]}" profiles.sh run.sh; cmd_run "$@" ;;
     recover) source_codex_auth_libs "${CODEX_AUTH_USAGE_LIB_FILES[@]}" profiles.sh run.sh; cmd_recover "$@" ;;
-    refresh) source_codex_auth_libs "${CODEX_AUTH_USAGE_LIB_FILES[@]}"; cmd_refresh "$@" ;;
+    refresh) source_codex_auth_libs "${CODEX_AUTH_USAGE_LIB_FILES[@]}" profiles.sh; cmd_refresh "$@" ;;
+    reset|use-reset) source_codex_auth_libs "${CODEX_AUTH_USAGE_LIB_FILES[@]}" profiles.sh; require_arg_count_between "$#" 2 2 "usage: codex-auth reset <profile> --yes"; cmd_reset "$@" ;;
     doctor) source_codex_auth_libs doctor.sh; cmd_doctor "$@" ;;
     export) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; require_arg_count_between "$#" 2 2 "usage: codex-auth export <name> <file>"; cmd_export "$@" ;;
     remove|rm) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; require_arg_count_between "$#" 1 2 "usage: codex-auth remove <name> --yes"; cmd_remove "$@" ;;
     paths) source_codex_auth_libs "${CODEX_AUTH_PROFILE_LIB_FILES[@]}"; cmd_paths ;;
-    -h|--help|help|'') source_codex_auth_libs "${CODEX_AUTH_UI_LIB_FILES[@]}" help.sh; usage ;;
+    -h|--help|help|'') source_codex_auth_libs "${CODEX_AUTH_UI_LIB_FILES[@]}" help.sh; usage "$@" ;;
     *) source_codex_auth_libs "${CODEX_AUTH_UI_LIB_FILES[@]}"; die "unknown command: $command. Use: codex-auth help" ;;
   esac
 }

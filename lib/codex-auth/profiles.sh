@@ -1,7 +1,154 @@
 # shellcheck shell=bash
 
+resolve_active_profile_for_auth() {
+  local auth_path="$1"
+  local live_fp live_kind live_identity marker_name marker_kind marker_identity marker_fp marker_revision
+  local path name profile_fp profile_kind profile_identity profile_revision matched="" identity_match="" identity_count=0
+
+  auth_file_is_valid "$auth_path" || return 1
+  live_fp="$(credential_fingerprint "$auth_path" || true)"
+  live_kind="$(auth_file_kind "$auth_path" || true)"
+  live_identity="$(auth_file_account_identity "$auth_path" || true)"
+
+  marker_name="$(active_profile_marker_read || true)"
+  if [[ -n "$marker_name" ]]; then
+    path="$(profile_path "$marker_name")"
+    marker_fp="$(active_profile_marker_field profile_fingerprint || true)"
+    profile_fp="$(credential_fingerprint "$path" || true)"
+    if [[ -n "$live_fp" && "$profile_fp" == "$live_fp" && "$marker_fp" == "$live_fp" ]]; then
+      printf '%s\n' "$marker_name"
+      return 0
+    fi
+  fi
+
+  shopt -s nullglob
+  for path in "$PROFILE_DIR"/*.json; do
+    profile_fp="$(credential_fingerprint "$path" || true)"
+    if [[ -n "$live_fp" && "$profile_fp" == "$live_fp" ]]; then
+      matched="$(basename "$path" .json)"
+      break
+    fi
+  done
+  shopt -u nullglob
+  if [[ -n "$matched" ]]; then
+    printf '%s\n' "$matched"
+    return 0
+  fi
+
+  [[ "$live_kind" == "chatgpt" && -n "$live_identity" ]] || return 1
+  if [[ -n "$marker_name" ]]; then
+    path="$(profile_path "$marker_name")"
+    if [[ -f "$path" ]]; then
+      marker_kind="$(active_profile_marker_field kind || true)"
+      marker_identity="$(active_profile_marker_field account_identity || true)"
+      marker_fp="$(active_profile_marker_field profile_fingerprint || true)"
+      marker_revision="$(active_profile_marker_field profile_revision || true)"
+      profile_kind="$(auth_file_kind "$path" || true)"
+      profile_identity="$(auth_file_account_identity "$path" || true)"
+      profile_fp="$(credential_fingerprint "$path" || true)"
+      profile_revision="$(auth_file_revision "$path" || true)"
+      if [[ "$marker_kind" == "chatgpt" \
+        && "$profile_kind" == "chatgpt" \
+        && -n "$marker_identity" \
+        && "$marker_identity" == "$live_identity" \
+        && "$profile_identity" == "$live_identity" \
+        && -n "$marker_fp" \
+        && "$profile_fp" == "$marker_fp" \
+        && -n "$marker_revision" \
+        && "$profile_revision" == "$marker_revision" ]]; then
+        printf '%s\n' "$marker_name"
+        return 0
+      fi
+    fi
+  fi
+
+  shopt -s nullglob
+  for path in "$PROFILE_DIR"/*.json; do
+    profile_kind="$(auth_file_kind "$path" || true)"
+    [[ "$profile_kind" == "chatgpt" ]] || continue
+    profile_identity="$(auth_file_account_identity "$path" || true)"
+    [[ -n "$profile_identity" && "$profile_identity" == "$live_identity" ]] || continue
+    identity_match="$(basename "$path" .json)"
+    identity_count=$((identity_count + 1))
+  done
+  shopt -u nullglob
+  [[ "$identity_count" == "1" ]] || return 1
+  printf '%s\n' "$identity_match"
+}
+
+sync_active_profile_from_live() (
+  local snapshot name profile live_fp profile_fp live_revision profile_revision current_revision live_kind profile_kind
+  local live_identity profile_identity marker_name marker_fp marker_identity marker_revision
+
+  [[ -f "$AUTH_FILE" ]] && auth_file_is_valid "$AUTH_FILE" || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+  ensure_dirs
+  acquire_mutation_lock
+
+  snapshot="$(mktemp "$CODEX_HOME/.tmp/active-auth.XXXXXX.json")"
+  if ! copy_auth_file_atomic "$AUTH_FILE" "$snapshot"; then
+    rm -f "$snapshot"
+    return 0
+  fi
+  name="$(resolve_active_profile_for_auth "$snapshot" || true)"
+  if [[ -z "$name" ]]; then
+    rm -f "$snapshot"
+    return 0
+  fi
+  profile="$(profile_path "$name")"
+  if [[ ! -f "$profile" ]] || ! auth_file_is_valid "$profile"; then
+    rm -f "$snapshot"
+    return 0
+  fi
+
+  live_fp="$(credential_fingerprint "$snapshot" || true)"
+  profile_fp="$(credential_fingerprint "$profile" || true)"
+  live_revision="$(auth_file_revision "$snapshot" || true)"
+  profile_revision="$(auth_file_revision "$profile" || true)"
+  current_revision="$(auth_file_revision "$AUTH_FILE" || true)"
+  if [[ -z "$live_fp" || -z "$live_revision" || "$current_revision" != "$live_revision" ]]; then
+    rm -f "$snapshot"
+    return 0
+  fi
+  if [[ "$live_revision" == "$profile_revision" ]]; then
+    active_profile_marker_write "$name" "$profile" || true
+    rm -f "$snapshot"
+    return 0
+  fi
+
+  live_kind="$(auth_file_kind "$snapshot" || true)"
+  profile_kind="$(auth_file_kind "$profile" || true)"
+  live_identity="$(auth_file_account_identity "$snapshot" || true)"
+  profile_identity="$(auth_file_account_identity "$profile" || true)"
+  [[ "$live_kind" == "chatgpt" \
+    && "$profile_kind" == "chatgpt" \
+    && -n "$live_identity" \
+    && "$live_identity" == "$profile_identity" ]] || { rm -f "$snapshot"; return 0; }
+
+  marker_name="$(active_profile_marker_read || true)"
+  if [[ -n "$marker_name" ]]; then
+    marker_fp="$(active_profile_marker_field profile_fingerprint || true)"
+    marker_identity="$(active_profile_marker_field account_identity || true)"
+    marker_revision="$(active_profile_marker_field profile_revision || true)"
+    [[ "$marker_name" == "$name" \
+      && -n "$marker_fp" \
+      && "$marker_fp" == "$profile_fp" \
+      && "$marker_identity" == "$live_identity" \
+      && -n "$marker_revision" \
+      && "$marker_revision" == "$profile_revision" ]] || { rm -f "$snapshot"; return 0; }
+  fi
+
+  [[ "$(auth_file_revision "$profile" || true)" == "$profile_revision" \
+    && "$(auth_file_revision "$AUTH_FILE" || true)" == "$live_revision" ]] \
+    || { rm -f "$snapshot"; return 0; }
+  copy_auth_file_atomic "$snapshot" "$profile" || { rm -f "$snapshot"; return 0; }
+  active_profile_marker_write "$name" "$profile" || true
+  rm -f "$snapshot"
+)
+
 cmd_list() {
   ensure_dirs
+  sync_active_profile_from_live
   local list_verbose=0
 
   while (( $# > 0 )); do
@@ -214,6 +361,7 @@ cmd_list() {
 
 cmd_current() {
   ensure_dirs
+  sync_active_profile_from_live
   local cols label_w value_w total_w status_text
   cols="$(terminal_width)"
   IFS=$'\t' read -r label_w value_w <<<"$(detail_widths "$cols")"
@@ -346,6 +494,9 @@ cmd_save() {
   require_name "$name"
   ensure_dirs
   acquire_mutation_lock
+  if [[ "$source" == "$AUTH_FILE" ]]; then
+    sync_active_profile_from_live
+  fi
   if [[ "$source" == "$AUTH_FILE" && ! -f "$source" ]]; then
     die "no active auth to save"
   fi
@@ -354,6 +505,9 @@ cmd_save() {
   local dest
   dest="$(profile_path "$name")"
   copy_auth_file_atomic "$source" "$dest"
+  if [[ "$source" == "$AUTH_FILE" ]]; then
+    active_profile_marker_write "$name" "$dest" || true
+  fi
   print_result_block "$summary" \
     "profile"$'\t'"$(display_path "$dest")"$'\t'"active" \
     "source"$'\t'"$(display_path "$source")"$'\t'"muted"
@@ -364,6 +518,7 @@ cmd_use() {
   require_name "$name"
   ensure_dirs
   acquire_mutation_lock
+  sync_active_profile_from_live
 
   local source source_fp="" active_fp=""
   source="$(profile_path "$name")"
@@ -375,6 +530,7 @@ cmd_use() {
     active_fp="$(credential_fingerprint "$AUTH_FILE" || true)"
   fi
   if [[ -n "$source_fp" && -n "$active_fp" && "$source_fp" == "$active_fp" ]]; then
+    active_profile_marker_write "$name" "$source" || true
     print_result_block "active $name" \
       "auth"$'\t'"$(display_path "$AUTH_FILE")"$'\t'"active" \
       "profile"$'\t'"$(display_path "$source")"$'\t'"muted" \
@@ -385,6 +541,7 @@ cmd_use() {
   local backup=""
   backup="$(backup_current "pre-use-$name" || true)"
   copy_auth_file_atomic "$source" "$AUTH_FILE"
+  active_profile_marker_write "$name" "$source" || true
 
   if [[ -n "$backup" ]]; then
     print_result_block "active $name" \
@@ -398,6 +555,54 @@ cmd_use() {
   fi
 }
 
+cmd_use_if_current() {
+  local expected="$1"
+  local target="$2"
+  local refresh_generation="${3:-}"
+  require_name "$expected"
+  require_name "$target"
+  ensure_dirs
+  acquire_mutation_lock
+  sync_active_profile_from_live
+
+  local expected_source expected_fp active_fp="" target_source target_fp
+  expected_source="$(profile_path "$expected")"
+  [[ -f "$expected_source" ]] || die "profile not found: $expected"
+  require_auth_file "$expected_source"
+  expected_fp="$(credential_fingerprint "$expected_source" || true)"
+  if [[ -f "$AUTH_FILE" ]]; then
+    active_fp="$(credential_fingerprint "$AUTH_FILE" || true)"
+  fi
+  if [[ -z "$expected_fp" || -z "$active_fp" || "$expected_fp" != "$active_fp" ]]; then
+    print_error "active profile changed; expected $expected"
+    return 75
+  fi
+
+  if [[ -n "$refresh_generation" ]]; then
+    target_source="$(profile_path "$target")"
+    [[ -f "$target_source" ]] || die "profile not found: $target"
+    require_auth_file "$target_source"
+    target_fp="$(credential_fingerprint "$target_source" || true)"
+    if [[ -z "$target_fp" ]] || ! jq -e \
+      --arg expected "$expected" \
+      --arg expected_fp "$expected_fp" \
+      --arg target "$target" \
+      --arg target_fp "$target_fp" \
+      --arg generation "$refresh_generation" '
+        .profiles[$expected].fingerprint == $expected_fp
+        and .profiles[$expected].refresh_generation == $generation
+        and .profiles[$target].fingerprint == $target_fp
+        and .profiles[$target].refresh_generation == $generation
+      ' "$STATE_FILE" >/dev/null 2>&1
+    then
+      print_error "profile changed or was not refreshed; expected generation $refresh_generation"
+      return 75
+    fi
+  fi
+
+  cmd_use "$target"
+}
+
 cmd_login() {
   local name="$1"
   shift || true
@@ -408,6 +613,7 @@ cmd_login() {
   require_codex_launcher "$codex_cli"
   ensure_dirs
   acquire_mutation_lock
+  sync_active_profile_from_live
 
   backup_current "pre-login-$name" >/dev/null || true
 
@@ -511,10 +717,11 @@ cmd_remove() {
   ensure_dirs
   acquire_mutation_lock
 
-  local path active_matches=0 active_fp="" profile_fp="" active_name="" remaining_name="" active_value="unsaved auth"
+  local path active_matches=0 active_fp="" profile_fp="" active_name="" remaining_name="" active_value="unsaved auth" marker_name=""
   local other other_name other_fp
   path="$(profile_path "$name")"
   [[ -f "$path" ]] || die "profile not found: $name"
+  marker_name="$(active_profile_marker_read || true)"
   if [[ -f "$AUTH_FILE" ]]; then
     active_fp="$(credential_fingerprint "$AUTH_FILE" || true)"
     profile_fp="$(credential_fingerprint "$path" || true)"
@@ -532,6 +739,13 @@ cmd_remove() {
   fi
 
   rm -f "$path"
+  if [[ "$marker_name" == "$name" ]]; then
+    if [[ -n "$remaining_name" && -f "$(profile_path "$remaining_name")" ]]; then
+      active_profile_marker_write "$remaining_name" "$(profile_path "$remaining_name")" || active_profile_marker_clear "$name"
+    else
+      active_profile_marker_clear "$name"
+    fi
+  fi
   if (( active_matches )); then
     [[ -n "$remaining_name" ]] && active_value="saved $remaining_name"
     print_result_block "removed active $name" \
@@ -575,5 +789,3 @@ cmd_paths() {
   print_path_line "undo" "backups" "$BACKUP_DIR" "$role_w" "$target_w" "$path_w" warn
   print_path_line "cache" "usage" "$STATE_FILE" "$role_w" "$target_w" "$path_w" muted
 }
-
-

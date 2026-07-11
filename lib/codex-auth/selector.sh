@@ -132,6 +132,17 @@ selector_palette_status_compact() {
   esac
 }
 
+selector_status_can_relogin() {
+  case "${1:-}" in
+    ""|offline|"no data"|"no usage")
+      return 1
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
 selector_palette_table_widths_into() {
   local -n primary_ref="$1"
   local -n week_ref="$2"
@@ -200,14 +211,14 @@ selector_palette_table_widths_into() {
 }
 
 selector_fast_fit_into() {
-  local -n out_ref="$1"
+  local -n fit_out_ref="$1"
   local text="$2"
   local width="$3"
   local align="${4:-left}"
   local trunc="…"
   local pad left right
 
-  out_ref=""
+  fit_out_ref=""
   (( width <= 0 )) && return 0
   [[ "${CODEX_AUTH_ASCII:-0}" == "1" ]] && trunc="~"
   if (( ${#text} > width )); then
@@ -221,21 +232,21 @@ selector_fast_fit_into() {
   (( pad < 0 )) && pad=0
   case "$align" in
     right)
-      printf -v out_ref '%*s%s' "$pad" '' "$text"
+      printf -v fit_out_ref '%*s%s' "$pad" '' "$text"
       ;;
     center)
       left=$(((pad + 1) / 2))
       right=$((pad - left))
-      printf -v out_ref '%*s%s%*s' "$left" '' "$text" "$right" ''
+      printf -v fit_out_ref '%*s%s%*s' "$left" '' "$text" "$right" ''
       ;;
     *)
-      printf -v out_ref '%s%*s' "$text" "$pad" ''
+      printf -v fit_out_ref '%s%*s' "$text" "$pad" ''
       ;;
   esac
 }
 
 selector_usage_display_profile_name_into() {
-  local -n out_ref="$1"
+  local -n profile_name_out_ref="$1"
   local profile="$2"
   local role="${3:-}"
   local width="${4:-0}"
@@ -243,102 +254,102 @@ selector_usage_display_profile_name_into() {
 
   if [[ "$profile" == "current" && "$role" != "active" && "$role" != "●" && "$role" != "*" ]]; then
     if [[ "$width" =~ ^[0-9]+$ && "$width" -gt 0 && "$width" -lt 7 ]]; then
-      out_ref="cur"
+      profile_name_out_ref="cur"
     else
-      out_ref="current"
+      profile_name_out_ref="current"
     fi
   elif [[ "$profile" == "Layth" && "$width" =~ ^[0-9]+$ && "$width" -gt 0 && "$width" -lt 5 ]]; then
-    out_ref="Lay"
+    profile_name_out_ref="Lay"
   elif [[ "$width" =~ ^[0-9]+$ && "$width" -gt 0 && ${#profile} -gt width && "$profile" =~ ^Layth([0-9]+)$ ]]; then
     suffix="${BASH_REMATCH[1]}"
     compact="L$suffix"
-    if (( ${#compact} <= width )); then out_ref="$compact"; else out_ref="${suffix:0:width}"; fi
+    if (( ${#compact} <= width )); then profile_name_out_ref="$compact"; else profile_name_out_ref="${suffix:0:width}"; fi
   elif [[ "$width" =~ ^[0-9]+$ && "$width" -gt 0 && ${#profile} -gt width && "$profile" == Layth.* ]]; then
     suffix="${profile#Layth.}"
-    if (( ${#suffix} <= width )); then out_ref="$suffix"; else out_ref="$profile"; fi
+    if (( ${#suffix} <= width )); then profile_name_out_ref="$suffix"; else profile_name_out_ref="$profile"; fi
   else
-    out_ref="$profile"
+    profile_name_out_ref="$profile"
   fi
 }
 
 selector_fast_display_status_into() {
-  local -n out_ref="$1"
+  local -n display_status_out_ref="$1"
   local status="$2"
 
   if [[ "$status" == stale\ * ]]; then
     status="${status#stale }"
-    if [[ "$status" == *cap ]]; then out_ref="old cap"; else out_ref="stale"; fi
+    if [[ "$status" == *cap ]]; then display_status_out_ref="old cap"; else display_status_out_ref="stale"; fi
   elif [[ "$status" == "week+5h cap" || "$status" == "week cap" || "$status" == "5h cap" ]]; then
-    out_ref="cap"
+    display_status_out_ref="cap"
   else
     case "$status" in
-      ok) out_ref="ready" ;;
-      login) out_ref="login" ;;
-      *) out_ref="$status" ;;
+      ok) display_status_out_ref="ready" ;;
+      login) display_status_out_ref="login" ;;
+      *) display_status_out_ref="$status" ;;
     esac
   fi
 }
 
 selector_fast_role_tone_into() {
-  local -n out_ref="$1"
+  local -n role_tone_out_ref="$1"
 
   case "${2:-}" in
-    best|b|◆|+) out_ref="accent" ;;
-    active|stay|s|●|\*) out_ref="active" ;;
-    use|u) out_ref="good" ;;
-    cap|c) out_ref="bad" ;;
-    login|l) out_ref="warn" ;;
-    warn) out_ref="warn" ;;
-    *) out_ref="muted" ;;
+    best|b|◆|+) role_tone_out_ref="accent" ;;
+    active|stay|s|●|\*) role_tone_out_ref="active" ;;
+    use|u) role_tone_out_ref="good" ;;
+    cap|c) role_tone_out_ref="bad" ;;
+    login|l) role_tone_out_ref="warn" ;;
+    warn) role_tone_out_ref="warn" ;;
+    *) role_tone_out_ref="muted" ;;
   esac
 }
 
 selector_fast_limit_tone_into() {
-  local -n out_ref="$1"
+  local -n limit_tone_out_ref="$1"
   local percent="${2:-}"
   local percent_value
 
   percent="${percent%\%}"
   if [[ ! "$percent" =~ ^-?[0-9]+$ ]]; then
-    out_ref="muted"
+    limit_tone_out_ref="muted"
     return 0
   fi
 
   percent_value="$percent"
   if (( percent_value < 25 )); then
-    out_ref="bad"
+    limit_tone_out_ref="bad"
   elif (( percent_value < 50 )); then
-    out_ref="warn"
+    limit_tone_out_ref="warn"
   else
-    out_ref="good"
+    limit_tone_out_ref="good"
   fi
 }
 
 selector_fast_status_tone_into() {
-  local -n out_ref="$1"
+  local -n status_tone_out_ref="$1"
   local status="${2:-}"
   local valid="${3:-0}"
 
   if [[ "$status" == "offline" || "$status" == "refresh timeout" || "$status" == "refresh unavailable" ]]; then
-    out_ref="warn"
+    status_tone_out_ref="warn"
   elif [[ "$valid" != "0" || "$status" == "login" ]]; then
-    out_ref="muted"
+    status_tone_out_ref="muted"
   elif [[ "$status" == stale* ]]; then
-    out_ref="warn"
+    status_tone_out_ref="warn"
   elif [[ "$status" == "ok" ]]; then
-    out_ref="good"
+    status_tone_out_ref="good"
   else
-    out_ref="bad"
+    status_tone_out_ref="bad"
   fi
 }
 
 selector_fast_tone_code_into() {
-  local -n out_ref="$1"
+  local -n tone_code_out_ref="$1"
   local mode="$2"
   local tone="${3:-}"
   local color=""
 
-  out_ref=""
+  tone_code_out_ref=""
   usage_color_active || return 0
   case "$tone" in
     good) color="166;227;161" ;;
@@ -351,23 +362,23 @@ selector_fast_tone_code_into() {
     38:muted) color="128;128;128" ;;
     48:track) color="35;35;35" ;;
   esac
-  [[ -n "$color" ]] && printf -v out_ref '\033[%s;2;%sm' "$mode" "$color"
+  [[ -n "$color" ]] && printf -v tone_code_out_ref '\033[%s;2;%sm' "$mode" "$color"
 }
 
 selector_fast_tone_text_into() {
-  local -n out_ref="$1"
+  local -n tone_text_out_ref="$1"
   local text="$2"
   local tone="${3:-}"
   local prefix="" reset=""
 
-  [[ -n "$text" ]] || { out_ref=""; return 0; }
+  [[ -n "$text" ]] || { tone_text_out_ref=""; return 0; }
   selector_fast_tone_code_into prefix 38 "$tone"
   usage_color_active && reset=$'\033[0m'
-  out_ref="${prefix}${text}${reset}"
+  tone_text_out_ref="${prefix}${text}${reset}"
 }
 
 selector_fast_repeat_glyph_into() {
-  local -n out_ref="$1"
+  local -n repeat_out_ref="$1"
   local glyph="$2"
   local width="${3:-0}"
   local i value=""
@@ -375,11 +386,11 @@ selector_fast_repeat_glyph_into() {
   for ((i = 0; i < width; i++)); do
     value+="$glyph"
   done
-  out_ref="$value"
+  repeat_out_ref="$value"
 }
 
 selector_fast_clamped_percent_into() {
-  local -n out_ref="$1"
+  local -n clamped_percent_out_ref="$1"
   local percent="$2"
   local percent_value
 
@@ -388,11 +399,11 @@ selector_fast_clamped_percent_into() {
   percent_value="$percent"
   (( percent_value < 0 )) && percent_value=0
   (( percent_value > 100 )) && percent_value=100
-  out_ref="$percent_value"
+  clamped_percent_out_ref="$percent_value"
 }
 
 selector_fast_metric_cell_into() {
-  local -n out_ref="$1"
+  local -n metric_cell_out_ref="$1"
   local percent="$2"
   local width="$3"
   local tone label label_w=4 bar_w value units full partial used bg_style
@@ -400,7 +411,7 @@ selector_fast_metric_cell_into() {
   local partial_glyphs=("" "▏" "▎" "▍" "▌" "▋" "▊" "▉")
   local label_cell bar_cell spaces prefix edge reset=""
 
-  out_ref=""
+  metric_cell_out_ref=""
   (( width <= 0 )) && return 0
   [[ -n "$percent" ]] || percent="-"
   label="${percent%\%}"
@@ -414,13 +425,13 @@ selector_fast_metric_cell_into() {
       printf -v spaces '%*s' "$((width - 3))" ''
       label_cell+="$spaces"
     fi
-    selector_fast_tone_text_into out_ref "$label_cell" muted
+    selector_fast_tone_text_into metric_cell_out_ref "$label_cell" muted
     return 0
   fi
 
   if (( width < 8 )); then
     selector_fast_fit_into label_cell "$label" "$width" center
-    selector_fast_tone_text_into out_ref "$label_cell" "$tone"
+    selector_fast_tone_text_into metric_cell_out_ref "$label_cell" "$tone"
     return 0
   fi
 
@@ -480,49 +491,49 @@ selector_fast_metric_cell_into() {
         bar_cell+="$spaces"
       fi
     fi
-    out_ref="${label_cell} ${bar_cell}"
+    metric_cell_out_ref="${label_cell} ${bar_cell}"
     return 0
   fi
 
   printf -v spaces '%*s' "$bar_w" ''
-  out_ref="${label_cell} ${spaces}"
+  metric_cell_out_ref="${label_cell} ${spaces}"
 }
 
 selector_fast_compact_status_into() {
-  local -n out_ref="$1"
+  local -n compact_status_out_ref="$1"
   local status="$2"
   local width="$3"
 
   case "$status" in
     "no data"|"no usage"|"n/a")
-      if (( width > 0 && width < 3 )); then out_ref="na"; else out_ref="$status"; fi
+      if (( width > 0 && width < 3 )); then compact_status_out_ref="na"; else compact_status_out_ref="$status"; fi
       ;;
     "login needed")
-      if (( width > 0 && width < 4 )); then out_ref="log"; elif (( width > 0 && width < 6 )); then out_ref="auth"; elif (( width > 0 && width < 13 )); then out_ref="login"; else out_ref="$status"; fi
+      if (( width > 0 && width < 4 )); then compact_status_out_ref="log"; elif (( width > 0 && width < 6 )); then compact_status_out_ref="auth"; elif (( width > 0 && width < 13 )); then compact_status_out_ref="login"; else compact_status_out_ref="$status"; fi
       ;;
     cap)
-      if (( width > 0 && width < 3 )); then out_ref="cp"; else out_ref="$status"; fi
+      if (( width > 0 && width < 3 )); then compact_status_out_ref="cp"; else compact_status_out_ref="$status"; fi
       ;;
     "old cap"|"both cap")
-      if (( width > 0 && width < 3 )); then out_ref="cp"; elif (( width > 0 && width < 7 )); then out_ref="cap"; else out_ref="$status"; fi
+      if (( width > 0 && width < 3 )); then compact_status_out_ref="cp"; elif (( width > 0 && width < 7 )); then compact_status_out_ref="cap"; else compact_status_out_ref="$status"; fi
       ;;
     ready)
-      if (( width > 0 && width < 5 )); then out_ref="ok"; else out_ref="$status"; fi
+      if (( width > 0 && width < 5 )); then compact_status_out_ref="ok"; else compact_status_out_ref="$status"; fi
       ;;
     offline)
-      if (( width > 0 && width < 3 )); then out_ref="of"; elif (( width > 0 && width < 7 )); then out_ref="off"; else out_ref="$status"; fi
+      if (( width > 0 && width < 3 )); then compact_status_out_ref="of"; elif (( width > 0 && width < 7 )); then compact_status_out_ref="off"; else compact_status_out_ref="$status"; fi
       ;;
     same)
-      if (( width > 0 && width < 4 )); then out_ref="="; else out_ref="$status"; fi
+      if (( width > 0 && width < 4 )); then compact_status_out_ref="="; else compact_status_out_ref="$status"; fi
       ;;
     *)
-      out_ref="$status"
+      compact_status_out_ref="$status"
       ;;
   esac
 }
 
 selector_palette_row_into() {
-  local -n out_ref="$1"
+  local -n palette_row_out_ref="$1"
   local primary="$2"
   local weekly="$3"
   local short="$4"
@@ -564,15 +575,15 @@ selector_palette_row_into() {
   selector_fast_status_tone_into status_tone "$_raw_status" "$valid"
   selector_fast_tone_text_into status_cell "$status_cell" "$status_tone"
   printf -v spaces '%*s' "$metric_gap" ''
-  out_ref="${primary_cell} ${week_cell}${spaces}${short_cell}"
+  palette_row_out_ref="${primary_cell} ${week_cell}${spaces}${short_cell}"
   if (( status_w > 0 )); then
     printf -v spaces '%*s' "$status_gap" ''
-    out_ref+="${spaces}${status_cell}"
+    palette_row_out_ref+="${spaces}${status_cell}"
   fi
 }
 
 selector_menu_row_for_record_into() {
-  local -n out_ref="$1"
+  local -n menu_row_out_ref="$1"
   shift
   local default_profile="$1"
   local selector_palette_mode="$2"
@@ -588,7 +599,7 @@ selector_menu_row_for_record_into() {
   local display display_status palette_profile action_role row_action row_profile_field active_row=0
 
   if (( ! selector_palette_mode )); then
-    out_ref="$(selector_menu_row_for_record "$default_profile" "$selector_palette_mode" "$mode" "$role_w" "$profile_w" "$cell_w" "$status_w" "$bar_width" "$total_w" "$record")"
+    menu_row_out_ref="$(selector_menu_row_for_record "$default_profile" "$selector_palette_mode" "$mode" "$role_w" "$profile_w" "$cell_w" "$status_w" "$bar_width" "$total_w" "$record")"
     return $?
   fi
 
@@ -602,8 +613,10 @@ selector_menu_row_for_record_into() {
     palette_profile="$profile"
   fi
 
-  if [[ "$valid" != "0" && "$status" == "login" ]]; then
-    selector_palette_row_into display "login $palette_profile" "-" "-" "login needed" "$status" "$valid" "$total_w"
+  if [[ "$valid" != "0" ]] && selector_status_can_relogin "$status"; then
+    selector_fast_display_status_into display_status "$status"
+    [[ "$status" == "login" ]] && display_status="login needed"
+    selector_palette_row_into display "login $palette_profile" "-" "-" "$display_status" "$status" "$valid" "$total_w"
     row_action="login"
   elif [[ "$valid" == "0" ]]; then
     selector_fast_display_status_into display_status "$status"
@@ -634,7 +647,7 @@ selector_menu_row_for_record_into() {
     row_profile_field="-"
   fi
 
-  printf -v out_ref '%s\037action\037%s\037%s\037%s' "$active_row" "$row_action" "$row_profile_field" "$display"
+  printf -v menu_row_out_ref '%s\037action\037%s\037%s\037%s' "$active_row" "$row_action" "$row_profile_field" "$display"
 }
 
 selector_palette_metric_cell() {
@@ -1375,11 +1388,13 @@ selector_menu_row_for_record() {
     fi
   fi
 
-  if [[ "$valid" != "0" && "$status" == "login" ]]; then
+  if [[ "$valid" != "0" ]] && selector_status_can_relogin "$status"; then
+    display_status="$(usage_display_status "$status" "normal")"
+    [[ "$status" == "login" ]] && display_status="login needed"
     if (( selector_palette_mode )); then
-      display="$(print_selector_palette_table_row "login $palette_profile" "-" "-" "login needed" "$status" "$valid" "$total_w")"
+      display="$(print_selector_palette_table_row "login $palette_profile" "-" "-" "$display_status" "$status" "$valid" "$total_w")"
     else
-      detail="needed"
+      detail="$display_status"
       display="$(print_selector_row "login" "$(usage_display_profile_name "$profile" "" "$selector_profile_w")" "$detail" "$action_w" "$selector_profile_w" "$total_w")"
     fi
     row_action="login"
