@@ -185,6 +185,10 @@ Terminate only the direct MCP sidecars under legacy `--yolo` Codex processes:
 codex-auth doctor --kill-sidecars --yes
 ```
 
+## Inspiration
+
+This project was directly inspired by [claude-swap](https://github.com/realiti4/claude-swap) (`cswap`) and its multi-account capture, live usage dashboard, and guarded autoswitch workflow for Claude Code. Credit to [realiti4](https://github.com/realiti4) and the `claude-swap` contributors for the original work and ideas.
+
 ## Notes
 
 - Profiles live under `$CODEX_HOME/auth-profiles` by default.
